@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.5
+> **Status:** Draft v0.6
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -60,11 +60,11 @@ Each stage is independently testable. Cached artifacts (geocoded addresses, down
 
 ### 4.1 ASGS SA2 Boundaries
 - **Source:** ABS Australian Statistical Geography Standard (ASGS) Edition 3 (covers Jul 2021 – Jun 2026).
-- **Format preference:** GeoPackage (smaller, single-file). Shapefile acceptable.
+- **Format:** Shapefile (`.shp` + `.dbf` / `.prj` / `.shx` sidecars). Per-level GeoPackage is not offered by ABS at SA-level granularity; only a 505 MB bundled "main structure" GeoPackage exists, which is overkill for v1's SA2-only scope.
 - **CRS:** GDA2020 (EPSG:7844). Reproject input points as needed.
-- **Approximate size:** ~30 MB.
+- **Approximate size:** ~50 MB.
 - **Base URL (configurable):** `https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/digital-boundary-files`
-- **Filename pattern:** `{level}_{year}_AUST_{datum}.zip`, e.g. `SA2_2021_AUST_GDA2020.zip`.
+- **Filename pattern:** `{level}_{year}_AUST_SHP_{datum}.zip`, e.g. `SA2_2021_AUST_SHP_GDA2020.zip`. Note the `SHP` token sits between `AUST_` and the datum on the **ZIP** filename — the files **inside** the ZIP do not have it (they are named `SA2_2021_AUST_GDA2020.shp` etc.).
 - The tool downloads this on first use into `data/boundaries/` and caches it.
 
 ### 4.2 Census DataPacks (2021 GCP)
@@ -75,6 +75,13 @@ Each stage is independently testable. Cached artifacts (geocoded addresses, down
 - **Filename pattern:** `{year}_{profile}_{level}_for_{region}_{descriptor}.zip`, e.g. `2021_GCP_SA2_for_AUS_short-header.zip`.
 - The tool constructs the full filename deterministically from config values, so users can override the *base* URL without having to specify each individual file.
 - The tool downloads, extracts, and indexes this on first use into `data/census/`.
+
+**Real DataPack layout (verified against 2021 GCP):**
+- CSVs live in a long-named subdirectory (e.g. `2021 Census GCP Statistical Area 2 for AUS/`) with names like `2021Census_G01_AUST_SA2.csv`. Discovery is by `rglob` and table-ID extraction, not fixed paths.
+- The `Metadata/` directory contains *three* `.xlsx` files; only `Metadata_*GCP*DataPack*.xlsx` (case-insensitive) is the descriptor we want. The others (`*geog_desc*.xlsx`, `*Sequential_Template*.xlsx`) are unrelated and ignored.
+- The descriptor sheet `Cell Descriptors Information` has ~10 rows of title/blank padding above the actual header row. The parser auto-detects the header row by scanning for a row containing `Short`, `Long`, and `DataPackfile`.
+- Six descriptor-sheet columns: `Sequential`, `Short`, `Long`, `DataPackfile`, `Profiletable`, `Columnheadingdescriptioninprofile`. The last is the user-readable description (e.g. "Median total household income ($/weekly)") and is what we expose via `discover`.
+- The `Table Number, Name, Population` sheet provides table-level names (e.g. `G02 → "Selected Medians and Averages"`). Note: some headers have trailing whitespace and must be stripped.
 
 > **Implementation note:** Both base URLs are exposed as `data_sources.boundaries_base_url` and `data_sources.datapacks_base_url` in config (see §6). Defaults ship with the spec and are validated to be reachable on first run; users can override either if ABS restructures their site.
 
@@ -191,6 +198,12 @@ variables:
 
 - Each entry under `variables` maps a friendly name to a `<table>.<column>` reference into the DataPack.
 - At config-load time, the tool validates every reference against the loaded DataPack metadata. Unknown table or column → fail with a helpful message that suggests near-matches.
+- The `<column>` portion is interpreted in the configured descriptor mode (`census.descriptor`):
+  - `short-header` (default): codes are short tokens (e.g. `Tot_P_M`).
+  - `long-header`: codes are underscored long forms (e.g. `Total_Persons_Males`).
+  - `sequential`: codes are numbered sequential identifiers (e.g. `G1`, `G108`).
+
+  The metadata column matched against the reference depends on this setting; the human-readable description shown by `discover` always comes from the `Columnheadingdescriptioninprofile` field of the descriptor sheet.
 - Friendly names must match `^[a-z][a-z0-9_]*$`. The output column is `{prefix}{friendly_name}`.
 - A `discover` CLI command lets users search metadata to find the right `table.column` references:
   ```
@@ -354,6 +367,10 @@ These were open questions in v0.1, resolved in v0.2:
 6. **Target scale and geocoder choice.** *Decision: design for a few hundred rows per run.* At this scale Nominatim's 1 req/sec policy is acceptable (~5 minutes of geocoding for 300 fresh addresses; cache hits on re-runs are instant). Larger scales are deferred to the pluggable geocoder hook in §13 (G-NAF, paid providers). Documented in §2.
 7. **Input lat/lon CRS.** *Decision: assume input lat/lon are EPSG:4326 (WGS84).* Most consumer/web/GPS-derived coordinates are WGS84; reprojection to the boundary CRS (GDA2020 / EPSG:7844) is handled internally. v1 does not expose this as configurable — convert externally if your data is GDA94 or a projected CRS. Documented in §7.3.
 8. **Nominatim rate-limit handling.** *Decision: back off exponentially on HTTP 429/503 with up to 3 retries; if still rate-limited, treat as a failed lookup. Failed lookups are not cached.* Aligns with the overall "geocoding failure → null coords, flag, continue" policy (§10) and avoids stalling the pipeline on persistent throttling, while letting next-run retries pick up after a transient outage. Documented in §7.2 and §10.
+9. **Verified ABS endpoints.** *Decision: corrected boundary filename to the `_SHP_` variant; format is Shapefile.* Real ABS does not offer per-level GeoPackage at SA granularity; only Shapefile per-level (or a 505 MB bundled main-structure GeoPackage). Per-level Shapefile is the right v1 fit at ~50 MB. Documented in §4.1.
+10. **Real DataPack metadata structure.** *Decision: parse the real `Cell Descriptors Information` sheet with title-row tolerance and descriptor-mode-aware code lookup; use `Columnheadingdescriptioninprofile` (not `Long`) for human descriptions; pick metadata file by name pattern.* Confirmed against 2021 GCP. Documented in §4.2 and §6.2.
+11. **Verified Nominatim response shape.** *Decision: parser as designed works against the live service.* `lat` / `lon` are strings (parsed to float), response is a JSON array of objects, descriptive User-Agent format `name/version (email)` is accepted. Documented in §7.2.
+12. **Real-data verification strategy.** *Decision: hermetic pytest suite stays mocked; opt-in `tools/` scripts download real ABS files and exercise the parsers against them.* Avoids CI flake from ABS uptime while making real-world validation a discoverable, deliberate developer activity. Documented in §17.
 
 ## 15. Open Questions
 
@@ -371,3 +388,19 @@ The implementation is considered done when:
 - `census-augment discover --search "income"` returns matching census variables.
 - Config errors (bad variable references, missing input columns) produce clear, actionable error messages.
 - Test suite covers: config validation, cache hit/miss, spatial join correctness on a small fixture, end-to-end pipeline on a tiny dataset.
+
+---
+
+## 17. Real-data verification
+
+The pytest suite is **hermetic**: every external interaction (Nominatim, ABS downloads) is mocked. To validate that parsers work against the **real** ABS endpoints and files, two scripts live under `tools/`:
+
+- **`tools/fetch_real_data.py`** downloads the real boundary ZIP and DataPack ZIP into `data/` (gitignored) and optionally captures one Nominatim sample response. It uses the actual `BoundariesDataSource` and `DataPacksDataSource` classes, so running it exercises the production code path.
+- **`tools/verify_real_parsers.py`** runs the parsers against the locally-cached real files and prints a tick/cross summary. Non-zero exit on failure. Suitable as a manual smoke test or a low-frequency scheduled job.
+
+When to run:
+1. After initial dev environment setup.
+2. After ABS publishes new versions of the boundaries / DataPacks (e.g. when 2026 Census lands).
+3. Whenever code touches the parsers.
+
+This dual approach keeps the test suite fast and offline-safe while making real-world validation a deliberate, audited path to ground-truth.
