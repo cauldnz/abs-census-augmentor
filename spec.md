@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.6
+> **Status:** Draft v0.7
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -194,6 +194,8 @@ variables:
 
 **Input column validation:** at least one of `input.address_column` OR both `input.latitude_column` and `input.longitude_column` must be set; the lat/lon pair must be set together (setting one without the other is a config error).
 
+**Optional path fields:** `input.path` and `output.path` are required only by the CLI's `run` command (which reads/writes CSVs). Library users calling `Pipeline.augment(df)` (see §18) can omit them — the column-name fields under `input` still describe the DataFrame regardless of where it came from.
+
 ### 6.2 Variable resolution
 
 - Each entry under `variables` maps a friendly name to a `<table>.<column>` reference into the DataPack.
@@ -283,11 +285,21 @@ sa2_median_age, sa2_median_household_income_weekly
 
 ## 9. Caching Strategy
 
-| Cache | Location | Format | Invalidation |
+| Cache | Default location | Format | Invalidation |
 |---|---|---|---|
-| Geocoded addresses | `cache/geocoding/` | JSON per address (sharded) | Manual delete; key is hash of normalized address |
-| ASGS boundaries | `data/boundaries/` | GeoPackage | Re-download with `census-augment fetch --boundaries --refresh` |
-| Census DataPacks | `data/census/` | Extracted CSVs + metadata | Re-download with `census-augment fetch --census --refresh` |
+| Geocoded addresses | `<cache_dir>/geocoding/` | JSON per address (sharded) | Manual delete; key is hash of normalized address |
+| ASGS boundaries | `<data_dir>/boundaries/` | Shapefile (extracted) | Re-download with `census-augment fetch --boundaries --refresh` |
+| Census DataPacks | `<data_dir>/census/` | Extracted CSVs + metadata | Re-download with `census-augment fetch --census --refresh` |
+
+**Defaults** are platform-appropriate user cache directories (via the `platformdirs` package), so downloads are shared across runs and across notebooks regardless of CWD — a single ~50 MB boundary download serves every project on the machine.
+
+| OS | `<data_dir>` | `<cache_dir>` |
+|---|---|---|
+| Linux | `~/.cache/census-augment/data/` | `~/.cache/census-augment/cache/` |
+| macOS | `~/Library/Caches/census-augment/data/` | `~/Library/Caches/census-augment/cache/` |
+| Windows | `%LOCALAPPDATA%\census-augment\Cache\data\` | `%LOCALAPPDATA%\census-augment\Cache\cache\` |
+
+**Override precedence:** explicit kwarg / CLI flag > `CENSUS_AUGMENT_DATA_DIR` / `CENSUS_AUGMENT_CACHE_DIR` env vars > platform default.
 
 ---
 
@@ -371,6 +383,9 @@ These were open questions in v0.1, resolved in v0.2:
 10. **Real DataPack metadata structure.** *Decision: parse the real `Cell Descriptors Information` sheet with title-row tolerance and descriptor-mode-aware code lookup; use `Columnheadingdescriptioninprofile` (not `Long`) for human descriptions; pick metadata file by name pattern.* Confirmed against 2021 GCP. Documented in §4.2 and §6.2.
 11. **Verified Nominatim response shape.** *Decision: parser as designed works against the live service.* `lat` / `lon` are strings (parsed to float), response is a JSON array of objects, descriptive User-Agent format `name/version (email)` is accepted. Documented in §7.2.
 12. **Real-data verification strategy.** *Decision: hermetic pytest suite stays mocked; opt-in `tools/` scripts download real ABS files and exercise the parsers against them.* Avoids CI flake from ABS uptime while making real-world validation a discoverable, deliberate developer activity. Documented in §17.
+13. **Library / programmatic use as a first-class entry point.** *Decision: same `Pipeline` class, two entry points — `Pipeline.run()` for file-in/file-out (CLI) and `Pipeline.augment(df)` for DataFrame-in/DataFrame-out (notebooks/library).* Returns an `AugmentResult` with the DataFrame, run summary, and typed boolean Series for per-row classification. Documented in §18.
+14. **User-level cache by default.** *Decision: default cache locations use `platformdirs`-managed user cache directories rather than CWD-relative `./data` / `./cache`.* Friendlier for library use (one shared cache across notebooks), avoids the CLI surprise of "where did this 50 MB go". Override via env vars or explicit flags/kwargs. Documented in §9 and §18.
+15. **Optional input/output paths in Config.** *Decision: `input.path` and `output.path` are optional fields on the Config schema.* CLI's `run` command validates they're set; library use doesn't need them. The input column-name fields (`address_column`, `latitude_column`, `longitude_column`) remain — they describe the DataFrame regardless of provenance. Documented in §6.1 and §18.
 
 ## 15. Open Questions
 
@@ -388,6 +403,7 @@ The implementation is considered done when:
 - `census-augment discover --search "income"` returns matching census variables.
 - Config errors (bad variable references, missing input columns) produce clear, actionable error messages.
 - Test suite covers: config validation, cache hit/miss, spatial join correctness on a small fixture, end-to-end pipeline on a tiny dataset.
+- **Library use:** `pipeline.augment(df)` produces an enriched DataFrame and an `AugmentResult` (with run summary + per-row classification masks) without touching the filesystem beyond the shared user cache for ABS data.
 
 ---
 
@@ -404,3 +420,84 @@ When to run:
 3. Whenever code touches the parsers.
 
 This dual approach keeps the test suite fast and offline-safe while making real-world validation a deliberate, audited path to ground-truth.
+
+---
+
+## 18. Library use
+
+The same `Pipeline` class supports two entry points:
+
+- **`pipeline.run()`** — reads `config.input.path`, writes `config.output.path`, returns a `RunSummary`. Used by the CLI's `run` command.
+- **`pipeline.augment(df)`** — takes a DataFrame, returns an `AugmentResult` (the augmented DataFrame plus typed per-row classification masks and the run summary). No file I/O.
+
+### 18.1 Constructing a pipeline
+
+Three ways, in increasing power:
+
+```python
+from census_augment import Pipeline, Config, load_config
+
+# A. Notebook-friendly factory (most common for library use)
+pipeline = Pipeline.create(
+    variables={"median_age": "G02.Median_age_persons"},
+    user_agent="my-app/1.0 (me@example.com)",
+    latitude_column="lat",
+    longitude_column="lon",
+)
+
+# B. Programmatic Config (full control without YAML)
+cfg = Config(input=..., output=..., census=..., ...)
+pipeline = Pipeline.from_config(cfg)
+
+# C. From YAML (same as the CLI uses)
+pipeline = Pipeline.from_config(load_config("config.yaml"))
+```
+
+### 18.2 The `augment` method
+
+```python
+result = pipeline.augment(
+    df,
+    # Optional per-call overrides; default to whatever's in config.input.
+    address_column="street",
+    latitude_column="latitude",
+    longitude_column="longitude",
+)
+```
+
+Returns an `AugmentResult` with:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `df` | `pandas.DataFrame` | The input DataFrame plus geo + sa2 + enrichment columns. |
+| `summary` | `RunSummary` | Aggregated counts (same shape as CLI). |
+| `added_columns` | `list[str]` | Names of columns added by this augment (handy for `df[result.added_columns]`). |
+| `is_fully_enriched` | `pandas.Series[bool]` | True for rows where all enrichment cells are non-null. |
+| `geocoding_failed` | `pandas.Series[bool]` | True for rows whose geocoding ended in `failed`. |
+| `sa2_unmatched` | `pandas.Series[bool]` | True for rows that had coords but didn't match any SA2 polygon. |
+
+All three boolean Series share `df`'s index, so `result.df[~result.geocoding_failed]` is the natural filter.
+
+### 18.3 Cache directories
+
+See §9. By default `Pipeline.augment(df)` and `Pipeline.run()` share a single user-level cache, so the ~50 MB boundary download (and ~40 MB DataPack download) happens once across all notebooks and runs. Override via env vars or kwargs.
+
+### 18.4 Public API
+
+Top-level imports from `census_augment`:
+
+```python
+from census_augment import (
+    # Main entry point
+    Pipeline, AugmentResult, RunSummary,
+    # Config schema
+    Config, InputConfig, OutputConfig, CensusConfig,
+    DataSourcesConfig, GeocodingConfig, load_config,
+    # Catalog (for programmatic discover)
+    VariableCatalog, CatalogError,
+    # For implementing a custom geocoder per §13
+    Geocoder,
+)
+```
+
+Internal subsystems (`BoundariesDataSource`, `DataPacksDataSource`, `SpatialIndex`, `CensusEnricher`, `NominatimGeocoder`, `GeocodeCache`) remain importable from their submodules but are not promoted to the top level — they may evolve internally between versions.
