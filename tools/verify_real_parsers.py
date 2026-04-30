@@ -19,6 +19,7 @@ from census_augment.config import (
 )
 from census_augment.data_sources.boundaries import BoundariesDataSource
 from census_augment.data_sources.datapacks import DataPacksDataSource
+from census_augment.paths import default_data_dir
 
 
 def _project_root() -> Path:
@@ -36,10 +37,11 @@ def _check(label: str, fn: Callable[[], None]) -> bool:
 
 
 def main() -> int:
-    data_dir = _project_root() / "data"
+    data_dir = default_data_dir()
     if not data_dir.exists():
         print(
-            "data/ does not exist. Run `python tools/fetch_real_data.py` first."
+            f"{data_dir} does not exist. "
+            "Run `python tools/fetch_real_data.py` first."
         )
         return 1
 

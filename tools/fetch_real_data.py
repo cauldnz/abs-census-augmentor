@@ -31,6 +31,7 @@ from census_augment.config import (
 )
 from census_augment.data_sources.boundaries import BoundariesDataSource
 from census_augment.data_sources.datapacks import DataPacksDataSource
+from census_augment.paths import default_data_dir
 
 NOMINATIM_USER_AGENT = (
     "census-augment-fetch/0.1 (real-data-verification; https://example.com)"
@@ -57,8 +58,12 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
-    data_dir = _project_root() / "data"
+    data_dir = default_data_dir()
     census = CensusConfig()  # spec defaults: SA2, 2021, GCP, AUS, short-header, GDA2020
+    print(f"Cache root: {data_dir}")
+    print(
+        "(Override via CENSUS_AUGMENT_DATA_DIR env var.)\n"
+    )
 
     print("=== Boundary ===")
     boundaries = BoundariesDataSource(

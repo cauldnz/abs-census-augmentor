@@ -136,6 +136,34 @@ def test_input_lon_without_lat_fails(tmp_path: Path) -> None:
         load_config(_write(tmp_path, cfg))
 
 
+def test_input_path_optional_for_library_use(tmp_path: Path) -> None:
+    """input.path is optional (CLI run command requires it; library doesn't)."""
+    cfg = _base_config()
+    del cfg["input"]["path"]
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.input.path is None
+    assert loaded.input.address_column == "address"
+
+
+def test_output_path_optional_for_library_use(tmp_path: Path) -> None:
+    """output.path is optional (CLI run command requires it; library doesn't)."""
+    cfg = _base_config()
+    del cfg["output"]["path"]
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.output.path is None
+    assert loaded.output.prefix == "sa2_"
+
+
+def test_both_paths_optional_at_once(tmp_path: Path) -> None:
+    """A pure-library config with neither path is valid."""
+    cfg = _base_config()
+    del cfg["input"]["path"]
+    del cfg["output"]["path"]
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.input.path is None
+    assert loaded.output.path is None
+
+
 def test_input_with_only_lat_lon_is_valid(tmp_path: Path) -> None:
     cfg = _base_config()
     del cfg["input"]["address_column"]

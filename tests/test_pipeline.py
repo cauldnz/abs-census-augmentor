@@ -22,7 +22,7 @@ from census_augment.config import (
 from census_augment.data_sources.datapacks import DataPackMetadata
 from census_augment.geocoding.base import GeocodeResult
 from census_augment.geocoding.cache import normalize_address
-from census_augment.pipeline import Pipeline, RunSummary
+from census_augment.pipeline import AugmentResult, Pipeline, RunSummary
 
 
 # ---- helpers --------------------------------------------------------------
@@ -205,7 +205,12 @@ def test_resolve_uses_input_latlon_when_present(tmp_path: Path) -> None:
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(df)
+    lats, lons, sources = pipeline._resolve_coordinates(
+        df,
+        addr_col=config.input.address_column,
+        lat_col=config.input.latitude_column,
+        lon_col=config.input.longitude_column,
+    )
 
     assert lats == [-33.86]
     assert lons == [151.21]
@@ -226,7 +231,12 @@ def test_resolve_falls_back_to_address_when_latlon_null(tmp_path: Path) -> None:
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(df)
+    lats, lons, sources = pipeline._resolve_coordinates(
+        df,
+        addr_col=config.input.address_column,
+        lat_col=config.input.latitude_column,
+        lon_col=config.input.longitude_column,
+    )
 
     assert lats == [-34.0]
     assert lons == [150.0]
@@ -245,7 +255,12 @@ def test_resolve_geocode_failure_propagates_source(tmp_path: Path) -> None:
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(df)
+    lats, lons, sources = pipeline._resolve_coordinates(
+        df,
+        addr_col=config.input.address_column,
+        lat_col=config.input.latitude_column,
+        lon_col=config.input.longitude_column,
+    )
 
     assert lats == [None]
     assert lons == [None]
@@ -265,7 +280,12 @@ def test_resolve_cache_source_propagates(tmp_path: Path) -> None:
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    _, _, sources = pipeline._resolve_coordinates(df)
+    _, _, sources = pipeline._resolve_coordinates(
+        df,
+        addr_col=config.input.address_column,
+        lat_col=config.input.latitude_column,
+        lon_col=config.input.longitude_column,
+    )
 
     assert sources == ["cache"]
 
@@ -282,7 +302,12 @@ def test_resolve_no_locator_at_all_yields_failed(tmp_path: Path) -> None:
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(df)
+    lats, lons, sources = pipeline._resolve_coordinates(
+        df,
+        addr_col=config.input.address_column,
+        lat_col=config.input.latitude_column,
+        lon_col=config.input.longitude_column,
+    )
 
     assert lats == [None]
     assert lons == [None]
@@ -439,3 +464,241 @@ def test_end_to_end_with_partially_enriched_row(
     assert summary.sa2_unmatched == 1
     assert summary.fully_enriched == 1
     assert summary.partially_enriched == 0
+
+
+# ---- Pipeline.augment (library entry point, spec §18) ---------------------
+
+
+@responses.activate
+def test_augment_returns_augment_result_with_expected_shape(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+) -> None:
+    config = _make_config(
+        tmp_path=tmp_path,
+        variables={"median_age": "G02.Median_age_persons"},
+    )
+    boundaries_url = (
+        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        f"{config.data_sources.datapacks_base_url}/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+
+    pipeline = Pipeline.from_config(
+        config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
+    )
+
+    df_in = pd.DataFrame(
+        {
+            "label": ["Sydney", "Open ocean", "Bad row"],
+            "address": [None, None, None],
+            "lat": [-33.86, -40.0, None],
+            "lon": [151.21, 160.0, None],
+        }
+    )
+    result = pipeline.augment(df_in)
+
+    assert isinstance(result, AugmentResult)
+    assert isinstance(result.df, pd.DataFrame)
+    assert isinstance(result.summary, RunSummary)
+    assert isinstance(result.added_columns, list)
+    assert "geo_lat" in result.added_columns
+    assert "sa2_code" in result.added_columns
+    assert "sa2_median_age" in result.added_columns
+
+    # Row 0: Sydney CBD inside fixture polygon, fully enriched
+    assert result.is_fully_enriched.iloc[0]
+    assert not result.geocoding_failed.iloc[0]
+    assert not result.sa2_unmatched.iloc[0]
+
+    # Row 1: open ocean - has coords but no SA2 match
+    assert not result.is_fully_enriched.iloc[1]
+    assert not result.geocoding_failed.iloc[1]
+    assert result.sa2_unmatched.iloc[1]
+
+    # Row 2: null inputs - geocoding failed
+    assert not result.is_fully_enriched.iloc[2]
+    assert result.geocoding_failed.iloc[2]
+    assert not result.sa2_unmatched.iloc[2]
+
+
+@responses.activate
+def test_augment_does_not_mutate_input(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+) -> None:
+    config = _make_config(tmp_path=tmp_path)
+    boundaries_url = (
+        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        f"{config.data_sources.datapacks_base_url}/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+
+    pipeline = Pipeline.from_config(
+        config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
+    )
+
+    df_in = pd.DataFrame({"address": ["x"], "lat": [-33.86], "lon": [151.21]})
+    cols_before = list(df_in.columns)
+    pipeline.augment(df_in)
+    # Input DataFrame must be unchanged
+    assert list(df_in.columns) == cols_before
+
+
+@responses.activate
+def test_augment_with_column_name_overrides(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+) -> None:
+    """Per-call kwargs override config.input.* — useful when a notebook
+    DataFrame uses different column names than what the config declares."""
+    # Config has only lat/lon configured; we'll override their names per-call.
+    config = _make_config(
+        tmp_path=tmp_path,
+        address_column=None,
+        latitude_column="lat",
+        longitude_column="lon",
+    )
+    boundaries_url = (
+        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        f"{config.data_sources.datapacks_base_url}/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+
+    pipeline = Pipeline.from_config(
+        config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
+    )
+
+    # DataFrame uses "latitude"/"longitude" instead of configured "lat"/"lon"
+    df_in = pd.DataFrame({"latitude": [-33.86], "longitude": [151.21]})
+    result = pipeline.augment(
+        df_in, latitude_column="latitude", longitude_column="longitude"
+    )
+
+    assert result.df.loc[0, "geo_source"] == "input"
+    # In-memory: sa2_code is a string from spatial.lookup_many (no CSV round-trip)
+    assert result.df.loc[0, "sa2_code"] == "117011326"
+
+
+def test_augment_missing_column_raises(tmp_path: Path) -> None:
+    config = _make_config(tmp_path=tmp_path)
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    df_in = pd.DataFrame({"only_this_column": [1]})
+    with pytest.raises(ValueError, match="missing configured columns"):
+        pipeline.augment(df_in)
+
+
+def test_augment_no_locator_raises(tmp_path: Path) -> None:
+    """Even though InputConfig validates at config load, augment() also
+    defends in case overrides nullify all locators (shouldn't be possible
+    today, but the check protects against future signature changes)."""
+    # Build a config with only address, then call augment passing nothing
+    # but a DataFrame that doesn't have it - the missing-column check
+    # fires first, but exercises the same defensive path.
+    config = _make_config(
+        tmp_path=tmp_path,
+        latitude_column=None,
+        longitude_column=None,
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+    df_in = pd.DataFrame({"unrelated": [1]})
+
+    with pytest.raises(ValueError):
+        pipeline.augment(df_in)
+
+
+# ---- Pipeline.create (notebook factory, spec §18.1) ----------------------
+
+
+@responses.activate
+def test_create_factory_builds_pipeline(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+) -> None:
+    """Pipeline.create constructs a default Config from kwargs and runs."""
+    boundaries_url = (
+        "https://www.abs.gov.au/statistics/standards/"
+        "australian-statistical-geography-standard-asgs-edition-3/"
+        "jul2021-jun2026/access-and-downloads/digital-boundary-files/"
+        "SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        "https://www.abs.gov.au/census/find-census-data/datapacks/download/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+
+    pipeline = Pipeline.create(
+        variables={"median_age": "G02.Median_age_persons"},
+        user_agent="test/0.1 (test@example.com)",
+        latitude_column="lat",
+        longitude_column="lon",
+        data_dir=tmp_path / "data",
+        cache_dir=tmp_path / "cache",
+    )
+
+    df = pd.DataFrame({"lat": [-33.86], "lon": [151.21]})
+    result = pipeline.augment(df)
+
+    assert "sa2_median_age" in result.df.columns
+    assert result.df.loc[0, "sa2_median_age"] == 35
+
+
+def test_create_factory_requires_at_least_one_locator() -> None:
+    """InputConfig's at-least-one-locator rule still applies."""
+    with pytest.raises(Exception):
+        Pipeline.create(
+            variables={"x": "G01.Tot_P_M"},
+            user_agent="test/0.1 (test@example.com)",
+            # no address_column, no latitude/longitude → InputConfig fails
+        )
+
+
+# ---- Pipeline.run requires paths (spec §6.1, §18) -------------------------
+
+
+def test_run_raises_when_input_path_missing(tmp_path: Path) -> None:
+    """Library users can build a Config without input.path (for augment()),
+    but run() must reject it."""
+    config = _make_config(tmp_path=tmp_path)
+    config = config.model_copy(
+        update={"input": config.input.model_copy(update={"path": None})}
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    with pytest.raises(ValueError, match="input.path"):
+        pipeline.run()
+
+
+def test_run_raises_when_output_path_missing(tmp_path: Path) -> None:
+    config = _make_config(tmp_path=tmp_path)
+    config = config.model_copy(
+        update={"output": config.output.model_copy(update={"path": None})}
+    )
+    config.input.path.write_text("address,lat,lon\nx,-33.86,151.21\n")
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    with pytest.raises(ValueError, match="output.path"):
+        pipeline.run()

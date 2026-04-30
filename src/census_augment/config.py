@@ -35,7 +35,9 @@ class _StrictModel(BaseModel):
 
 
 class InputConfig(_StrictModel):
-    path: Path
+    # ``path`` is optional — required only by the CLI's ``run`` command.
+    # Library users (``Pipeline.augment(df)``) don't need it. See spec §6.1.
+    path: Path | None = None
     address_column: str | None = None
     latitude_column: str | None = None
     longitude_column: str | None = None
@@ -59,7 +61,9 @@ class InputConfig(_StrictModel):
 
 
 class OutputConfig(_StrictModel):
-    path: Path
+    # ``path`` is optional — required only by the CLI's ``run`` command.
+    # Library users don't need it. See spec §6.1.
+    path: Path | None = None
     prefix: str = "sa2_"
 
     @field_validator("prefix")

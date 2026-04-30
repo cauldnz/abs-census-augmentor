@@ -127,6 +127,45 @@ def test_run_missing_config_file_fails(tmp_path: Path) -> None:
     assert result.exit_code != 0
 
 
+def test_run_fails_when_input_path_missing_from_config(tmp_path: Path) -> None:
+    """Spec §6.1: input.path is now optional (library use); CLI's run
+    command must reject a config that omits it."""
+    cfg = {
+        "input": {"address_column": "address"},  # no path
+        "output": {"path": str(tmp_path / "output.csv")},
+        "geocoding": {"user_agent": "test/0.1 (test@example.com)"},
+        "variables": {"median_age": "G02.Median_age_persons"},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    result = runner.invoke(app, ["run", "--config", str(config_path)])
+
+    assert result.exit_code == 1
+    output = result.stdout + (result.stderr or "")
+    assert "input.path" in output
+
+
+def test_run_fails_when_output_path_missing_from_config(tmp_path: Path) -> None:
+    cfg = {
+        "input": {
+            "path": str(tmp_path / "input.csv"),
+            "address_column": "address",
+        },
+        "output": {},  # no path
+        "geocoding": {"user_agent": "test/0.1 (test@example.com)"},
+        "variables": {"median_age": "G02.Median_age_persons"},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    result = runner.invoke(app, ["run", "--config", str(config_path)])
+
+    assert result.exit_code == 1
+    output = result.stdout + (result.stderr or "")
+    assert "output.path" in output
+
+
 # ---- discover -------------------------------------------------------------
 
 

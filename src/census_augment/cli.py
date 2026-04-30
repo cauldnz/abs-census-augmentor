@@ -23,6 +23,7 @@ from .catalog import CatalogError, VariableCatalog
 from .config import load_config
 from .data_sources.boundaries import BoundariesDataSource
 from .data_sources.datapacks import DataPacksDataSource
+from .paths import default_data_dir
 from .pipeline import Pipeline
 
 app = typer.Typer(
@@ -44,20 +45,42 @@ def _main(
     logging.basicConfig(level=level, format="[%(levelname)s] %(name)s: %(message)s")
 
 
+_DATA_DIR_HELP = (
+    "Where to cache ABS downloads. Defaults to the platform user cache "
+    "(e.g. ~/.cache/census-augment/data on Linux). Override via the "
+    "CENSUS_AUGMENT_DATA_DIR env var or this flag."
+)
+_CACHE_DIR_HELP = (
+    "Where to keep the geocoding cache. Defaults to the platform user "
+    "cache. Override via the CENSUS_AUGMENT_CACHE_DIR env var or this flag."
+)
+
+
 @app.command()
 def run(
     config: Path = typer.Option(
         ..., "--config", "-c", exists=True, dir_okay=False, readable=True
     ),
-    data_dir: Path = typer.Option(
-        Path("data"), "--data-dir", help="Where to cache ABS downloads."
-    ),
-    cache_dir: Path = typer.Option(
-        Path("cache"), "--cache-dir", help="Where to keep the geocoding cache."
+    data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
+    cache_dir: Path | None = typer.Option(
+        None, "--cache-dir", help=_CACHE_DIR_HELP
     ),
 ) -> None:
     """Run the augmentation pipeline (input CSV -> enriched output CSV)."""
     cfg = load_config(config)
+    if cfg.input.path is None or cfg.output.path is None:
+        missing = []
+        if cfg.input.path is None:
+            missing.append("input.path")
+        if cfg.output.path is None:
+            missing.append("output.path")
+        typer.echo(
+            f"Error: the run command requires {' and '.join(missing)} "
+            f"to be set in {config}.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     pipeline = Pipeline.from_config(cfg, data_dir=data_dir, cache_dir=cache_dir)
     summary = pipeline.run()
     typer.echo(summary.format_human_readable())
@@ -68,7 +91,7 @@ def discover(
     config: Path = typer.Option(
         ..., "--config", "-c", exists=True, dir_okay=False, readable=True
     ),
-    data_dir: Path = typer.Option(Path("data"), "--data-dir"),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
     search: str | None = typer.Option(
         None, "--search", help="Substring to search in column codes / descriptions."
     ),
@@ -85,10 +108,11 @@ def discover(
         raise typer.Exit(code=2)
 
     cfg = load_config(config)
+    effective_data_dir = data_dir if data_dir is not None else default_data_dir()
     datapacks = DataPacksDataSource(
         census=cfg.census,
         base_url=cfg.data_sources.datapacks_base_url,
-        root=data_dir / "census",
+        root=effective_data_dir / "census",
     )
     catalog = VariableCatalog.from_data_source(datapacks)
 
@@ -118,7 +142,7 @@ def fetch(
     config: Path = typer.Option(
         ..., "--config", "-c", exists=True, dir_okay=False, readable=True
     ),
-    data_dir: Path = typer.Option(Path("data"), "--data-dir"),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
     boundaries: bool = typer.Option(
         False, "--boundaries", help="Pre-fetch the SA2 boundary shapefile."
     ),
@@ -137,11 +161,12 @@ def fetch(
         raise typer.Exit(code=2)
 
     cfg = load_config(config)
+    effective_data_dir = data_dir if data_dir is not None else default_data_dir()
     if boundaries:
         bds = BoundariesDataSource(
             census=cfg.census,
             base_url=cfg.data_sources.boundaries_base_url,
-            root=data_dir / "boundaries",
+            root=effective_data_dir / "boundaries",
         )
         path = bds.fetch(refresh=refresh)
         typer.echo(f"Boundaries: {path}")
@@ -149,7 +174,7 @@ def fetch(
         dds = DataPacksDataSource(
             census=cfg.census,
             base_url=cfg.data_sources.datapacks_base_url,
-            root=data_dir / "census",
+            root=effective_data_dir / "census",
         )
         path = dds.fetch(refresh=refresh)
         typer.echo(f"DataPacks:  {path}")
@@ -168,7 +193,7 @@ def validate(
             "(downloads the DataPack if not cached)."
         ),
     ),
-    data_dir: Path = typer.Option(Path("data"), "--data-dir"),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
 ) -> None:
     """Validate config; structurally always, semantically with ``--full``."""
     try:
@@ -181,10 +206,11 @@ def validate(
     if not full:
         return
 
+    effective_data_dir = data_dir if data_dir is not None else default_data_dir()
     datapacks = DataPacksDataSource(
         census=cfg.census,
         base_url=cfg.data_sources.datapacks_base_url,
-        root=data_dir / "census",
+        root=effective_data_dir / "census",
     )
     catalog = VariableCatalog.from_data_source(datapacks)
     try:
