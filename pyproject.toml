@@ -47,3 +47,14 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "geopandas",
+    "geopandas.*",
+    "shapely",
+    "shapely.*",
+    "pyproj",
+    "pyproj.*",
+]
+ignore_missing_imports = true
