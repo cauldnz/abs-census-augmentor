@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.2
+> **Status:** Draft v0.3
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -35,6 +35,9 @@ The output is a CSV with the original records plus appended columns drawn from t
 - Computed/derived variables (ratios, percentages combining multiple columns) — these are an explicit downstream concern of the data science feature engineering pipeline that consumes this tool's output, not a responsibility of this tool.
 - Output formats other than CSV (Parquet, GeoPackage).
 - Explicit input deduplication. Duplicate input rows are processed independently; efficiency on duplicate addresses comes from the geocoding cache.
+
+### Usage assumptions
+- **Target scale:** typically a few hundred rows per run. Nominatim's 1 req/sec policy is acceptable at this scale. Larger workloads are deferred to a future pluggable geocoder (see §13).
 
 ---
 
@@ -344,6 +347,7 @@ These were open questions in v0.1, resolved in v0.2:
 3. **Computed variables.** *Decision: Out of scope for this tool entirely.* This tool's job is raw census variable attachment; ratios, percentages, and other derived metrics are the responsibility of the downstream feature engineering pipeline. Documented in §2.
 4. **Partial enrichment policy.** *Decision: Leave missing/suppressed cells as null and flag the row as "partially enriched" in the run summary.* No row is dropped due to missing census values. Documented in §10.
 5. **Boundary version pinning.** *Decision: Add explicit `census.asgs_edition` and `census.datum` config fields with sensible defaults (3 / GDA2020).* Forces deliberate handling when a new ASGS edition is released. Documented in §6.1.
+6. **Target scale and geocoder choice.** *Decision: design for a few hundred rows per run.* At this scale Nominatim's 1 req/sec policy is acceptable (~5 minutes of geocoding for 300 fresh addresses; cache hits on re-runs are instant). Larger scales are deferred to the pluggable geocoder hook in §13 (G-NAF, paid providers). Documented in §2.
 
 ## 15. Open Questions
 
