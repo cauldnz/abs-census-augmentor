@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.4
+> **Status:** Draft v0.5
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -224,13 +224,14 @@ variables:
   }
   ```
 - Respect Nominatim's rate limit (1 req/sec) and User-Agent policy.
-- Failed lookups: record retains `null` coordinates and is flagged in the run summary; pipeline continues.
+- If Nominatim returns HTTP 429 (Too Many Requests) or 503 (rate-limited), back off exponentially up to 3 retries before treating the lookup as failed.
+- Failed lookups: record retains `null` coordinates and is flagged in the run summary; pipeline continues. Failures are not cached — they are retried on the next run.
 - **Duplicate addresses are not explicitly deduplicated** before geocoding. Within a single run, a duplicate address will hit the cache as soon as the first occurrence is processed and written. This keeps row-level processing predictable and avoids reordering output, at the cost of one extra cache lookup per duplicate (negligible).
 
 ### 7.3 Spatial join
 - Load SA2 GeoPackage into a GeoDataFrame.
 - Build a spatial index (`sindex`).
-- Reproject points to match the boundary CRS.
+- Input lat/lon are interpreted as EPSG:4326 (WGS84) — the de facto standard for consumer GPS, web mapping, and Nominatim output. Points are reprojected to the boundary CRS (GDA2020 / EPSG:7844) before the join.
 - Point-in-polygon for each record. Records outside any SA2 get `null` `sa2_code` and `sa2_name`.
 
 ### 7.4 Census enrichment
@@ -281,7 +282,8 @@ sa2_median_age, sa2_median_household_income_weekly
 
 | Condition | Behavior |
 |---|---|
-| Address fails to geocode | Warn; row keeps null coords; flagged in summary; pipeline continues. |
+| Address fails to geocode | Warn; row keeps null coords; flagged in summary; pipeline continues. Failures are not cached. |
+| Nominatim rate-limit response (HTTP 429 / 503) | Back off exponentially up to 3 retries; if still rate-limited, treat as failed lookup. |
 | Coordinates fall outside Australia / no SA2 match | Warn; row keeps null SA2; flagged in summary; pipeline continues. |
 | Some configured variables missing or suppressed for a matched SA2 | Leave those cells as null; flag the row in the summary as "partially enriched"; pipeline continues. |
 | Variable reference not found in metadata | **Fail fast at config load.** Suggest near-matches. |
@@ -350,6 +352,8 @@ These were open questions in v0.1, resolved in v0.2:
 4. **Partial enrichment policy.** *Decision: Leave missing/suppressed cells as null and flag the row as "partially enriched" in the run summary.* No row is dropped due to missing census values. Documented in §10.
 5. **Boundary version pinning.** *Decision: Add explicit `census.asgs_edition` and `census.datum` config fields with sensible defaults (3 / GDA2020).* Forces deliberate handling when a new ASGS edition is released. Documented in §6.1.
 6. **Target scale and geocoder choice.** *Decision: design for a few hundred rows per run.* At this scale Nominatim's 1 req/sec policy is acceptable (~5 minutes of geocoding for 300 fresh addresses; cache hits on re-runs are instant). Larger scales are deferred to the pluggable geocoder hook in §13 (G-NAF, paid providers). Documented in §2.
+7. **Input lat/lon CRS.** *Decision: assume input lat/lon are EPSG:4326 (WGS84).* Most consumer/web/GPS-derived coordinates are WGS84; reprojection to the boundary CRS (GDA2020 / EPSG:7844) is handled internally. v1 does not expose this as configurable — convert externally if your data is GDA94 or a projected CRS. Documented in §7.3.
+8. **Nominatim rate-limit handling.** *Decision: back off exponentially on HTTP 429/503 with up to 3 retries; if still rate-limited, treat as a failed lookup. Failed lookups are not cached.* Aligns with the overall "geocoding failure → null coords, flag, continue" policy (§10) and avoids stalling the pipeline on persistent throttling, while letting next-run retries pick up after a transient outage. Documented in §7.2 and §10.
 
 ## 15. Open Questions
 
