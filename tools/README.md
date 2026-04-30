@@ -10,7 +10,9 @@ The pytest suite is hermetic (every external interaction mocked). Real-world val
 ## Workflow
 
 ```bash
-# 1. Download real ABS files into data/ (gitignored)
+# 1. Download real ABS files into the user cache (per spec §9).
+#    The same cache is shared with the library (Pipeline) and the CLI,
+#    so this also primes them — no duplicate downloads.
 python tools/fetch_real_data.py
 
 # 2. Validate the parsers against them
@@ -19,11 +21,13 @@ python tools/verify_real_parsers.py
 
 ## What `fetch_real_data.py` downloads
 
-| Path | Source | Size |
+| Item | Source | Size |
 |---|---|---|
-| `data/boundaries/SA2_2021_AUST_SHP_GDA2020/...` | ABS ASGS Edition 3 | ~50 MB |
-| `data/census/2021_GCP_SA2_for_AUS_short-header/...` | ABS Census 2021 GCP | ~40 MB |
-| `data/nominatim_sample.json` | Nominatim public API (1 query) | <1 KB |
+| `<data_dir>/boundaries/SA2_2021_AUST_SHP_GDA2020/...` | ABS ASGS Edition 3 | ~50 MB |
+| `<data_dir>/census/2021_GCP_SA2_for_AUS_short-header/...` | ABS Census 2021 GCP | ~40 MB |
+| `<data_dir>/nominatim_sample.json` | Nominatim public API (1 query) | <1 KB |
+
+`<data_dir>` defaults to the platform user cache (e.g. `~/.cache/census-augment/data/` on Linux, `%LOCALAPPDATA%\census-augment\Cache\data\` on Windows). Override with the `CENSUS_AUGMENT_DATA_DIR` env var. See spec §9.
 
 Pass `--refresh` to force re-download. Pass `--skip-nominatim` to skip the geocoder query (e.g. offline run).
 

@@ -83,11 +83,21 @@ census-augment discover --search "income"
 
 See `spec.md` §5 for the full tree. Key entry points:
 
-- `src/census_augment/cli.py` — Typer entry point
-- `src/census_augment/config.py` — Pydantic config models + loader
-- `src/census_augment/pipeline.py` — Orchestrates input → geocode → spatial → enrich → output
-- `src/census_augment/catalog.py` — Resolves friendly variable names against DataPack metadata
-- `tests/fixtures/` — Tiny sample inputs and mocked DataPack/boundary slices
+- `src/census_augment/cli.py` — Typer entry point (CLI commands)
+- `src/census_augment/pipeline.py` — Orchestrates input → geocode → spatial → enrich → output. Two entry points: `Pipeline.run()` (file in/out) and `Pipeline.augment(df)` (DataFrame in/out, library use).
+- `src/census_augment/__init__.py` — Public library API surface (spec §18.4).
+- `src/census_augment/config.py` — Pydantic config models + YAML loader.
+- `src/census_augment/paths.py` — Default cache directory resolution (env var → platformdirs).
+- `src/census_augment/catalog.py` — Resolves friendly variable names against DataPack metadata.
+- `tests/conftest.py` — Shared fixtures (synthetic SA2 polygons + DataPack ZIP).
+- `tools/` — Scripts for verifying parsers against real ABS data (spec §17).
+
+## Two ways the tool gets used
+
+- **CLI** — file in / file out via `census-augment run --config config.yaml`. See spec §11.
+- **Library / notebook** — DataFrame in / DataFrame out via `Pipeline.augment(df)` returning an `AugmentResult`. See spec §18.
+
+Both share the same Pipeline implementation; the file-I/O is only at the edges of `Pipeline.run`.
 
 ---
 

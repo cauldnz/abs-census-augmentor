@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.7
+> **Status:** Draft v0.8
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -91,38 +91,45 @@ Each stage is independently testable. Cached artifacts (geocoded addresses, down
 
 ```
 census-augment/
-├── README.md
+├── README.md                      # User-facing intro (CLI + library)
+├── CLAUDE.md                      # Contributor / agent guidance
 ├── pyproject.toml
-├── config.example.yaml
+├── config.example.yaml            # Sample config for the CLI
+├── LICENSE
 ├── .gitignore
-├── data/                          # Runtime-fetched; gitignored
-│   ├── README.md                  # Describes purpose; checked in
-│   ├── .gitignore                 # Ignores all but README.md
-│   ├── boundaries/                # ASGS files
-│   └── census/                    # Extracted DataPacks
-├── cache/                         # Runtime-generated; gitignored
+├── examples/                      # Runnable usage scripts (CLI + library)
+├── data/                          # Optional project-local cache; gitignored
+│   ├── README.md                  # Defaults to platform user cache (§9)
+│   └── .gitignore                 # Ignores all but README.md
+├── cache/                         # Optional project-local geocoding cache
 │   ├── README.md
-│   ├── .gitignore
-│   └── geocoding/                 # JSON per address
+│   └── .gitignore
 ├── src/
 │   └── census_augment/
-│       ├── __init__.py
-│       ├── cli.py                 # Entry point (Typer or Click)
-│       ├── config.py              # Pydantic schema + validation
-│       ├── data_sources/
-│       │   ├── boundaries.py      # Download + load SA2 polygons
-│       │   └── datapacks.py       # Download + parse tables + metadata
-│       ├── geocoding/
-│       │   ├── base.py            # Abstract Geocoder interface
-│       │   ├── nominatim.py       # Nominatim implementation
-│       │   └── cache.py           # Hash-keyed JSON cache
+│       ├── __init__.py            # Public API exports (spec §18.4)
+│       ├── py.typed               # Inline type marker for downstream users
+│       ├── cli.py                 # Typer entry point
+│       ├── config.py              # Pydantic schema + YAML loader
+│       ├── paths.py               # User-cache directory resolution (§9)
+│       ├── catalog.py             # Variable resolution + search + suggestions
 │       ├── spatial.py             # Point-in-polygon → SA2
-│       ├── enrich.py              # SA2 + variables → enriched rows
-│       ├── catalog.py             # Variable resolution against metadata
-│       └── pipeline.py            # Orchestration
-└── tests/
-    ├── fixtures/
-    └── ...
+│       ├── enrich.py              # SA2 + variables → enriched DataFrame
+│       ├── pipeline.py            # Orchestration; Pipeline.run + Pipeline.augment
+│       ├── data_sources/
+│       │   ├── _base.py           # Shared download/extract base (boundaries + datapacks)
+│       │   ├── boundaries.py      # Shapefile download + load
+│       │   └── datapacks.py       # CSV + Excel-metadata parser
+│       └── geocoding/
+│           ├── base.py            # Geocoder Protocol + GeocodeResult dataclass
+│           ├── cache.py           # Hash-keyed JSON cache (sharded)
+│           └── nominatim.py       # Nominatim impl with rate-limit + back-off
+├── tools/                         # Real-data verification (see §17)
+│   ├── README.md
+│   ├── fetch_real_data.py
+│   └── verify_real_parsers.py
+└── tests/                         # Hermetic test suite (no real network)
+    ├── conftest.py                # Shared fixtures (synthetic SA2 + DataPack)
+    └── test_*.py
 ```
 
 ### `.gitignore` pattern for data and cache folders
@@ -322,17 +329,33 @@ A summary report is printed at the end of every run.
 
 ## 11. CLI
 
-Using Typer (preferred) or Click. Proposed commands:
+Using Typer. Commands and their flags:
 
 ```
+# Augment a CSV end-to-end
 census-augment run --config config.yaml
-census-augment discover --search "income"     # Find variables by keyword
-census-augment discover --table G02           # List all columns in a table
-census-augment fetch --boundaries             # Pre-fetch boundaries
-census-augment fetch --census                 # Pre-fetch DataPacks
-census-augment fetch --boundaries --census --refresh  # Force re-download
-census-augment validate --config config.yaml  # Dry-run config validation
+
+# Discover variables in the DataPack
+census-augment discover --config config.yaml --search "income"
+census-augment discover --config config.yaml --table G02
+
+# Pre-fetch ABS data
+census-augment fetch --config config.yaml --boundaries
+census-augment fetch --config config.yaml --census
+census-augment fetch --config config.yaml --boundaries --census --refresh
+
+# Validate config (structurally; --full also validates against DataPack)
+census-augment validate --config config.yaml
+census-augment validate --config config.yaml --full
+
+# Global flag (any command)
+census-augment --verbose <command> ...        # DEBUG-level logging
+
+# Cache override (any command that uses ABS data)
+census-augment <command> --data-dir /path/to/data --cache-dir /path/to/cache
 ```
+
+Cache flag precedence is documented in §9.
 
 ---
 
@@ -411,7 +434,7 @@ The implementation is considered done when:
 
 The pytest suite is **hermetic**: every external interaction (Nominatim, ABS downloads) is mocked. To validate that parsers work against the **real** ABS endpoints and files, two scripts live under `tools/`:
 
-- **`tools/fetch_real_data.py`** downloads the real boundary ZIP and DataPack ZIP into `data/` (gitignored) and optionally captures one Nominatim sample response. It uses the actual `BoundariesDataSource` and `DataPacksDataSource` classes, so running it exercises the production code path.
+- **`tools/fetch_real_data.py`** downloads the real boundary ZIP and DataPack ZIP into the configured cache (defaults to the platform user cache per §9; override via `CENSUS_AUGMENT_DATA_DIR`) and optionally captures one Nominatim sample response. It uses the actual `BoundariesDataSource` and `DataPacksDataSource` classes, so running it exercises the production code path.
 - **`tools/verify_real_parsers.py`** runs the parsers against the locally-cached real files and prints a tick/cross summary. Non-zero exit on failure. Suitable as a manual smoke test or a low-frequency scheduled job.
 
 When to run:
