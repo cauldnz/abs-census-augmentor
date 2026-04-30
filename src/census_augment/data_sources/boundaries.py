@@ -16,10 +16,14 @@ _log = logging.getLogger(__name__)
 
 
 class BoundariesDataSource:
-    """Download, extract, and load the ASGS boundary GeoPackage.
+    """Download, extract, and load the ASGS boundary Shapefile.
 
     Filename is constructed deterministically from config (spec §4.1):
-    ``{level}_{year}_AUST_{datum}.zip``, e.g. ``SA2_2021_AUST_GDA2020.zip``.
+    ``{level}_{year}_AUST_SHP_{datum}.zip``, e.g.
+    ``SA2_2021_AUST_SHP_GDA2020.zip``. Note that the ``SHP`` token is
+    only on the ZIP filename — files inside the ZIP are named
+    ``SA2_2021_AUST_GDA2020.{shp,dbf,prj,shx,...}``.
+
     Downloaded ZIPs are cached under ``root`` and extracted into a sibling
     directory named after the ZIP. Re-fetch with ``refresh=True`` per
     spec §9.
@@ -45,7 +49,7 @@ class BoundariesDataSource:
     @property
     def filename(self) -> str:
         c = self._census
-        return f"{c.level}_{c.year}_AUST_{c.datum}.zip"
+        return f"{c.level}_{c.year}_AUST_SHP_{c.datum}.zip"
 
     @property
     def url(self) -> str:
@@ -60,43 +64,43 @@ class BoundariesDataSource:
         return self._root / self.filename.removesuffix(".zip")
 
     @property
-    def gpkg_path(self) -> Path | None:
-        """Path to the extracted ``.gpkg`` file, or ``None`` if not extracted."""
+    def shapefile_path(self) -> Path | None:
+        """Path to the extracted ``.shp`` file, or ``None`` if not extracted."""
         if not self.extract_dir.exists():
             return None
-        for gpkg in self.extract_dir.rglob("*.gpkg"):
-            return gpkg
+        for shp in self.extract_dir.rglob("*.shp"):
+            return shp
         return None
 
     def is_cached(self) -> bool:
-        return self.gpkg_path is not None
+        return self.shapefile_path is not None
 
     def fetch(self, refresh: bool = False) -> Path:
-        """Download (if needed) and extract; return the ``.gpkg`` path.
+        """Download (if needed) and extract; return the ``.shp`` path.
 
         With ``refresh=True``, re-downloads even if cached. Raises
         ``requests.HTTPError`` on a non-2xx response, or ``RuntimeError``
-        if the extracted ZIP contains no GeoPackage.
+        if the extracted ZIP contains no Shapefile.
         """
         if not refresh:
-            cached = self.gpkg_path
+            cached = self.shapefile_path
             if cached is not None:
                 _log.debug("Using cached boundary at %s", cached)
                 return cached
         self._download()
         self._extract()
-        gpkg = self.gpkg_path
-        if gpkg is None:
+        shp = self.shapefile_path
+        if shp is None:
             raise RuntimeError(
-                f"No .gpkg file found in {self.extract_dir} after extracting "
+                f"No .shp file found in {self.extract_dir} after extracting "
                 f"{self.zip_path}; ABS may have changed the ZIP layout."
             )
-        return gpkg
+        return shp
 
     def load(self, refresh: bool = False) -> gpd.GeoDataFrame:
         """Fetch (if needed) and load as a GeoDataFrame."""
-        gpkg = self.fetch(refresh=refresh)
-        return gpd.read_file(gpkg)
+        shp = self.fetch(refresh=refresh)
+        return gpd.read_file(shp)
 
     def _download(self) -> None:
         self._root.mkdir(parents=True, exist_ok=True)

@@ -15,7 +15,7 @@ from census_augment.config import CensusConfig
 from census_augment.data_sources.boundaries import BoundariesDataSource
 
 BASE_URL = "https://abs.test/boundaries"
-EXPECTED_FILENAME = "SA2_2021_AUST_GDA2020.zip"
+EXPECTED_FILENAME = "SA2_2021_AUST_SHP_GDA2020.zip"
 EXPECTED_URL = f"{BASE_URL}/{EXPECTED_FILENAME}"
 
 
@@ -50,7 +50,10 @@ def test_url_strips_trailing_slash(tmp_path: Path) -> None:
 def test_zip_and_extract_paths_are_under_root(tmp_path: Path) -> None:
     ds = _make_data_source(tmp_path)
     assert ds.zip_path.parent == tmp_path / "data" / "boundaries"
-    assert ds.extract_dir == tmp_path / "data" / "boundaries" / "SA2_2021_AUST_GDA2020"
+    assert (
+        ds.extract_dir
+        == tmp_path / "data" / "boundaries" / "SA2_2021_AUST_SHP_GDA2020"
+    )
 
 
 # ---------- caching ----------
@@ -59,11 +62,11 @@ def test_zip_and_extract_paths_are_under_root(tmp_path: Path) -> None:
 def test_not_cached_initially(tmp_path: Path) -> None:
     ds = _make_data_source(tmp_path)
     assert ds.is_cached() is False
-    assert ds.gpkg_path is None
+    assert ds.shapefile_path is None
 
 
 @responses.activate
-def test_fetch_downloads_extracts_and_returns_gpkg(
+def test_fetch_downloads_extracts_and_returns_shapefile(
     tmp_path: Path, fake_boundary_zip_bytes: bytes
 ) -> None:
     responses.add(
@@ -71,10 +74,14 @@ def test_fetch_downloads_extracts_and_returns_gpkg(
     )
 
     ds = _make_data_source(tmp_path)
-    gpkg = ds.fetch()
+    shp = ds.fetch()
 
-    assert gpkg.exists()
-    assert gpkg.suffix == ".gpkg"
+    assert shp.exists()
+    assert shp.suffix == ".shp"
+    # Sidecar files should also have been extracted
+    assert shp.with_suffix(".dbf").exists()
+    assert shp.with_suffix(".prj").exists()
+    assert shp.with_suffix(".shx").exists()
     assert ds.is_cached()
     assert len(responses.calls) == 1
 
@@ -154,7 +161,11 @@ def test_load_returns_geodataframe_with_expected_shape(
     assert "SA2_CODE21" in gdf.columns
     assert "SA2_NAME21" in gdf.columns
     assert gdf.crs is not None
-    assert gdf.crs.to_epsg() == 7844  # GDA2020
+    # Real ABS shapefiles: to_epsg() == 7844; fixture-written shapefiles lose
+    # the EPSG identifier on round-trip but preserve the datum in `crs.name`.
+    crs_epsg = gdf.crs.to_epsg()
+    crs_name = (gdf.crs.name or "").upper()
+    assert crs_epsg == 7844 or "GDA2020" in crs_name
 
 
 # ---------- error paths ----------
@@ -169,16 +180,16 @@ def test_download_404_raises_http_error(tmp_path: Path) -> None:
 
 
 @responses.activate
-def test_zip_with_no_gpkg_raises(tmp_path: Path) -> None:
+def test_zip_with_no_shapefile_raises(tmp_path: Path) -> None:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("readme.txt", "no geopackage in here")
+        zf.writestr("readme.txt", "no shapefile in here")
     bad_zip_bytes = buf.getvalue()
 
     responses.add(responses.GET, EXPECTED_URL, body=bad_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
-    with pytest.raises(RuntimeError, match=".gpkg"):
+    with pytest.raises(RuntimeError, match=".shp"):
         ds.fetch()
 
 
