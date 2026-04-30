@@ -19,7 +19,6 @@ dependencies = [
     "pandas",
     "requests",
     "openpyxl",
-    "tqdm",
     "platformdirs",
 ]
 

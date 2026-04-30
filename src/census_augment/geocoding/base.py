@@ -40,8 +40,14 @@ class Geocoder(Protocol):
     - Use a :class:`~census_augment.geocoding.cache.GeocodeCache` to
       short-circuit repeat lookups.
     - Return a :class:`GeocodeResult` with ``source="failed"`` and null
-      coordinates on lookup failure rather than raising.
-    - Propagate genuine programming errors and unexpected network errors.
+      coordinates on **any** failure mode the pipeline should treat as
+      "row didn't geocode" — including HTTP errors, network errors, and
+      malformed responses. The pipeline's contract (spec §10) is "address
+      fails to geocode → null coords, flag, continue", which would break
+      if implementations propagated network errors instead.
+    - Propagate genuine programming errors (e.g. invalid argument types)
+      so they surface during development rather than being masked as
+      data-quality issues.
     """
 
     def geocode(self, address: str) -> GeocodeResult: ...

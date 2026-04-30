@@ -371,8 +371,8 @@ Suggested (Claude Code may adjust):
 - `pyyaml` — config parsing
 - `typer` (or `click`) — CLI
 - `requests` — HTTP downloads
-- `tqdm` — progress bars
 - `openpyxl` — read DataPack metadata Excel file
+- `platformdirs` — user-cache directory resolution (§9)
 
 Test deps: `pytest`, `pytest-mock`, `responses` (HTTP mocking).
 

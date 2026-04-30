@@ -1,7 +1,15 @@
-"""Download real ABS data into ``data/`` for offline parser verification.
+"""Download real ABS data for offline parser verification.
 
 Usage:
     python tools/fetch_real_data.py [--refresh] [--skip-nominatim]
+
+Files are written to the user-cache root resolved by
+:func:`census_augment.paths.default_data_dir` — by default a platform
+user-cache directory (e.g. ``~/.cache/census-augment/data/`` on Linux),
+overridable via the ``CENSUS_AUGMENT_DATA_DIR`` env var. See spec §9.
+
+The same cache is shared with the library (``Pipeline.from_config``) and
+the CLI, so this script also primes them — no duplicate downloads.
 
 Idempotent: skips downloads when local files already exist; ``--refresh``
 forces re-download. Uses the actual ``BoundariesDataSource`` /
