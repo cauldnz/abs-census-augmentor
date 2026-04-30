@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
-import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +12,7 @@ import pandas as pd
 import requests
 
 from ..config import CensusConfig
+from ._base import _AbsZipDataSource
 
 _log = logging.getLogger(__name__)
 
@@ -105,7 +104,7 @@ def extract_table_id(filename: str) -> str | None:
     return None
 
 
-class DataPacksDataSource:
+class DataPacksDataSource(_AbsZipDataSource):
     """Download, extract, and parse ABS Census DataPacks (spec §4.2).
 
     Filename: ``{year}_{profile}_{level}_for_{region}_{descriptor}.zip``
@@ -125,6 +124,8 @@ class DataPacksDataSource:
     See ``tools/verify_real_parsers.py`` for a real-data smoke check.
     """
 
+    _label = "DataPack ZIP"
+
     def __init__(
         self,
         *,
@@ -135,29 +136,19 @@ class DataPacksDataSource:
         chunk_size: int = 1024 * 1024,
         timeout: float = 600.0,
     ) -> None:
+        super().__init__(
+            base_url=base_url,
+            root=root,
+            session=session,
+            chunk_size=chunk_size,
+            timeout=timeout,
+        )
         self._census = census
-        self._base_url = base_url.rstrip("/")
-        self._root = Path(root)
-        self._session = session if session is not None else requests.Session()
-        self._chunk_size = chunk_size
-        self._timeout = timeout
 
     @property
     def filename(self) -> str:
         c = self._census
         return f"{c.year}_{c.profile}_{c.level}_for_{c.region}_{c.descriptor}.zip"
-
-    @property
-    def url(self) -> str:
-        return f"{self._base_url}/{self.filename}"
-
-    @property
-    def zip_path(self) -> Path:
-        return self._root / self.filename
-
-    @property
-    def extract_dir(self) -> Path:
-        return self._root / self.filename.removesuffix(".zip")
 
     def is_cached(self) -> bool:
         return bool(self._table_csvs())
@@ -235,29 +226,6 @@ class DataPacksDataSource:
             f"No SA2 code column found; expected one of "
             f"{list(_SA2_CODE_CANDIDATES)}; got: {list(df.columns)}"
         )
-
-    def _download(self) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        _log.info("Downloading DataPack ZIP from %s", self.url)
-        with self._session.get(
-            self.url, stream=True, timeout=self._timeout
-        ) as response:
-            response.raise_for_status()
-            tmp = self._root / (self.filename + ".tmp")
-            with tmp.open("wb") as f:
-                for chunk in response.iter_content(chunk_size=self._chunk_size):
-                    if chunk:
-                        f.write(chunk)
-            tmp.replace(self.zip_path)
-        _log.info("Saved DataPack ZIP to %s", self.zip_path)
-
-    def _extract(self) -> None:
-        if self.extract_dir.exists():
-            shutil.rmtree(self.extract_dir)
-        self.extract_dir.mkdir(parents=True, exist_ok=True)
-        _log.info("Extracting %s to %s", self.zip_path, self.extract_dir)
-        with zipfile.ZipFile(self.zip_path) as zf:
-            zf.extractall(self.extract_dir)
 
 
 # ---- metadata parsing -----------------------------------------------------

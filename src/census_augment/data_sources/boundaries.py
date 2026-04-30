@@ -3,31 +3,32 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import zipfile
 from pathlib import Path
 
 import geopandas as gpd
 import requests
 
 from ..config import CensusConfig
+from ._base import _AbsZipDataSource
 
 _log = logging.getLogger(__name__)
 
 
-class BoundariesDataSource:
+class BoundariesDataSource(_AbsZipDataSource):
     """Download, extract, and load the ASGS boundary Shapefile.
 
     Filename is constructed deterministically from config (spec §4.1):
     ``{level}_{year}_AUST_SHP_{datum}.zip``, e.g.
-    ``SA2_2021_AUST_SHP_GDA2020.zip``. Note that the ``SHP`` token is
-    only on the ZIP filename — files inside the ZIP are named
+    ``SA2_2021_AUST_SHP_GDA2020.zip``. The ``SHP`` token is only on the
+    ZIP filename — files inside the ZIP are named
     ``SA2_2021_AUST_GDA2020.{shp,dbf,prj,shx,...}``.
 
     Downloaded ZIPs are cached under ``root`` and extracted into a sibling
     directory named after the ZIP. Re-fetch with ``refresh=True`` per
     spec §9.
     """
+
+    _label = "boundary ZIP"
 
     def __init__(
         self,
@@ -39,29 +40,19 @@ class BoundariesDataSource:
         chunk_size: int = 1024 * 1024,
         timeout: float = 300.0,
     ) -> None:
+        super().__init__(
+            base_url=base_url,
+            root=root,
+            session=session,
+            chunk_size=chunk_size,
+            timeout=timeout,
+        )
         self._census = census
-        self._base_url = base_url.rstrip("/")
-        self._root = Path(root)
-        self._session = session if session is not None else requests.Session()
-        self._chunk_size = chunk_size
-        self._timeout = timeout
 
     @property
     def filename(self) -> str:
         c = self._census
         return f"{c.level}_{c.year}_AUST_SHP_{c.datum}.zip"
-
-    @property
-    def url(self) -> str:
-        return f"{self._base_url}/{self.filename}"
-
-    @property
-    def zip_path(self) -> Path:
-        return self._root / self.filename
-
-    @property
-    def extract_dir(self) -> Path:
-        return self._root / self.filename.removesuffix(".zip")
 
     @property
     def shapefile_path(self) -> Path | None:
@@ -101,26 +92,3 @@ class BoundariesDataSource:
         """Fetch (if needed) and load as a GeoDataFrame."""
         shp = self.fetch(refresh=refresh)
         return gpd.read_file(shp)
-
-    def _download(self) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        _log.info("Downloading boundary ZIP from %s", self.url)
-        with self._session.get(
-            self.url, stream=True, timeout=self._timeout
-        ) as response:
-            response.raise_for_status()
-            tmp = self._root / (self.filename + ".tmp")
-            with tmp.open("wb") as f:
-                for chunk in response.iter_content(chunk_size=self._chunk_size):
-                    if chunk:
-                        f.write(chunk)
-            tmp.replace(self.zip_path)
-        _log.info("Saved boundary ZIP to %s", self.zip_path)
-
-    def _extract(self) -> None:
-        if self.extract_dir.exists():
-            shutil.rmtree(self.extract_dir)
-        self.extract_dir.mkdir(parents=True, exist_ok=True)
-        _log.info("Extracting %s to %s", self.zip_path, self.extract_dir)
-        with zipfile.ZipFile(self.zip_path) as zf:
-            zf.extractall(self.extract_dir)
