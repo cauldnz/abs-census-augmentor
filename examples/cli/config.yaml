@@ -1,0 +1,22 @@
+# Config for the CLI example. Run from the repo root with:
+#   census-augment run --config examples/cli/config.yaml
+
+input:
+  path: examples/cli/input.csv
+  address_column: address
+  latitude_column: lat
+  longitude_column: lon
+
+output:
+  path: examples/cli/output.csv
+  prefix: sa2_
+
+geocoding:
+  user_agent: "census-augment-example/0.1 (someone@example.com)"
+
+# A small starter set — try `census-augment discover --config <this> --search <term>`
+# to find more, or look at `census-augment discover --table G02`.
+variables:
+  median_age: G02.Median_age_persons
+  median_household_income_weekly: G02.Median_tot_hhd_inc_weekly
+  total_population: G01.Tot_P_P
