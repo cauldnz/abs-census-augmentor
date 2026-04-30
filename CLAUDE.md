@@ -26,7 +26,7 @@ Python CLI tool that augments Australian location datasets with ABS Census data 
 - HTTP: `requests`
 - Excel metadata: `openpyxl`
 - Progress: `tqdm`
-- Testing: `pytest`, with `responses` (or `pytest-httpx`) for HTTP mocking
+- Testing: `pytest`, `pytest-mock`, `responses` (HTTP mocking)
 
 ---
 

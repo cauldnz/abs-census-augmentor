@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "census-augment"
+version = "0.1.0"
+description = "Augment Australian location datasets with ABS Census data at the SA2 statistical area level."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+    "pydantic>=2",
+    "pyyaml",
+    "typer",
+    "geopandas",
+    "shapely",
+    "pyproj",
+    "pandas",
+    "requests",
+    "openpyxl",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock",
+    "responses",
+    "ruff",
+    "mypy",
+    "types-requests",
+    "types-PyYAML",
+    "pandas-stubs",
+]
+
+[project.scripts]
+census-augment = "census_augment.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/census_augment"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
