@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.3
+> **Status:** Draft v0.4
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -184,6 +184,8 @@ variables:
   total_population: G01.Tot_P_P
   born_overseas_count: G01.Birthplace_Elsewhere_P
 ```
+
+**Input column validation:** at least one of `input.address_column` OR both `input.latitude_column` and `input.longitude_column` must be set; the lat/lon pair must be set together (setting one without the other is a config error).
 
 ### 6.2 Variable resolution
 

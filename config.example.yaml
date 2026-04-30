@@ -1,0 +1,43 @@
+# Census augmentation configuration
+
+input:
+  path: data/locations.csv
+  address_column: address          # Optional. If present, used for geocoding.
+  latitude_column: lat             # Optional. If both lat & lon present, used directly.
+  longitude_column: lon            # Both required together if used.
+
+output:
+  path: out/locations_enriched.csv
+  prefix: sa2_                     # Prefix for all census-derived columns
+
+census:
+  year: 2021                       # Reserved for future use (2026 Census)
+  level: SA2                       # v1: SA2 only
+  profile: GCP                     # General Community Profile
+  region: AUS                      # AUS or state code (NSW, VIC, QLD, ...)
+  descriptor: short-header         # short-header | sequential | long-header
+  asgs_edition: 3                  # ASGS edition for boundaries (3 covers Jul 2021 – Jun 2026)
+  datum: GDA2020                   # GDA2020 or GDA94 for boundary files
+
+# Base URLs for ABS data downloads. Override only if ABS restructures their site.
+# Full filenames are constructed deterministically from the census.* values above.
+data_sources:
+  boundaries_base_url: https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/digital-boundary-files
+  datapacks_base_url: https://www.abs.gov.au/census/find-census-data/datapacks/download
+
+geocoding:
+  provider: nominatim
+  user_agent: "census-augment/0.1 (you@example.com)"   # Required by Nominatim policy
+  rate_limit_per_second: 1
+  cache_enabled: true
+
+# Variables to attach to each record.
+# Format: <friendly_name>: <table_id>.<column_name>
+# Output column will be: <output.prefix><friendly_name>
+# Friendly names must be valid snake_case identifiers.
+variables:
+  median_age: G02.Median_age_persons
+  median_household_income_weekly: G02.Median_tot_hhd_inc_weekly
+  median_rent_weekly: G02.Median_rent_weekly
+  total_population: G01.Tot_P_P
+  born_overseas_count: G01.Birthplace_Elsewhere_P
