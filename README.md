@@ -1,5 +1,7 @@
 # Australian Census Augmentation Tool
 
+[![tests](https://github.com/cauldnz/abs-census-augmentor/actions/workflows/test.yml/badge.svg)](https://github.com/cauldnz/abs-census-augmentor/actions/workflows/test.yml)
+
 Augment Australian location datasets with ABS Census data at the SA2 statistical area level. Use it as a CLI tool against CSV files, or as a Python library against a `pandas.DataFrame`.
 
 ```
