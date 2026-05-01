@@ -20,6 +20,11 @@ dependencies = [
     "requests",
     "openpyxl",
     "platformdirs",
+    # G-NAF support (spec §19, added in v1.0):
+    "duckdb",       # G-NAF indexing + FTS, native Parquet reads
+    "pyarrow",      # Parquet I/O for G-NAF
+    "rapidfuzz",    # Tier 3 fuzzy address matching
+    "boto3",        # Anonymous S3 access for G-NAF distribution
 ]
 
 [project.optional-dependencies]
