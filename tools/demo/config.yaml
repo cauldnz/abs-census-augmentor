@@ -1,0 +1,23 @@
+# Minimal config for the README demo recording (Nominatim-only path).
+# Inputs are lat/lon, so Nominatim is never actually invoked — the
+# user_agent below is here only because the config validator requires
+# it when 'nominatim' is in providers.
+
+input:
+  path: tools/demo/input.csv
+  latitude_column: lat
+  longitude_column: lon
+
+output:
+  path: tools/demo/output.csv
+  prefix: sa2_
+
+geocoding:
+  providers: [nominatim]
+  nominatim:
+    user_agent: "census-augment-demo/1.0 (demo@example.com)"
+
+variables:
+  median_age: G02.Median_age_persons
+  median_income: G02.Median_tot_hhd_inc_weekly
+  population: G01.Tot_P_P
