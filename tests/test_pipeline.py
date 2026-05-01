@@ -17,6 +17,7 @@ from census_augment.config import (
     DataSourcesConfig,
     GeocodingConfig,
     InputConfig,
+    NominatimConfig,
     OutputConfig,
 )
 from census_augment.data_sources.datapacks import DataPackMetadata
@@ -92,7 +93,12 @@ def _make_config(
         ),
         census=CensusConfig(),
         data_sources=DataSourcesConfig(),
-        geocoding=GeocodingConfig(user_agent="test/0.1 (test@example.com)"),
+        geocoding=GeocodingConfig(
+            providers=["nominatim"],
+            nominatim=NominatimConfig(
+                user_agent="test/0.1 (test@example.com)"
+            ),
+        ),
         variables=variables,
     )
 

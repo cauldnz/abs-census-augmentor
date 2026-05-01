@@ -24,6 +24,7 @@ from .config import (
     DataSourcesConfig,
     GeocodingConfig,
     InputConfig,
+    NominatimConfig,
     OutputConfig,
 )
 from .data_sources.boundaries import BoundariesDataSource
@@ -213,10 +214,30 @@ class Pipeline:
             cache = GeocodeCache(cache_dir / "geocoding")
         else:
             cache = NullCache()
+
+        # Phase 6a: only Nominatim is wired here; the multi-provider
+        # chain (G-NAF + Nominatim) lands in Phase 6b. The config schema
+        # already supports it — this is just a temporary single-provider
+        # wiring during the migration.
+        if "nominatim" not in config.geocoding.providers:
+            raise NotImplementedError(
+                "Pipeline.from_config currently only supports geocoding "
+                "configurations that include 'nominatim' in providers. "
+                "G-NAF wiring lands in the next commit; in the meantime, "
+                "use providers: [nominatim] or providers: [gnaf, nominatim]."
+            )
+        nominatim_cfg = config.geocoding.nominatim
+        if nominatim_cfg.user_agent is None:
+            # The model validator should have caught this already; the
+            # assert keeps mypy happy on the strict-typed call below.
+            raise ValueError(
+                "geocoding.nominatim.user_agent is required when "
+                "'nominatim' is in geocoding.providers."
+            )
         geocoder = NominatimGeocoder(
-            user_agent=config.geocoding.user_agent,
+            user_agent=nominatim_cfg.user_agent,
             cache=cache,
-            rate_limit_per_second=config.geocoding.rate_limit_per_second,
+            rate_limit_per_second=nominatim_cfg.rate_limit_per_second,
         )
 
         return cls(
@@ -259,7 +280,13 @@ class Pipeline:
             output=OutputConfig(prefix=output_prefix),
             census=CensusConfig(),
             data_sources=DataSourcesConfig(),
-            geocoding=GeocodingConfig(user_agent=user_agent),
+            geocoding=GeocodingConfig(
+                # Nominatim-only by default for the notebook factory until
+                # G-NAF wiring lands in Phase 6b. Users wanting the chain
+                # can build a Config manually and call from_config.
+                providers=["nominatim"],
+                nominatim=NominatimConfig(user_agent=user_agent),
+            ),
             variables=variables,
         )
         return cls.from_config(cfg, data_dir=data_dir, cache_dir=cache_dir)

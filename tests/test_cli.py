@@ -32,7 +32,7 @@ def _write_config(
             "address_column": "address",
         },
         "output": {"path": str(tmp_path / "output.csv")},
-        "geocoding": {"user_agent": "test/0.1 (test@example.com)"},
+        "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "test/0.1 (test@example.com)"}},
         "variables": variables or {"median_age": "G02.Median_age_persons"},
     }
     if not address_only:
@@ -133,7 +133,7 @@ def test_run_fails_when_input_path_missing_from_config(tmp_path: Path) -> None:
     cfg = {
         "input": {"address_column": "address"},  # no path
         "output": {"path": str(tmp_path / "output.csv")},
-        "geocoding": {"user_agent": "test/0.1 (test@example.com)"},
+        "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "test/0.1 (test@example.com)"}},
         "variables": {"median_age": "G02.Median_age_persons"},
     }
     config_path = tmp_path / "config.yaml"
@@ -153,7 +153,7 @@ def test_run_fails_when_output_path_missing_from_config(tmp_path: Path) -> None:
             "address_column": "address",
         },
         "output": {},  # no path
-        "geocoding": {"user_agent": "test/0.1 (test@example.com)"},
+        "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "test/0.1 (test@example.com)"}},
         "variables": {"median_age": "G02.Median_age_persons"},
     }
     config_path = tmp_path / "config.yaml"
@@ -422,7 +422,7 @@ def test_validate_invalid_config_fails(tmp_path: Path) -> None:
             {
                 # Missing input section entirely - structural failure
                 "output": {"path": "out.csv"},
-                "geocoding": {"user_agent": "x/1 (a@b.c)"},
+                "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "x/1 (a@b.c)"}},
                 "variables": {"foo": "G01.Tot_P_M"},
             }
         ),
