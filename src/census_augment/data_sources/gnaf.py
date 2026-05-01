@@ -39,6 +39,9 @@ _REQUIRED_COLUMNS = frozenset(
         "LATITUDE",
         "LONGITUDE",
         "MB_CODE",
+        # POSTCODE is required for Tier 2 / Tier 3 pre-filtering (spec §19.3);
+        # without it those tiers would have to scan all 15M rows.
+        "POSTCODE",
     }
 )
 

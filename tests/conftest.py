@@ -287,7 +287,8 @@ def fake_datapack_zip_bytes(
 #     (e.g. PO box surrogate) — exercised in Phase 4.
 
 _FAKE_GNAF_RECORDS = [
-    # (PID, ADDRESS_LABEL, LATITUDE, LONGITUDE, MB_CODE)
+    # (PID, ADDRESS_LABEL, LATITUDE, LONGITUDE, MB_CODE, POSTCODE)
+    # POSTCODE is the Tier 2 / Tier 3 pre-filter key (spec §19.3).
     # SA2 117011326 (Sydney CBD area) — lat/lon inside fake_sa2_gdf polygon 1
     (
         "GANSW000000001",
@@ -295,6 +296,7 @@ _FAKE_GNAF_RECORDS = [
         -33.864,
         151.211,
         "11701132601",
+        "2000",
     ),
     (
         "GANSW000000002",
@@ -302,6 +304,7 @@ _FAKE_GNAF_RECORDS = [
         -33.866,
         151.211,
         "11701132602",
+        "2000",
     ),
     (
         "GANSW000000003",
@@ -309,6 +312,7 @@ _FAKE_GNAF_RECORDS = [
         -33.868,
         151.205,
         "11701132603",
+        "2000",
     ),
     # SA2 117011327 (North Sydney area) — inside polygon 2
     (
@@ -317,6 +321,7 @@ _FAKE_GNAF_RECORDS = [
         -33.835,
         151.200,
         "11701132701",
+        "2060",
     ),
     # SA2 117011328 (Eastern Suburbs) — inside polygon 3
     (
@@ -325,6 +330,7 @@ _FAKE_GNAF_RECORDS = [
         -33.880,
         151.245,
         "11701132801",
+        "2026",
     ),
 ]
 
@@ -344,6 +350,7 @@ def fake_gnaf_parquet_bytes() -> bytes:
             "LATITUDE": [r[2] for r in _FAKE_GNAF_RECORDS],
             "LONGITUDE": [r[3] for r in _FAKE_GNAF_RECORDS],
             "MB_CODE": [r[4] for r in _FAKE_GNAF_RECORDS],
+            "POSTCODE": [r[5] for r in _FAKE_GNAF_RECORDS],
         }
     )
     buf = io.BytesIO()
