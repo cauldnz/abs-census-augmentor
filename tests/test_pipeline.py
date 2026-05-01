@@ -183,11 +183,14 @@ def test_pipeline_rejects_geo_lat_collision(tmp_path: Path) -> None:
 
 
 def test_run_fails_when_input_columns_missing(tmp_path: Path) -> None:
+    """When *all* configured locator columns are absent, lenient
+    resolution drops them and the pipeline raises with a clear message
+    listing the resolved (None) locators and the actual DataFrame columns."""
     config = _make_config(tmp_path=tmp_path)
     config.input.path.write_text("foo,bar\n1,2\n", encoding="utf-8")
 
     pipeline = Pipeline(config=config, **_empty_pipeline_pieces(tmp_path))
-    with pytest.raises(ValueError, match="missing configured columns"):
+    with pytest.raises(ValueError, match="no usable locator"):
         pipeline.run()
 
 
@@ -596,13 +599,87 @@ def test_augment_with_column_name_overrides(
 
 
 def test_augment_missing_column_raises(tmp_path: Path) -> None:
+    """All configured columns absent → no usable locator → raises with
+    a message that reports both resolution result and DataFrame schema."""
     config = _make_config(tmp_path=tmp_path)
     pieces = _empty_pipeline_pieces(tmp_path)
     pipeline = Pipeline(config=config, **pieces)
 
     df_in = pd.DataFrame({"only_this_column": [1]})
-    with pytest.raises(ValueError, match="missing configured columns"):
+    with pytest.raises(ValueError, match="no usable locator"):
         pipeline.augment(df_in)
+
+
+def test_augment_explicit_none_override_disables_locator(tmp_path: Path) -> None:
+    """Passing ``address_column=None`` explicitly should disable address
+    resolution for that call, even when config has it set."""
+    config = _make_config(tmp_path=tmp_path)  # configures all 3 cols
+    fake_geo = _FakeGeocoder({})
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoder"] = fake_geo
+    pipeline = Pipeline(config=config, **pieces)
+
+    # df has address present too — but we'll override to None so it's ignored
+    df_in = pd.DataFrame({
+        "address": ["Some Address"],
+        "lat": [-33.86],
+        "lon": [151.21],
+    })
+    result = pipeline.augment(df_in, address_column=None)
+
+    # Geocoder was never consulted (lat/lon path took precedence)
+    assert fake_geo.calls == []
+    # And nothing's flagged as unused — address override was intentional
+    assert result.summary.unused_configured_columns == []
+    assert result.df.loc[0, "geo_source"] == "input"
+
+
+def test_augment_lenient_absent_address_column(tmp_path: Path) -> None:
+    """A config with address_column set but a DataFrame that doesn't
+    have it should NOT error — drop the address with a warning, use
+    lat/lon, and surface the absent column in the run summary."""
+    config = _make_config(tmp_path=tmp_path)  # configures all 3
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    df_in = pd.DataFrame({"lat": [-33.86], "lon": [151.21]})
+    result = pipeline.augment(df_in)
+
+    assert result.df.loc[0, "geo_source"] == "input"
+    assert result.summary.unused_configured_columns == ["address"]
+
+
+def test_augment_lenient_absent_lat_lon(tmp_path: Path) -> None:
+    """Conversely, if lat/lon are configured but absent, we fall back
+    to address (still lenient — no hard error)."""
+    config = _make_config(tmp_path=tmp_path)
+    fake_geo = _FakeGeocoder(
+        {"Sydney CBD": _success_result("Sydney CBD", -33.86, 151.21)}
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoder"] = fake_geo
+    pipeline = Pipeline(config=config, **pieces)
+
+    df_in = pd.DataFrame({"address": ["Sydney CBD"]})  # no lat/lon
+    result = pipeline.augment(df_in)
+
+    assert fake_geo.calls == ["Sydney CBD"]
+    assert sorted(result.summary.unused_configured_columns) == ["lat", "lon"]
+
+
+def test_run_summary_format_includes_unused_columns(tmp_path: Path) -> None:
+    """The human-readable run summary lists unused configured columns
+    so CLI users see why an apparently-set field had no effect."""
+    config = _make_config(tmp_path=tmp_path)
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    df_in = pd.DataFrame({"lat": [-33.86], "lon": [151.21]})
+    result = pipeline.augment(df_in)
+
+    text = result.summary.format_human_readable()
+    assert "Unused configured columns" in text
+    assert "address" in text
 
 
 def test_augment_no_locator_raises(tmp_path: Path) -> None:

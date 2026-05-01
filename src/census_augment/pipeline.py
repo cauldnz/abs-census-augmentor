@@ -11,7 +11,7 @@ Two entry points (spec §3, §7, §18):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -57,6 +57,10 @@ class RunSummary:
     *did* have lat/lon but didn't fall in any SA2. ``fully_enriched`` /
     ``partially_enriched`` partition rows that got an SA2 by whether every
     configured variable resolved to a non-null value.
+
+    ``unused_configured_columns`` lists locator columns that were set in
+    config (or via override) but absent from the input DataFrame; they were
+    dropped from the resolution chain for this run with a WARNING log.
     """
 
     total_rows: int
@@ -67,9 +71,10 @@ class RunSummary:
     sa2_unmatched: int
     fully_enriched: int
     partially_enriched: int
+    unused_configured_columns: list[str] = field(default_factory=list)
 
     def format_human_readable(self) -> str:
-        return (
+        body = (
             "Run summary:\n"
             f"  Total rows:           {self.total_rows}\n"
             "  Geocoding source:\n"
@@ -83,6 +88,31 @@ class RunSummary:
             f"    Fully enriched:     {self.fully_enriched}\n"
             f"    Partially enriched: {self.partially_enriched}\n"
         )
+        if self.unused_configured_columns:
+            body += "  Unused configured columns (absent from input):\n"
+            for col in self.unused_configured_columns:
+                body += f"    - {col}\n"
+        return body
+
+
+class _UnsetType:
+    """Singleton sentinel distinguishing "kwarg not provided" from
+    "kwarg explicitly set to None". Used by :meth:`Pipeline.augment` so
+    callers can override a configured locator column to ``None`` without
+    that being indistinguishable from "use the config default"."""
+
+    _instance: _UnsetType | None = None
+
+    def __new__(cls) -> _UnsetType:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "_UNSET"
+
+
+_UNSET: _UnsetType = _UnsetType()
 
 
 @dataclass(eq=False)
@@ -261,37 +291,51 @@ class Pipeline:
         self,
         df: pd.DataFrame,
         *,
-        address_column: str | None = None,
-        latitude_column: str | None = None,
-        longitude_column: str | None = None,
+        address_column: str | None | _UnsetType = _UNSET,
+        latitude_column: str | None | _UnsetType = _UNSET,
+        longitude_column: str | None | _UnsetType = _UNSET,
     ) -> AugmentResult:
         """DataFrame in / DataFrame out (library path; spec §18.2).
 
         Returns a fresh :class:`AugmentResult`; does *not* mutate ``df``.
-        Column-name kwargs override whatever's in ``config.input.*`` for
-        this call only — handy when one notebook DataFrame uses a different
-        schema than the configured one.
 
-        Raises ``ValueError`` if no locator is configured (neither address
-        nor lat/lon) or if a configured column is missing from ``df``.
+        Column-name kwargs override whatever's in ``config.input.*`` for
+        this call only. Three behaviours per kwarg:
+
+        - **Omit** the kwarg → use ``config.input.*`` (or ``None`` if not set).
+        - Pass ``"some_column"`` → use that column for this call.
+        - Pass ``None`` → disable this locator for this call (useful when
+          the configured column is intentionally absent from the
+          DataFrame).
+
+        Configured columns that are absent from ``df`` are dropped with a
+        WARNING log and listed on
+        :attr:`AugmentResult.summary.unused_configured_columns` — the call
+        proceeds with the remaining locators rather than failing. If no
+        usable locator remains, ``ValueError`` is raised.
         """
-        addr_col = address_column or self._config.input.address_column
-        lat_col = latitude_column or self._config.input.latitude_column
-        lon_col = longitude_column or self._config.input.longitude_column
+        addr_col = self._resolve_override(
+            address_column, self._config.input.address_column
+        )
+        lat_col = self._resolve_override(
+            latitude_column, self._config.input.latitude_column
+        )
+        lon_col = self._resolve_override(
+            longitude_column, self._config.input.longitude_column
+        )
+
+        addr_col, lat_col, lon_col, unused_configured_columns = (
+            self._lenient_drop_absent_columns(df, addr_col, lat_col, lon_col)
+        )
 
         if not self._has_locator(addr_col, lat_col, lon_col):
             raise ValueError(
-                "augment(df) requires at least one locator: pass "
-                "address_column, or both latitude_column and longitude_column "
-                "(or set them on Config.input)."
-            )
-
-        configured_cols = [c for c in (addr_col, lat_col, lon_col) if c is not None]
-        missing = [c for c in configured_cols if c not in df.columns]
-        if missing:
-            raise ValueError(
-                f"DataFrame is missing configured columns: {missing}; "
-                f"got: {list(df.columns)}"
+                f"augment(df) cannot proceed: no usable locator columns. "
+                f"After applying overrides and dropping columns absent from "
+                f"the DataFrame, the resolved locators are "
+                f"address={addr_col!r}, latitude={lat_col!r}, "
+                f"longitude={lon_col!r}. DataFrame columns: "
+                f"{list(df.columns)}."
             )
 
         df_out = df.copy()
@@ -331,7 +375,10 @@ class Pipeline:
         enrichment_cols = [
             f"{prefix}{name}" for name in self._config.variables
         ]
-        if enrichment_cols:
+        # Same defensive check as _build_summary: handle the case where
+        # the enricher didn't populate the expected columns (e.g. when a
+        # test injects a stub enricher with variables={}).
+        if enrichment_cols and all(c in df_out.columns for c in enrichment_cols):
             is_fully_enriched = (
                 df_out[enrichment_cols]
                 .notna()
@@ -346,9 +393,16 @@ class Pipeline:
                 name="is_fully_enriched",
             )
 
+        # Attach unused-columns to the summary so the CLI's "Run summary"
+        # output shows them and library callers can read them off the
+        # AugmentResult.
+        summary_with_unused = RunSummary(
+            **{**summary.__dict__, "unused_configured_columns": unused_configured_columns}
+        )
+
         return AugmentResult(
             df=df_out,
-            summary=summary,
+            summary=summary_with_unused,
             added_columns=added_columns,
             is_fully_enriched=is_fully_enriched,
             geocoding_failed=geocoding_failed,
@@ -378,6 +432,73 @@ class Pipeline:
         return addr_col is not None or (
             lat_col is not None and lon_col is not None
         )
+
+    @staticmethod
+    def _resolve_override(
+        override: str | None | _UnsetType, configured: str | None
+    ) -> str | None:
+        """Apply a per-call kwarg override against the config default.
+
+        Sentinel ``_UNSET`` means "use the configured default";
+        ``None`` and ``"some_column"`` are explicit values.
+        """
+        if isinstance(override, _UnsetType):
+            return configured
+        return override
+
+    @staticmethod
+    def _lenient_drop_absent_columns(
+        df: pd.DataFrame,
+        addr_col: str | None,
+        lat_col: str | None,
+        lon_col: str | None,
+    ) -> tuple[str | None, str | None, str | None, list[str]]:
+        """Treat configured-but-absent columns as not configured.
+
+        Logs a WARNING per absent column and returns them in
+        ``unused_configured_columns`` so the run summary can surface them.
+        Lat/lon must still be paired — if only one of them survives the
+        absence check, the other is dropped to keep the contract clean
+        (the surviving column is *not* listed as unused since it WAS
+        present in ``df``).
+        """
+        unused: list[str] = []
+
+        if addr_col is not None and addr_col not in df.columns:
+            _log.warning(
+                "Configured address column %r is not in the DataFrame; "
+                "address-fallback disabled for this call",
+                addr_col,
+            )
+            unused.append(addr_col)
+            addr_col = None
+
+        if lat_col is not None and lat_col not in df.columns:
+            _log.warning(
+                "Configured latitude column %r is not in the DataFrame; "
+                "lat/lon resolution disabled",
+                lat_col,
+            )
+            unused.append(lat_col)
+            lat_col = None
+
+        if lon_col is not None and lon_col not in df.columns:
+            _log.warning(
+                "Configured longitude column %r is not in the DataFrame; "
+                "lat/lon resolution disabled",
+                lon_col,
+            )
+            unused.append(lon_col)
+            lon_col = None
+
+        # Lat and lon come as a pair. If only one survived absence-check,
+        # drop the other (it can't be used alone). The orphan was present
+        # in df so don't list it as unused.
+        if (lat_col is None) ^ (lon_col is None):
+            lat_col = None
+            lon_col = None
+
+        return addr_col, lat_col, lon_col, unused
 
     def _resolve_coordinates(
         self,

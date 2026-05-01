@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.8
+> **Status:** Draft v0.9
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -409,6 +409,7 @@ These were open questions in v0.1, resolved in v0.2:
 13. **Library / programmatic use as a first-class entry point.** *Decision: same `Pipeline` class, two entry points — `Pipeline.run()` for file-in/file-out (CLI) and `Pipeline.augment(df)` for DataFrame-in/DataFrame-out (notebooks/library).* Returns an `AugmentResult` with the DataFrame, run summary, and typed boolean Series for per-row classification. Documented in §18.
 14. **User-level cache by default.** *Decision: default cache locations use `platformdirs`-managed user cache directories rather than CWD-relative `./data` / `./cache`.* Friendlier for library use (one shared cache across notebooks), avoids the CLI surprise of "where did this 50 MB go". Override via env vars or explicit flags/kwargs. Documented in §9 and §18.
 15. **Optional input/output paths in Config.** *Decision: `input.path` and `output.path` are optional fields on the Config schema.* CLI's `run` command validates they're set; library use doesn't need them. The input column-name fields (`address_column`, `latitude_column`, `longitude_column`) remain — they describe the DataFrame regardless of provenance. Documented in §6.1 and §18.
+16. **Lenient column resolution in `augment`.** *Decision: configured locator columns that are absent from the input DataFrame are dropped with a WARNING and surfaced in `RunSummary.unused_configured_columns`, rather than failing the run.* Per-call kwargs use a sentinel to distinguish "not provided" from "explicitly `None`", so callers can disable a locator for one call without rebuilding Config. Makes a Config written for a CLI CSV re-usable in notebooks with differently-shaped DataFrames. Documented in §18.2.
 
 ## 15. Open Questions
 
@@ -488,12 +489,22 @@ result = pipeline.augment(
 )
 ```
 
+**Override semantics for the column kwargs.** Each kwarg has three behaviours:
+
+- *Omit* the kwarg → use `config.input.*` (or `None` if not set in config).
+- Pass `"some_column"` → use that column for this call.
+- Pass `None` explicitly → disable this locator for this call (useful when the configured column is intentionally absent from the DataFrame).
+
+Internally a sentinel distinguishes "not provided" from "explicitly `None`" — passing `None` truly turns a configured locator off rather than silently falling back to config.
+
+**Lenient column resolution.** A configured (or override-set) column that's *absent from the DataFrame* is dropped with a `WARNING` log and listed on `result.summary.unused_configured_columns` — the call proceeds with the remaining locators. If no usable locator remains after lenient resolution, `augment` raises `ValueError` with a message that lists the resolved locators alongside the DataFrame's actual columns. This means a Config written for a CLI CSV can be re-used in notebooks against DataFrames with different schemas without rebuilding it.
+
 Returns an `AugmentResult` with:
 
 | Field | Type | Meaning |
 |---|---|---|
 | `df` | `pandas.DataFrame` | The input DataFrame plus geo + sa2 + enrichment columns. |
-| `summary` | `RunSummary` | Aggregated counts (same shape as CLI). |
+| `summary` | `RunSummary` | Aggregated counts (same shape as CLI). Includes `unused_configured_columns: list[str]` listing locators that were configured but absent from the input. |
 | `added_columns` | `list[str]` | Names of columns added by this augment (handy for `df[result.added_columns]`). |
 | `is_fully_enriched` | `pandas.Series[bool]` | True for rows where all enrichment cells are non-null. |
 | `geocoding_failed` | `pandas.Series[bool]` | True for rows whose geocoding ended in `failed`. |
