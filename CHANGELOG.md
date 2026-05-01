@@ -9,6 +9,117 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-02
+
+v1.0 implements `spec.md` v1.0 — G-NAF as the primary geocoder with the
+Nominatim fallback, and a mesh-block fast path for SA2 resolution.
+
+### ⚠️ Breaking changes (output schema + config)
+
+The output CSV's `geo_source` column now uses provider-prefixed values:
+
+| Before (v0.1) | After (v1.0)                                                 |
+| ------------- | ------------------------------------------------------------ |
+| `input`       | `input` (unchanged)                                          |
+| `cache`       | `nominatim_cache`                                            |
+| `fresh`       | `nominatim_fresh` (or `gnaf_exact` / `gnaf_component` / `gnaf_fuzzy`) |
+| `failed`      | `failed` (unchanged)                                         |
+
+Two new columns appear in the output CSV: `geo_match_score` (populated
+for `gnaf_fuzzy` rows) and `sa2_resolution` (`mb_code` |
+`spatial_join` | `unmatched`).
+
+The `geocoding:` section of `config.yaml` has restructured. Old:
+
+```yaml
+geocoding:
+  provider: nominatim
+  user_agent: "..."
+  rate_limit_per_second: 1
+  cache_enabled: true
+```
+
+New (v1.0):
+
+```yaml
+geocoding:
+  providers: [gnaf, nominatim]
+  cache_enabled: true
+  gnaf:
+    mode: cache
+    release: latest
+    datum: GDA2020
+    fuzzy_threshold: 0.85
+  nominatim:
+    user_agent: "..."
+    rate_limit_per_second: 1
+```
+
+To reproduce v0.1 behaviour without G-NAF: `providers: [nominatim]`
+plus the new `nominatim:` subsection.
+
+### Added
+
+#### Geocoding
+- **G-NAF Core integration** as the primary geocoder. Three offline
+  match tiers (spec §19.3):
+  - `gnaf_exact` — exact `ADDRESS_LABEL` match after normalisation.
+  - `gnaf_component` — postcode-pre-filtered substring match on the
+    canonical `<num> <street> <type>` form.
+  - `gnaf_fuzzy` — `rapidfuzz` token-set similarity above a configurable
+    `fuzzy_threshold`, with the score recorded in `geo_match_score`.
+- Cascading provider chain (spec §7.2): `geocoding.providers` is an
+  ordered list; first non-failed result wins.
+- AU address normaliser (rules-based, no NLP dependencies). Handles
+  AS4590 street-type abbreviations (ST→STREET etc.), state names,
+  punctuation, casing.
+- DuckDB-backed lookup with native Parquet reads. ~15.86 M addresses
+  queried via local GeoParquet files.
+- New CLI command: `census-augment gnaf-info` reports the resolved
+  release, mode, on-disk path, and cache size.
+- New CLI flag: `census-augment fetch --gnaf` validates the cache
+  layout and downloads the Mesh Block correspondence shapefile.
+
+#### MB → SA2 fast path (spec §7.3)
+- When G-NAF returns an `mb_code`, SA2 is resolved via an O(1) dict
+  lookup against the Mesh Block shapefile's `.dbf` attribute table —
+  bypassing the spatial-join entirely. Resolution path is recorded
+  per-row in the new `sa2_resolution` column.
+- Lat/lon-input rows and Nominatim-resolved rows continue using the
+  spatial-join fallback.
+- `MbCorrespondenceDataSource` builds the lookup lazily by reading
+  only the .dbf attribute columns via
+  `pyogrio.read_dataframe(read_geometry=False)` — no geometry parsing.
+
+#### RunSummary (spec §7.5)
+- Per-tier histogram (`geo_per_tier`) and per-resolution-path counts
+  (`sa2_resolution_counts`) joined the existing aggregates.
+- Human-readable summary picks up "Per-tier breakdown" and "SA2
+  resolution path" sections.
+
+#### Public API
+- New top-level exports: `GnafConfig`, `NominatimConfig`.
+
+### Dependencies
+- `duckdb` — G-NAF indexing + analytical queries.
+- `pyarrow` — GeoParquet I/O for G-NAF.
+- `rapidfuzz` — Tier 3 fuzzy matching.
+- `boto3` — anonymous S3 access for `s3://minus34.com/opendata/`
+  (G-NAF distribution).
+- `pyogrio` — promoted from transitive to explicit (we call it
+  directly to read the Mesh Block .dbf without geometry).
+
+### Notes
+- G-NAF is licensed under Geoscape's Open G-NAF EULA. The README, the
+  `tools/fetch_real_data.py` output, and `census-augment fetch --gnaf`
+  all carry the required attribution string. See spec §19.5.
+- `mode: remote` and `mode: official` for `geocoding.gnaf` raise
+  `NotImplementedError` with migration messages — only `mode: cache`
+  is shipped in v1.0. Drop GeoParquet files into
+  `<data_dir>/gnaf/{YYYYMM}/` (e.g. from
+  `s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/`) to
+  populate the cache; automated S3 fetching lands in a follow-up.
+
 ## [0.1.0] - 2026-05-01
 
 Initial release. v1 implementation against `spec.md` v0.9.
@@ -99,5 +210,6 @@ Initial release. v1 implementation against `spec.md` v0.9.
 - Computed/derived variables (ratios, percentages) explicitly out of
   scope per spec §14 #3 — that's downstream feature engineering.
 
-[Unreleased]: https://github.com/cauldnz/abs-census-augmentor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cauldnz/abs-census-augmentor/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/cauldnz/abs-census-augmentor/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/cauldnz/abs-census-augmentor/releases/tag/v0.1.0

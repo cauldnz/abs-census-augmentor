@@ -1,11 +1,12 @@
 """Typer-based CLI for census-augment (spec §11).
 
 Commands:
-    run       Execute the augmentation pipeline.
-    discover  Search census variables by keyword or list a table's columns.
-    fetch     Pre-fetch ABS data (boundaries, DataPacks, or both).
-    validate  Structurally validate a config file (with ``--full`` also
-              validates variable refs against the loaded DataPack).
+    run        Execute the augmentation pipeline.
+    discover   Search census variables by keyword or list a table's columns.
+    fetch      Pre-fetch ABS data (boundaries, DataPacks, G-NAF, or all).
+    validate   Structurally validate a config file (with ``--full`` also
+               validates variable refs against the loaded DataPack).
+    gnaf-info  Show the resolved G-NAF release, mode, on-disk path, size.
 
 Global options:
     --verbose / -v   Switch logging from INFO to DEBUG.
@@ -23,6 +24,8 @@ from .catalog import CatalogError, VariableCatalog
 from .config import load_config
 from .data_sources.boundaries import BoundariesDataSource
 from .data_sources.datapacks import DataPacksDataSource
+from .data_sources.gnaf import GnafDataSource
+from .mb_correspondence import MbCorrespondenceDataSource
 from .paths import default_data_dir
 from .pipeline import Pipeline
 
@@ -53,6 +56,14 @@ _DATA_DIR_HELP = (
 _CACHE_DIR_HELP = (
     "Where to keep the geocoding cache. Defaults to the platform user "
     "cache. Override via the CENSUS_AUGMENT_CACHE_DIR env var or this flag."
+)
+
+#: G-NAF attribution string per Geoscape's Open G-NAF EULA (spec §19.5).
+#: Printed on every G-NAF fetch.
+_GNAF_ATTRIBUTION = (
+    "Incorporates or developed using G-NAF © Geoscape Australia licensed "
+    "by the Commonwealth of Australia under the Open Geo-coded National "
+    "Address File (G-NAF) End User Licence Agreement."
 )
 
 
@@ -149,14 +160,25 @@ def fetch(
     census: bool = typer.Option(
         False, "--census", help="Pre-fetch the Census DataPack."
     ),
+    gnaf: bool = typer.Option(
+        False,
+        "--gnaf",
+        help=(
+            "Pre-fetch the G-NAF Core dataset. Currently only validates "
+            "the cache layout (S3 download lands in a follow-up — see "
+            "spec §19.2). Also fetches the Mesh Block correspondence "
+            "shapefile alongside (used for the §7.3 fast path)."
+        ),
+    ),
     refresh: bool = typer.Option(
         False, "--refresh", help="Force re-download even if cached."
     ),
 ) -> None:
     """Pre-fetch ABS data (saves the first --run from doing the download)."""
-    if not boundaries and not census:
+    if not (boundaries or census or gnaf):
         typer.echo(
-            "Error: specify at least one of --boundaries or --census.", err=True
+            "Error: specify at least one of --boundaries, --census, or --gnaf.",
+            err=True,
         )
         raise typer.Exit(code=2)
 
@@ -178,6 +200,89 @@ def fetch(
         )
         path = dds.fetch(refresh=refresh)
         typer.echo(f"DataPacks:  {path}")
+    if gnaf:
+        # G-NAF attribution is required by Geoscape's Open EULA (spec §19.5).
+        # Print it on every fetch so first-time CLI users see it.
+        typer.echo(_GNAF_ATTRIBUTION)
+        gnaf_ds = GnafDataSource(
+            release=cfg.geocoding.gnaf.release,
+            datum=cfg.geocoding.gnaf.datum,
+            mode=cfg.geocoding.gnaf.mode,
+            data_dir=effective_data_dir,
+            s3_base_url=cfg.data_sources.gnaf_s3_base_url,
+            official_base_url=cfg.data_sources.gnaf_official_base_url,
+        )
+        try:
+            gnaf_path = gnaf_ds.fetch(refresh=refresh)
+        except (RuntimeError, NotImplementedError) as e:
+            typer.echo(f"G-NAF:      not available — {e}", err=True)
+            raise typer.Exit(code=1) from e
+        typer.echo(f"G-NAF:      {gnaf_path}")
+        # MB correspondence: download alongside, since the §7.3 fast path
+        # depends on it. The .dbf is read lazily, so we just ensure the
+        # shapefile is on disk.
+        mb_ds = MbCorrespondenceDataSource(
+            year=cfg.census.year,
+            datum=cfg.geocoding.gnaf.datum,
+            base_url=cfg.data_sources.boundaries_base_url,
+            root=effective_data_dir / "mb",
+        )
+        mb_path = mb_ds.fetch(refresh=refresh)
+        typer.echo(f"MB lookup:  {mb_path}")
+
+
+@app.command(name="gnaf-info")
+def gnaf_info(
+    config: Path = typer.Option(
+        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
+    ),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
+) -> None:
+    """Show the resolved G-NAF release, mode, on-disk path, and size."""
+    cfg = load_config(config)
+    if "gnaf" not in cfg.geocoding.providers:
+        typer.echo(
+            "G-NAF is not in geocoding.providers; nothing to report.\n"
+            "Set providers: [gnaf, nominatim] in your config to enable G-NAF.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    effective_data_dir = data_dir if data_dir is not None else default_data_dir()
+    gnaf_ds = GnafDataSource(
+        release=cfg.geocoding.gnaf.release,
+        datum=cfg.geocoding.gnaf.datum,
+        mode=cfg.geocoding.gnaf.mode,
+        data_dir=effective_data_dir,
+        s3_base_url=cfg.data_sources.gnaf_s3_base_url,
+        official_base_url=cfg.data_sources.gnaf_official_base_url,
+    )
+    typer.echo(f"Mode:           {gnaf_ds.mode}")
+    typer.echo(f"Datum:          {gnaf_ds.datum}")
+    typer.echo(f"Configured release: {cfg.geocoding.gnaf.release}")
+    if gnaf_ds.is_cached():
+        try:
+            resolved = gnaf_ds.resolved_release
+        except RuntimeError as e:  # pragma: no cover — guarded by is_cached
+            typer.echo(f"Resolved release: <unresolved> ({e})")
+            return
+        typer.echo(f"Resolved release: {resolved}")
+        rel_dir = gnaf_ds.release_dir
+        typer.echo(f"Path:           {rel_dir}")
+        size_bytes = sum(f.stat().st_size for f in rel_dir.glob("*.parquet"))
+        typer.echo(
+            f"Cached size:    {size_bytes / (1024 * 1024):.1f} MB "
+            f"({len(list(rel_dir.glob('*.parquet')))} parquet file(s))"
+        )
+    else:
+        typer.echo("Resolved release: <not cached>")
+        typer.echo(
+            f"Path:           {gnaf_ds.gnaf_root}/{{YYYYMM}}/ (none yet)"
+        )
+        typer.echo(
+            "Hint: run `census-augment fetch --gnaf` (or populate "
+            f"{gnaf_ds.gnaf_root}/{{YYYYMM}}/ manually) to enable G-NAF."
+        )
 
 
 @app.command()

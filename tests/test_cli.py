@@ -488,3 +488,161 @@ def test_validate_full_fails_with_unknown_variable_ref(
     # "G99" might be in stdout or stderr depending on CliRunner config
     output = result.stdout + (result.stderr or "")
     assert "G99" in output
+
+
+# ---- fetch --gnaf (Phase 7) ---------------------------------------------
+
+_MB_URL = (
+    "https://www.abs.gov.au/statistics/standards/"
+    "australian-statistical-geography-standard-asgs-edition-3/"
+    "jul2021-jun2026/access-and-downloads/digital-boundary-files/"
+    "MB_2021_AUST_SHP_GDA2020.zip"
+)
+
+
+@responses.activate
+def test_fetch_gnaf_downloads_mb_correspondence_and_prints_attribution(
+    tmp_path: Path,
+    fake_mb_correspondence_zip_bytes: bytes,
+    fake_gnaf_data_dir: Path,
+) -> None:
+    """``fetch --gnaf`` must print the Geoscape attribution string and
+    download the MB correspondence shapefile alongside G-NAF (the §7.3
+    fast path needs both)."""
+    # Pre-populate the gnaf cache so fetch() resolves without S3 download.
+    config_path = _write_config(tmp_path, address_only=True)
+
+    responses.add(
+        responses.GET, _MB_URL, body=fake_mb_correspondence_zip_bytes, status=200
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "fetch",
+            "--config",
+            str(config_path),
+            "--data-dir",
+            str(fake_gnaf_data_dir),  # already has gnaf/202602/addresses.parquet
+            "--gnaf",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "Geoscape" in result.stdout
+    assert "G-NAF:" in result.stdout
+    assert "MB lookup:" in result.stdout
+
+
+@responses.activate
+def test_fetch_gnaf_reports_missing_cache_clearly(
+    tmp_path: Path,
+    fake_mb_correspondence_zip_bytes: bytes,
+) -> None:
+    """When G-NAF can't resolve (no cached release) the CLI exits non-zero
+    with a useful message — but doesn't surface a stack trace."""
+    config_path = _write_config(tmp_path, address_only=True)
+
+    responses.add(
+        responses.GET, _MB_URL, body=fake_mb_correspondence_zip_bytes, status=200
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "fetch",
+            "--config",
+            str(config_path),
+            "--data-dir",
+            str(tmp_path / "empty_data"),  # no cache prepopulated
+            "--gnaf",
+        ],
+    )
+
+    assert result.exit_code == 1
+    output = result.stdout + (result.stderr or "")
+    assert "G-NAF" in output
+
+
+# ---- gnaf-info ----------------------------------------------------------
+
+
+def test_gnaf_info_when_provider_not_enabled(tmp_path: Path) -> None:
+    """``gnaf-info`` exits with a useful message when G-NAF isn't even
+    in providers (the user hasn't opted in)."""
+    config_path = _write_config(tmp_path)  # nominatim-only by default
+    result = runner.invoke(
+        app, ["gnaf-info", "--config", str(config_path)]
+    )
+    assert result.exit_code == 1
+    output = result.stdout + (result.stderr or "")
+    assert "G-NAF is not in" in output
+
+
+def test_gnaf_info_with_cached_release(
+    tmp_path: Path, fake_gnaf_data_dir: Path
+) -> None:
+    """A populated cache produces a tidy info dump."""
+    cfg: dict[str, Any] = {
+        "input": {
+            "path": str(tmp_path / "input.csv"),
+            "address_column": "address",
+        },
+        "output": {"path": str(tmp_path / "output.csv")},
+        "geocoding": {
+            "providers": ["gnaf", "nominatim"],
+            "nominatim": {"user_agent": "test/0.1 (test@example.com)"},
+        },
+        "variables": {"median_age": "G02.Median_age_persons"},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "gnaf-info",
+            "--config",
+            str(config_path),
+            "--data-dir",
+            str(fake_gnaf_data_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "Mode:" in result.stdout
+    assert "cache" in result.stdout
+    assert "Resolved release: 202602" in result.stdout
+    assert "Cached size:" in result.stdout
+
+
+def test_gnaf_info_with_no_cached_release(tmp_path: Path) -> None:
+    """When G-NAF is configured but nothing's cached, the command still
+    succeeds and points the user at the fix."""
+    cfg: dict[str, Any] = {
+        "input": {
+            "path": str(tmp_path / "input.csv"),
+            "address_column": "address",
+        },
+        "output": {"path": str(tmp_path / "output.csv")},
+        "geocoding": {
+            "providers": ["gnaf", "nominatim"],
+            "nominatim": {"user_agent": "test/0.1 (test@example.com)"},
+        },
+        "variables": {"median_age": "G02.Median_age_persons"},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "gnaf-info",
+            "--config",
+            str(config_path),
+            "--data-dir",
+            str(tmp_path / "empty"),
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "<not cached>" in result.stdout
+    assert "fetch --gnaf" in result.stdout

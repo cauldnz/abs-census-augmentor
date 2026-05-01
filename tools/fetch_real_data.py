@@ -39,6 +39,7 @@ from census_augment.config import (
 )
 from census_augment.data_sources.boundaries import BoundariesDataSource
 from census_augment.data_sources.datapacks import DataPacksDataSource
+from census_augment.mb_correspondence import MbCorrespondenceDataSource
 from census_augment.paths import default_data_dir
 
 NOMINATIM_USER_AGENT = (
@@ -46,6 +47,13 @@ NOMINATIM_USER_AGENT = (
 )
 NOMINATIM_SAMPLE_ADDRESS = "1 Macquarie Street, Sydney NSW"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+
+#: G-NAF attribution string per Geoscape's Open G-NAF EULA (spec §19.5).
+GNAF_ATTRIBUTION = (
+    "Incorporates or developed using G-NAF © Geoscape Australia licensed "
+    "by the Commonwealth of Australia under the Open Geo-coded National "
+    "Address File (G-NAF) End User Licence Agreement."
+)
 
 
 def _project_root() -> Path:
@@ -93,6 +101,17 @@ def main() -> int:
     extract = datapacks.fetch(refresh=args.refresh)
     print(f"  files:  {extract}")
 
+    print("=== Mesh Block correspondence ===")
+    mb_ds = MbCorrespondenceDataSource(
+        year=census.year,
+        datum=census.datum,
+        base_url=DEFAULT_BOUNDARIES_URL,
+        root=data_dir / "mb",
+    )
+    print(f"  URL:    {mb_ds.url}")
+    mb_shp = mb_ds.fetch(refresh=args.refresh)
+    print(f"  shp:    {mb_shp}")
+
     if not args.skip_nominatim:
         print("=== Nominatim sample ===")
         sample_path = data_dir / "nominatim_sample.json"
@@ -124,6 +143,18 @@ def main() -> int:
                 encoding="utf-8",
             )
             print(f"  saved:  {sample_path}")
+
+    # Note: G-NAF download is intentionally NOT included here. S3
+    # listing/anonymous fetch is deferred (spec §19.2); to populate the
+    # G-NAF cache today, manually drop GeoParquet files into
+    # <data_dir>/gnaf/{YYYYMM}/ (e.g. via the `gnaf-loader` snapshot
+    # at s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/). When
+    # you do, the attribution below applies.
+    print("=== G-NAF ===")
+    print("  (S3 download deferred — see spec §19.2; populate the cache manually.)")
+    print("  Attribution:")
+    for line in GNAF_ATTRIBUTION.split(". "):
+        print(f"    {line}")
 
     print()
     print("Done. Run `python tools/verify_real_parsers.py` to validate.")

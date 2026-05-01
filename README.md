@@ -5,11 +5,10 @@
 Augment Australian location datasets with ABS Census data at the SA2 statistical area level. Use it as a CLI tool against CSV files, or as a Python library against a `pandas.DataFrame`.
 
 ```
-Input  →  Geocoding  →  Spatial Join  →  Census Enrichment  →  Output
-          (Nominatim)   (ASGS SA2)       (2021 GCP DataPack)
+Input → Geocoding (G-NAF tiered → Nominatim) → SA2 (MB fast path → spatial fallback) → Census Enrichment → Output
 ```
 
-For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding an address), looks up which SA2 the point falls in, and merges in your chosen Census variables. Geocoded addresses, ASGS boundary files, and Census DataPacks all cache locally so re-runs are fast.
+For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in (via mesh-block lookup for G-NAF rows, point-in-polygon for the rest), and merges in your chosen Census variables. G-NAF Core, ASGS boundary files, Census DataPacks, and Nominatim responses all cache locally so re-runs are fast.
 
 ## Requirements
 
@@ -73,7 +72,10 @@ census-augment discover --config config.yaml --table G02
 census-augment validate --config config.yaml --full
 
 # Pre-fetch ABS data (saves the first --run from doing the download)
-census-augment fetch --config config.yaml --boundaries --census
+census-augment fetch --config config.yaml --boundaries --census --gnaf
+
+# Inspect the resolved G-NAF release / cache size
+census-augment gnaf-info --config config.yaml
 ```
 
 Run `census-augment --help` for the full list. See [`config.example.yaml`](config.example.yaml) for the full config schema.
@@ -108,7 +110,7 @@ Override with `CENSUS_AUGMENT_DATA_DIR` / `CENSUS_AUGMENT_CACHE_DIR` env vars, t
 ## Development
 
 ```bash
-pytest                            # 250+ hermetic tests; no real network
+pytest                            # 400+ hermetic tests; no real network
 ruff check . && ruff format .     # Lint + format
 mypy src/ tools/                  # Strict type check
 ```
@@ -117,14 +119,27 @@ The full suite is hermetic — every external interaction (Nominatim, ABS) is mo
 
 ## Status
 
-v1 implementation per [`spec.md` §16](spec.md). All acceptance criteria met:
-- CLI run end-to-end on mixed addresses + coordinates ✓
-- Library `pipeline.augment(df)` ✓
-- Auto-download + caching of ABS data ✓
-- `discover --search` / `--table` ✓
-- Clear error messages with near-match suggestions for bad variable refs ✓
-- Real-data verification path ([`tools/verify_real_parsers.py`](tools/verify_real_parsers.py)) ✓
+v1.0 implementation per [`spec.md` §16](spec.md). G-NAF integration, mesh-block fast path, tiered geocoding, and the v1.0 output schema are all in place. See [`CHANGELOG.md`](CHANGELOG.md) for the upgrade notes from v0.1 → v1.0.
+
+## G-NAF setup
+
+The default config wires G-NAF as the primary geocoder with Nominatim as the fallback. Drop pre-built GeoParquet snapshots into `<data_dir>/gnaf/{YYYYMM}/` to enable G-NAF locally — for example, the [`gnaf-loader`](https://github.com/minus34/gnaf-loader) project publishes a quarterly snapshot at `s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/` (anonymous access).
+
+To use Nominatim only (the v0.1 behaviour), set:
+
+```yaml
+geocoding:
+  providers: [nominatim]
+  nominatim:
+    user_agent: "..."
+```
+
+### G-NAF attribution
+
+> Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.
+
+The Open G-NAF EULA permits this kind of geocoding-and-enrichment use. It does *not* permit using the data to generate or compile addresses for sending mail unless each address has been verified against a secondary source.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). G-NAF data is licensed separately under Geoscape's [Open G-NAF EULA](https://geoscape.com.au/legal/g-naf-end-user-licence-agreement/).
