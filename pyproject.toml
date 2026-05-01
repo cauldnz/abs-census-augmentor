@@ -16,6 +16,7 @@ dependencies = [
     "geopandas",
     "shapely",
     "pyproj",
+    "pyogrio",      # geopandas IO backend; we call it directly to read .dbf attrs without geometry (spec §19.4)
     "pandas",
     "requests",
     "openpyxl",
@@ -61,5 +62,7 @@ module = [
     "shapely.*",
     "pyproj",
     "pyproj.*",
+    "pyogrio",
+    "pyogrio.*",
 ]
 ignore_missing_imports = true

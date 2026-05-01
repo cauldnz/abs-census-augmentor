@@ -387,3 +387,80 @@ def fake_gnaf_data_dir_with_two_releases(
         (rel_dir / "addresses.parquet").write_bytes(fake_gnaf_parquet_bytes)
     return data_dir
 
+
+# ---- MB → SA2 correspondence fixtures (synthetic Mesh Block shapefile) ----
+#
+# The real MB→SA2 mapping (spec §15.1 resolution) is the .dbf attribute
+# table of ``MB_2021_AUST_SHP_GDA2020.zip``. We emit a tiny synthetic
+# shapefile with the same year-suffixed column names ABS uses, so the
+# parser exercises the column-detection logic. MB_CODE values match the
+# G-NAF fixture above so end-to-end (G-NAF mb_code → SA2) tests can
+# round-trip.
+
+_FAKE_MB_RECORDS = [
+    # (MB_CODE21, SA2_CODE21, SA2_NAME21)
+    # SA2 117011326 (Sydney CBD) — three MBs
+    ("11701132601", "117011326", "Sydney CBD"),
+    ("11701132602", "117011326", "Sydney CBD"),
+    ("11701132603", "117011326", "Sydney CBD"),
+    # SA2 117011327 (North Sydney) — one MB
+    ("11701132701", "117011327", "North Sydney"),
+    # SA2 117011328 (Eastern Suburbs) — one MB
+    ("11701132801", "117011328", "Eastern Suburbs"),
+]
+
+
+@pytest.fixture
+def fake_mb_gdf() -> gpd.GeoDataFrame:
+    """Synthetic Mesh Block GeoDataFrame with 5 MBs across 3 SA2s.
+
+    Geometry is a 1-degree square dummy per row (we never read it from
+    the .dbf; it's only present so geopandas can write a valid shapefile).
+    Column names follow the real ABS Mesh Block shapefile convention
+    (``MB_CODE21``, ``SA2_CODE21``, ``SA2_NAME21`` — 10-char DBF limit),
+    so the parser exercises its column-detection logic against the same
+    names production data uses.
+    """
+    return gpd.GeoDataFrame(
+        {
+            "MB_CODE21": [r[0] for r in _FAKE_MB_RECORDS],
+            "SA2_CODE21": [r[1] for r in _FAKE_MB_RECORDS],
+            "SA2_NAME21": [r[2] for r in _FAKE_MB_RECORDS],
+            "geometry": [
+                Polygon(
+                    [
+                        (151.20 + i * 0.01, -33.87),
+                        (151.21 + i * 0.01, -33.87),
+                        (151.21 + i * 0.01, -33.86),
+                        (151.20 + i * 0.01, -33.86),
+                    ]
+                )
+                for i in range(len(_FAKE_MB_RECORDS))
+            ],
+        },
+        crs="EPSG:7844",
+    )
+
+
+@pytest.fixture
+def fake_mb_correspondence_zip_bytes(
+    tmp_path: Path, fake_mb_gdf: gpd.GeoDataFrame
+) -> bytes:
+    """In-memory ZIP containing the synthetic Mesh Block shapefile.
+
+    Filename inside the ZIP follows the ABS convention:
+    ``MB_2021_AUST_GDA2020.shp`` (no ``SHP`` token in the inner name —
+    that token only appears on the outer ZIP filename, mirroring the
+    boundary fixture).
+    """
+    work_dir = tmp_path / "_fixture_mb"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    shp_path = work_dir / "MB_2021_AUST_GDA2020.shp"
+    fake_mb_gdf.to_file(shp_path, driver="ESRI Shapefile")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for sidecar in work_dir.iterdir():
+            zf.write(sidecar, arcname=sidecar.name)
+    return buf.getvalue()
+

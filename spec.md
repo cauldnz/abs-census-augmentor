@@ -390,7 +390,7 @@ sa2_median_age, sa2_median_household_income_weekly
 | ASGS boundaries | `<data_dir>/boundaries/` | Shapefile (extracted) | Re-download with `census-augment fetch --boundaries --refresh` |
 | Census DataPacks | `<data_dir>/census/` | Extracted CSVs + metadata | Re-download with `census-augment fetch --census --refresh` |
 | G-NAF Core (cache mode) | `<data_dir>/gnaf/{release}/` | GeoParquet files | Re-fetch with `census-augment fetch --gnaf --refresh` or by changing `geocoding.gnaf.release` |
-| MB → SA2 correspondence | `<data_dir>/correspondence/` | CSV | Bundled with ASGS edition; re-fetched alongside boundaries (see §15.1 — open question on URL location) |
+| MB → SA2 correspondence | `<data_dir>/mb/MB_{year}_AUST_SHP_{datum}/` | Shapefile (.dbf only is read) | Re-fetched alongside boundaries; lookup dict built lazily from .dbf attribute table (see §15.1 / §19.4) |
 
 **Defaults** are platform-appropriate user cache directories (via the `platformdirs` package), so downloads are shared across runs and across notebooks regardless of CWD.
 
@@ -534,10 +534,11 @@ These were open questions in earlier drafts, resolved through discussion:
 26. **License attribution.** *Decision: G-NAF attribution lives in the README, not in output files. Also printed by `tools/fetch_real_data.py` when it downloads G-NAF.* The Open G-NAF EULA requires attribution but doesn't mandate per-output stamping. README mention plus the on-download attribution print is sufficient for a data-science tool whose output is intermediate. Documented in §19.5.
 27. **`GeocodeResult` extended with `mb_code` / `match_quality` / `match_score`.** *Decision: extend the existing dataclass rather than introduce a parallel type.* Backwards-compatible for the field set (new fields default to `None`). Documented in §19.1.
 28. **v1.0 is a breaking change from v0.9 in the output schema.** *Decision: bump major version; document in CHANGELOG; provide upgrade note.* `geo_source` enum has changed values; two new columns (`geo_match_score`, `sa2_resolution`) appear. The internal Python API (`Pipeline.augment(df)` etc.) stays mostly compatible; the breakage is in the *file format*. Documented in §8 and `CHANGELOG.md`.
+29. **MB → SA2 correspondence is the .dbf attribute table of the Mesh Block shapefile.** *Decision: build the MB→SA2 lookup dict by reading the `.dbf` of `MB_{year}_AUST_SHP_{datum}.zip` (downloaded from the same Digital Boundary Files endpoint as SA2 boundaries), not from the ABS *correspondences* page.* HEAD-checks confirmed that the correspondences page hosts only **change files** between ASGS editions (e.g. 2016→2021 transitions) — it has no within-edition hierarchy lookups. The Mesh Block shapefile carries `MB_CODE21`, `SA2_CODE21`, `SA2_NAME21` columns, which is exactly what we need; reading attributes only (via `pyogrio.read_dataframe(read_geometry=False)`) keeps the cost cheap. Resolves former §15.1. Documented in §4.2, §15.1, §17, §19.4.
 
 ## 15. Open Questions
 
-1. **MB → SA2 correspondence file source.** ABS publishes correspondence files (Mesh Block → SA1 → SA2 → ...) but their exact location and filename pattern is unconfirmed. Spec §4.2 currently describes this loosely ("CSV bundled with ASGS edition; re-fetched alongside boundaries"). **Resolve at implementation time:** HEAD-check the ABS correspondence page (`https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/correspondences`), confirm the filename and whether it's bundled with boundary downloads or fetched separately. Update §4.2, §9, and §19.4 once verified.
+1. *(Resolved — see §14 decision #29.)* **MB → SA2 correspondence file source.** Originally listed as open: ABS's correspondence page only hosts *change files* (e.g. 2016→2021 transitions), not within-edition hierarchy lookups. The MB→SA2 mapping lives in the **`.dbf` attribute table of the Mesh Block shapefile** (`MB_2021_AUST_SHP_GDA2020.zip`), downloaded from the same Digital Boundary Files endpoint as SA2 boundaries (§4.1). Implementation reads only the .dbf columns (no geometry) for cheap O(1) lookup table construction.
 
 ---
 
@@ -572,7 +573,7 @@ The pytest suite is **hermetic**: every external interaction (Nominatim, ABS dow
 - **SA2 boundaries:** ~3 polygons covering known Sydney/Melbourne areas in EPSG:7844.
 - **DataPack:** a small in-memory ZIP with G01.csv + G02.csv + a synthesised metadata Excel matching the real ABS layout (title rows, `Cell Descriptors Information` sheet, etc.).
 - **G-NAF:** a small in-memory Parquet (~50 addresses) covering the test SA2 polygons and exercising all four match tiers (exact, component, fuzzy, miss). Includes representative `MB_CODE` values that resolve via the MB→SA2 correspondence fixture.
-- **MB→SA2 correspondence:** a tiny CSV mapping the synthetic mesh-block codes to the synthetic SA2 codes.
+- **MB→SA2 correspondence:** a synthetic Mesh Block shapefile (5 mesh blocks across 3 SA2s) with ABS's `MB_CODE21` / `SA2_CODE21` / `SA2_NAME21` column names. The fixture's mesh-block codes line up with the G-NAF fixture's `MB_CODE` values so end-to-end MB-fast-path tests round-trip.
 
 When to run the real-data scripts: after dev environment setup; after ABS or Geoscape publishes new versions; whenever code touches the parsers or matcher.
 
@@ -686,9 +687,10 @@ The output `geo_source` column distinguishes which tier matched (`gnaf_exact`, `
 
 When G-NAF returns a match, the result carries an `mb_code` (11-digit ABS Mesh Block). We resolve SA2 from this via:
 
-- **Source:** ABS-published MB → SA1 → SA2 correspondence files, distributed as part of ASGS Edition 3. **Exact URL and bundled-vs-separate is unconfirmed; tracked as Open Question §15.1, to be resolved by HEAD-check at implementation time.**
-- **Storage:** A small CSV bundled with the boundary download (or fetched separately from the ASGS correspondence page — depending on §15.1 resolution).
-- **Lookup:** Loaded into a dict keyed by `mb_code`; lookup is O(1).
+- **Source:** the **`.dbf` attribute table of the ABS Mesh Block shapefile** (`MB_{year}_AUST_SHP_{datum}.zip`), downloaded from the same Digital Boundary Files endpoint as SA2 boundaries (§4.1). The ABS *correspondences* page only hosts cross-edition *change files* (e.g. 2016→2021 transitions); within-edition hierarchy lookups live in the boundary shapefiles themselves. Resolved §15.1.
+- **Loading:** read only the .dbf attribute columns via `pyogrio.read_dataframe(read_geometry=False)` — no geometry parsing, fast on a ~100 MB shapefile.
+- **Lookup:** loaded into a dict keyed by `mb_code` (mapping to `(sa2_code, sa2_name)`); lookup is O(1).
+- **Column resolution:** ABS's column names are year-suffixed (`MB_CODE21`, `SA2_CODE21`, `SA2_NAME21` for the shapefile; `MB_CODE_2021`, `SA2_MAINCODE_2021`, `SA2_NAME_2021` for the CSV variant). The parser detects both forms and picks the highest-year-suffixed column when multiple coexist (spec §13 extensibility hook).
 - **Vintage:** Mesh blocks have a vintage (e.g. `MB_2021`). G-NAF Core's `MB_CODE` is currently the 2021 vintage. When ABS publishes 2026 mesh blocks alongside the 2026 Census, this becomes a config-driven choice.
 
 If `mb_code` is null on a G-NAF row (rare but possible for very recent additions), the pipeline falls back to the spatial-join path using G-NAF's lat/lon. This is logged at INFO and counted in the run summary.
