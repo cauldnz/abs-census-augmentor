@@ -55,7 +55,7 @@ def _failed_result(address: str) -> GeocodeResult:
 
 
 def _success_result(
-    address: str, lat: float, lon: float, source: str = "fresh"
+    address: str, lat: float, lon: float, source: str = "nominatim_fresh"
 ) -> GeocodeResult:
     return GeocodeResult(
         address_input=address,
@@ -243,7 +243,7 @@ def test_resolve_falls_back_to_address_when_latlon_null(tmp_path: Path) -> None:
 
     assert lats == [-34.0]
     assert lons == [150.0]
-    assert sources == ["fresh"]
+    assert sources == ["nominatim_fresh"]
     assert fake_geo.calls == ["Fallback Address"]
 
 
@@ -276,7 +276,7 @@ def test_resolve_cache_source_propagates(tmp_path: Path) -> None:
         "address,lat,lon\nCached,,\n", encoding="utf-8"
     )
     fake_geo = _FakeGeocoder(
-        {"Cached": _success_result("Cached", -33.0, 151.0, source="cache")}
+        {"Cached": _success_result("Cached", -33.0, 151.0, source="nominatim_cache")}
     )
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoder"] = fake_geo
@@ -290,7 +290,7 @@ def test_resolve_cache_source_propagates(tmp_path: Path) -> None:
         lon_col=config.input.longitude_column,
     )
 
-    assert sources == ["cache"]
+    assert sources == ["nominatim_cache"]
 
 
 def test_resolve_no_locator_at_all_yields_failed(tmp_path: Path) -> None:
@@ -414,7 +414,7 @@ def test_end_to_end_smoke(
     assert out.loc[0, "sa2_total_pop"] == 10200
 
     # Row 1: geocoded successfully into the same Sydney CBD polygon
-    assert out.loc[1, "geo_source"] == "fresh"
+    assert out.loc[1, "geo_source"] == "nominatim_fresh"
     assert out.loc[1, "sa2_code"] == 117011326
     assert out.loc[1, "sa2_median_age"] == 35
 

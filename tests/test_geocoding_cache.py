@@ -111,7 +111,7 @@ def test_get_flips_source_to_cache(tmp_path: Path) -> None:
     cache.set(_result(source="fresh"))
     retrieved = cache.get("1 Main St, Sydney")
     assert retrieved is not None
-    assert retrieved.source == "cache"
+    assert retrieved.source == "nominatim_cache"
 
 
 def test_set_creates_sharded_directory_layout(tmp_path: Path) -> None:

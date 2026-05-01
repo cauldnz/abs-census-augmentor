@@ -71,12 +71,16 @@ class GeocodeCache:
             )
             return None
         try:
+            # v1.0: source is provider-prefixed. v1 only Nominatim caches
+            # (G-NAF caches its underlying database, not individual lookups —
+            # spec §7.2), so this is hardcoded; if a future provider gains
+            # caching, we'd derive source from data["provider"].
             return GeocodeResult(
                 address_input=data["address_input"],
                 address_normalized=data["address_normalized"],
                 lat=data["lat"],
                 lon=data["lon"],
-                source="cache",
+                source="nominatim_cache",
                 provider=data["provider"],
                 timestamp=datetime.fromisoformat(data["timestamp"]),
                 raw_response=data.get("raw_response"),

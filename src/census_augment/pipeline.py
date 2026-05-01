@@ -564,8 +564,15 @@ class Pipeline:
         self, df: pd.DataFrame, sources: list[str]
     ) -> RunSummary:
         geo_input = sum(1 for s in sources if s == "input")
-        geo_cache = sum(1 for s in sources if s == "cache")
-        geo_fresh = sum(1 for s in sources if s == "fresh")
+        # v1.0: source values are provider-prefixed (spec §8 / §19.1).
+        # The summary counters keep their v0.9 names but classify across
+        # the new value set so existing callers see consistent semantics.
+        geo_cache = sum(1 for s in sources if s == "nominatim_cache")
+        geo_fresh = sum(
+            1
+            for s in sources
+            if s in ("nominatim_fresh", "gnaf_exact", "gnaf_component", "gnaf_fuzzy")
+        )
         geo_failed = sum(1 for s in sources if s == "failed")
 
         has_coords = df[_GEO_LAT_COL].notna() & df[_GEO_LON_COL].notna()

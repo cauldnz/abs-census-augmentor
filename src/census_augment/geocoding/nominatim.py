@@ -134,7 +134,7 @@ class NominatimGeocoder:
             address_normalized=normalized,
             lat=lat,
             lon=lon,
-            source="fresh",
+            source="nominatim_fresh",
             provider="nominatim",
             timestamp=datetime.now(timezone.utc),
             raw_response=entry,
