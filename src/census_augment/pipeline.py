@@ -30,7 +30,7 @@ from .data_sources.boundaries import BoundariesDataSource
 from .data_sources.datapacks import DataPacksDataSource
 from .enrich import CensusEnricher
 from .geocoding.base import Geocoder
-from .geocoding.cache import GeocodeCache
+from .geocoding.cache import GeocodeCache, NullCache
 from .geocoding.nominatim import NominatimGeocoder
 from .paths import default_cache_dir, default_data_dir
 from .spatial import SpatialIndex
@@ -208,9 +208,14 @@ class Pipeline:
             output_prefix=config.output.prefix,
         )
 
+        cache: GeocodeCache
+        if config.geocoding.cache_enabled:
+            cache = GeocodeCache(cache_dir / "geocoding")
+        else:
+            cache = NullCache()
         geocoder = NominatimGeocoder(
             user_agent=config.geocoding.user_agent,
-            cache=GeocodeCache(cache_dir / "geocoding"),
+            cache=cache,
             rate_limit_per_second=config.geocoding.rate_limit_per_second,
         )
 

@@ -107,3 +107,25 @@ class GeocodeCache:
         tmp = path.parent / (path.name + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(path)
+
+
+class NullCache(GeocodeCache):
+    """No-op geocoding cache: always misses on read, ignores writes.
+
+    Used when ``geocoding.cache_enabled`` is ``False`` so the
+    NominatimGeocoder stays unchanged but every call goes to the
+    network. Useful for debugging stale cached values or for tests
+    that need to verify HTTP behaviour.
+    """
+
+    def __init__(self) -> None:
+        # The parent's ``root`` is never touched (we override every method
+        # that would access disk), but supplying a path keeps the type
+        # contract clean.
+        super().__init__(Path("."))
+
+    def get(self, address: str) -> GeocodeResult | None:
+        return None
+
+    def set(self, result: GeocodeResult) -> None:
+        return None

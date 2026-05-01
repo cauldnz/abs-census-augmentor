@@ -12,6 +12,7 @@ import pytest
 from census_augment.geocoding.base import GeocodeResult
 from census_augment.geocoding.cache import (
     GeocodeCache,
+    NullCache,
     address_hash,
     normalize_address,
 )
@@ -204,3 +205,22 @@ def test_is_success_false_when_lon_none() -> None:
 
 def test_is_success_false_when_both_none() -> None:
     assert _result(lat=None, lon=None).is_success is False
+
+
+# ---------- NullCache (when geocoding.cache_enabled is False) -------------
+
+
+def test_null_cache_get_always_returns_none() -> None:
+    cache = NullCache()
+    cache.set(_result())  # silently ignored
+    assert cache.get("1 Main St") is None
+
+
+def test_null_cache_set_is_idempotent_no_op() -> None:
+    """``set`` returns None and doesn't raise; ``get`` still misses
+    afterward (proving nothing was persisted)."""
+    cache = NullCache()
+    assert cache.set(_result()) is None  # type: ignore[func-returns-value]
+    cache.set(_result(address="2 Other St", lat=-34.0, lon=152.0))
+    assert cache.get("1 Main St, Sydney") is None
+    assert cache.get("2 Other St") is None

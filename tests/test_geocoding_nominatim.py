@@ -11,7 +11,12 @@ import responses
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from responses import matchers
 
-from census_augment.geocoding.cache import GeocodeCache, address_hash, normalize_address
+from census_augment.geocoding.cache import (
+    GeocodeCache,
+    NullCache,
+    address_hash,
+    normalize_address,
+)
 from census_augment.geocoding.nominatim import NominatimGeocoder
 
 NOMINATIM_BASE = "https://nominatim.openstreetmap.org"
@@ -178,6 +183,28 @@ def test_normalized_variants_share_cache_entry(tmp_path: Path) -> None:
         result = geocoder.geocode(variant)
         assert result.source == "cache"
     assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_null_cache_disables_short_circuit(tmp_path: Path) -> None:
+    """With NullCache, repeat geocodes hit HTTP each time — proves
+    that ``geocoding.cache_enabled = false`` will turn caching off
+    when wired through Pipeline.from_config."""
+    responses.add(responses.GET, SEARCH_URL, json=_ok_payload(), status=200)
+    responses.add(responses.GET, SEARCH_URL, json=_ok_payload(), status=200)
+
+    geocoder = NominatimGeocoder(
+        user_agent="test/0.1",
+        cache=NullCache(),
+        sleep=lambda _seconds: None,
+    )
+
+    first = geocoder.geocode("1 Main St")
+    second = geocoder.geocode("1 Main St")
+
+    assert first.source == "fresh"
+    assert second.source == "fresh"  # not "cache" — NullCache always misses
+    assert len(responses.calls) == 2
 
 
 # ---------- failure paths ----------

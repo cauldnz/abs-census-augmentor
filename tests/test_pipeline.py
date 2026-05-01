@@ -667,6 +667,73 @@ def test_augment_lenient_absent_lat_lon(tmp_path: Path) -> None:
     assert sorted(result.summary.unused_configured_columns) == ["lat", "lon"]
 
 
+@responses.activate
+def test_from_config_uses_null_cache_when_cache_disabled(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+) -> None:
+    """``geocoding.cache_enabled = false`` should result in a NullCache
+    being wired into the geocoder, so per-row geocodes never short-circuit."""
+    from census_augment.geocoding.cache import NullCache
+    from census_augment.geocoding.nominatim import NominatimGeocoder
+
+    config = _make_config(tmp_path=tmp_path)
+    config = config.model_copy(
+        update={
+            "geocoding": config.geocoding.model_copy(
+                update={"cache_enabled": False}
+            )
+        }
+    )
+
+    boundaries_url = (
+        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        f"{config.data_sources.datapacks_base_url}/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+
+    pipeline = Pipeline.from_config(
+        config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
+    )
+
+    assert isinstance(pipeline._geocoder, NominatimGeocoder)
+    assert isinstance(pipeline._geocoder._cache, NullCache)
+
+
+@responses.activate
+def test_from_config_uses_real_cache_by_default(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+) -> None:
+    """Default (cache_enabled=True) wires a normal GeocodeCache."""
+    from census_augment.geocoding.cache import GeocodeCache, NullCache
+
+    config = _make_config(tmp_path=tmp_path)
+    boundaries_url = (
+        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        f"{config.data_sources.datapacks_base_url}/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+
+    pipeline = Pipeline.from_config(
+        config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
+    )
+
+    cache = pipeline._geocoder._cache
+    assert isinstance(cache, GeocodeCache)
+    assert not isinstance(cache, NullCache)
+
+
 def test_run_summary_format_includes_unused_columns(tmp_path: Path) -> None:
     """The human-readable run summary lists unused configured columns
     so CLI users see why an apparently-set field had no effect."""
