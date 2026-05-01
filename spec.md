@@ -414,7 +414,7 @@ These were open questions in v0.1, resolved in v0.2:
 
 ## 15. Open Questions
 
-*(None at present. Add new ones here as they arise during implementation.)*
+1. **2026 Census format drift.** When ABS publishes the 2026 Census DataPacks (expected mid-2027), the metadata Excel format may change — recall §14 #10 documents what we currently expect (Cell Descriptors Information sheet, title-row prefix, six specific column names). The parser is deliberately localised to `_parse_metadata_xlsx` in `src/census_augment/data_sources/datapacks.py` so a 2026 adjustment is one localised change rather than a refactor. **First integration check:** run `tools/verify_real_parsers.py` against the 2026 DataPack as soon as it's available; the descriptor-mode-aware code lookup (§14 #10) generalises to any new descriptor mode if ABS introduces one. The boundary filename pattern in §4.1 will likely also need a year bump (`SA2_2026_AUST_SHP_GDA2020.zip`?) — confirm against the live ABS URL before adjusting.
 
 ---
 

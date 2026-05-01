@@ -1,5 +1,7 @@
 # Australian Census Augmentation Tool
 
+[![tests](https://github.com/cauldnz/abs-census-augmentor/actions/workflows/test.yml/badge.svg)](https://github.com/cauldnz/abs-census-augmentor/actions/workflows/test.yml)
+
 Augment Australian location datasets with ABS Census data at the SA2 statistical area level. Use it as a CLI tool against CSV files, or as a Python library against a `pandas.DataFrame`.
 
 ```
@@ -54,6 +56,8 @@ result.df[result.is_fully_enriched]   # filter to clean rows
 ```
 
 `pipeline.augment(df)` returns an `AugmentResult` with the augmented DataFrame, a `RunSummary`, and three boolean Series (`is_fully_enriched`, `geocoding_failed`, `sa2_unmatched`) for filtering. See [`spec.md` §18](spec.md) for the full API.
+
+> **First-run download:** the first call to `pipeline.augment(df)` (or `Pipeline.run()`, or any `census-augment` CLI command that touches the data) downloads ~50 MB of SA2 boundaries and ~40 MB of Census DataPacks into the user cache. Subsequent calls — including across notebooks, scripts, and CLI runs on the same machine — reuse the cache and are instant. See "Where data is cached" below.
 
 ### As a CLI
 
