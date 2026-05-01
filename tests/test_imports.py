@@ -18,7 +18,9 @@ def test_public_api_importable() -> None:
         DataSourcesConfig,
         Geocoder,
         GeocodingConfig,
+        GnafConfig,
         InputConfig,
+        NominatimConfig,
         OutputConfig,
         Pipeline,
         RunSummary,
@@ -43,6 +45,8 @@ def test_all_attribute_lists_full_surface() -> None:
         "CensusConfig",
         "DataSourcesConfig",
         "GeocodingConfig",
+        "GnafConfig",
+        "NominatimConfig",
         "load_config",
         # Catalog
         "VariableCatalog",
