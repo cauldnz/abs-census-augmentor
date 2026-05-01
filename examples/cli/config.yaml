@@ -12,7 +12,12 @@ output:
   prefix: sa2_
 
 geocoding:
-  user_agent: "census-augment-example/0.1 (someone@example.com)"
+  # The example uses Nominatim only. To opt G-NAF in, add 'gnaf' before
+  # 'nominatim' in providers and populate <data_dir>/gnaf/{YYYYMM}/ with
+  # a GeoParquet snapshot (see README "G-NAF setup").
+  providers: [nominatim]
+  nominatim:
+    user_agent: "census-augment-example/0.1 (someone@example.com)"
 
 # A small starter set — try `census-augment discover --config <this> --search <term>`
 # to find more, or look at `census-augment discover --table G02`.

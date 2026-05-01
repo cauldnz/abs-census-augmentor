@@ -24,7 +24,10 @@ def _base_config() -> dict[str, Any]:
             "path": "out/locations_enriched.csv",
         },
         "geocoding": {
-            "user_agent": "census-augment-test/0.1 (test@example.com)",
+            "providers": ["nominatim"],
+            "nominatim": {
+                "user_agent": "census-augment-test/0.1 (test@example.com)",
+            },
         },
         "variables": {
             "median_age": "G02.Median_age_persons",
@@ -53,8 +56,8 @@ def test_minimal_valid_config_loads(tmp_path: Path) -> None:
     assert cfg.census.level == "SA2"
     assert cfg.census.profile == "GCP"
     assert cfg.census.asgs_edition == 3
-    assert cfg.geocoding.provider == "nominatim"
-    assert cfg.geocoding.rate_limit_per_second == 1.0
+    assert cfg.geocoding.providers == ["nominatim"]
+    assert cfg.geocoding.nominatim.rate_limit_per_second == 1.0
     assert cfg.geocoding.cache_enabled is True
     assert cfg.variables == {"median_age": "G02.Median_age_persons"}
 
@@ -67,6 +70,11 @@ def test_example_config_loads() -> None:
     assert "median_age" in cfg.variables
     assert "total_population" in cfg.variables
     assert cfg.output.prefix == "sa2_"
+    assert cfg.geocoding.providers == ["gnaf", "nominatim"]
+    assert cfg.geocoding.gnaf.mode == "cache"
+    assert cfg.geocoding.gnaf.release == "latest"
+    assert cfg.geocoding.gnaf.fuzzy_threshold == 0.85
+    assert cfg.geocoding.nominatim.user_agent is not None
 
 
 # ---------- missing required fields ----------
@@ -93,11 +101,99 @@ def test_missing_geocoding_section_fails(tmp_path: Path) -> None:
         load_config(_write(tmp_path, cfg))
 
 
-def test_missing_geocoding_user_agent_fails(tmp_path: Path) -> None:
+def test_missing_nominatim_user_agent_fails_when_nominatim_in_providers(
+    tmp_path: Path,
+) -> None:
     cfg = _base_config()
-    del cfg["geocoding"]["user_agent"]
+    del cfg["geocoding"]["nominatim"]["user_agent"]
     with pytest.raises(ValidationError, match="user_agent"):
         load_config(_write(tmp_path, cfg))
+
+
+def test_nominatim_user_agent_optional_when_only_gnaf_configured(
+    tmp_path: Path,
+) -> None:
+    """G-NAF-only setups (offline) don't need a Nominatim User-Agent."""
+    cfg = _base_config()
+    cfg["geocoding"] = {"providers": ["gnaf"]}
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.geocoding.providers == ["gnaf"]
+    assert loaded.geocoding.nominatim.user_agent is None
+
+
+def test_geocoding_providers_default_to_gnaf_then_nominatim(
+    tmp_path: Path,
+) -> None:
+    cfg = _base_config()
+    # Drop the explicit providers list — default should be [gnaf, nominatim].
+    del cfg["geocoding"]["providers"]
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.geocoding.providers == ["gnaf", "nominatim"]
+
+
+def test_empty_providers_list_fails(tmp_path: Path) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["providers"] = []
+    with pytest.raises(ValidationError, match="at least one"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_duplicate_provider_fails(tmp_path: Path) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["providers"] = ["nominatim", "nominatim"]
+    with pytest.raises(ValidationError, match="duplicates"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_unknown_provider_fails(tmp_path: Path) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["providers"] = ["google_maps"]
+    with pytest.raises(ValidationError):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_gnaf_release_format_validated(tmp_path: Path) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["providers"] = ["gnaf"]
+    cfg["geocoding"]["gnaf"] = {"release": "Q1-2026"}
+    with pytest.raises(ValidationError, match="YYYYMM"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_gnaf_release_explicit_yyyymm_accepted(tmp_path: Path) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["providers"] = ["gnaf"]
+    cfg["geocoding"]["gnaf"] = {"release": "202602"}
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.geocoding.gnaf.release == "202602"
+
+
+def test_gnaf_fuzzy_threshold_out_of_range_fails(tmp_path: Path) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["gnaf"] = {"fuzzy_threshold": 1.5}
+    with pytest.raises(ValidationError, match="fuzzy_threshold"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_datum_mismatch_emits_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _base_config()
+    cfg["geocoding"]["providers"] = ["gnaf", "nominatim"]
+    cfg["geocoding"]["gnaf"] = {"datum": "GDA94"}  # census defaults to GDA2020
+    with caplog.at_level("WARNING", logger="census_augment.config"):
+        load_config(_write(tmp_path, cfg))
+    assert any("Datum mismatch" in rec.message for rec in caplog.records)
+
+
+def test_no_warning_when_datums_match(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cfg = _base_config()  # gnaf default datum=GDA2020 matches census default
+    cfg["geocoding"]["providers"] = ["gnaf", "nominatim"]
+    with caplog.at_level("WARNING", logger="census_augment.config"):
+        load_config(_write(tmp_path, cfg))
+    assert not any("Datum mismatch" in rec.message for rec in caplog.records)
 
 
 def test_missing_variables_fails(tmp_path: Path) -> None:

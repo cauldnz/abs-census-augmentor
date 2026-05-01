@@ -24,12 +24,28 @@ census:
 data_sources:
   boundaries_base_url: https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/digital-boundary-files
   datapacks_base_url: https://www.abs.gov.au/census/find-census-data/datapacks/download
+  gnaf_s3_base_url: s3://minus34.com/opendata           # Pre-built GeoParquet (default)
+  gnaf_official_base_url: https://data.gov.au/data/dataset  # PSV fallback
 
 geocoding:
-  provider: nominatim
-  user_agent: "census-augment/0.1 (you@example.com)"   # Required by Nominatim policy
-  rate_limit_per_second: 1
+  # Ordered list of geocoders. The first to return a result for a given row wins.
+  # 'gnaf' is the gold-standard offline matcher; 'nominatim' is the network fallback.
+  # Set providers: [nominatim] to reproduce v0.9 behaviour without G-NAF.
+  providers: [gnaf, nominatim]
   cache_enabled: true
+
+  gnaf:
+    # 'cache' (default): download Parquet to user cache on first use, query locally thereafter.
+    # 'remote':  query Parquet over HTTPS without downloading (deferred in v1.0).
+    # 'official': fetch official PSV from data.gov.au, build local DuckDB (deferred in v1.0).
+    mode: cache
+    release: latest                # 'latest' or specific YYYYMM (e.g. 202602). Pinned in resolved config.
+    datum: GDA2020                 # GDA2020 or GDA94. Should match census.datum.
+    fuzzy_threshold: 0.85          # Tier 3 score floor; below this, fall through to Nominatim.
+
+  nominatim:
+    user_agent: "census-augment/0.1 (you@example.com)"   # Required by Nominatim policy
+    rate_limit_per_second: 1
 
 # Variables to attach to each record.
 # Format: <friendly_name>: <table_id>.<column_name>

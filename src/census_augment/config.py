@@ -11,12 +11,15 @@ is available.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_log = logging.getLogger(__name__)
 
 FRIENDLY_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 VARIABLE_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\.[A-Za-z][A-Za-z0-9_]*$")
@@ -28,6 +31,11 @@ DEFAULT_BOUNDARIES_URL = (
     "jul2021-jun2026/access-and-downloads/digital-boundary-files"
 )
 DEFAULT_DATAPACKS_URL = "https://www.abs.gov.au/census/find-census-data/datapacks/download"
+DEFAULT_GNAF_S3_BASE_URL = "s3://minus34.com/opendata"
+DEFAULT_GNAF_OFFICIAL_BASE_URL = "https://data.gov.au/data/dataset"
+
+#: Recognised ``geocoding.providers`` entries (spec §6.1).
+GeocoderName = Literal["gnaf", "nominatim"]
 
 
 class _StrictModel(BaseModel):
@@ -92,20 +100,66 @@ class CensusConfig(_StrictModel):
 class DataSourcesConfig(_StrictModel):
     boundaries_base_url: str = DEFAULT_BOUNDARIES_URL
     datapacks_base_url: str = DEFAULT_DATAPACKS_URL
+    gnaf_s3_base_url: str = DEFAULT_GNAF_S3_BASE_URL
+    gnaf_official_base_url: str = DEFAULT_GNAF_OFFICIAL_BASE_URL
 
 
-class GeocodingConfig(_StrictModel):
-    provider: Literal["nominatim"] = "nominatim"
-    user_agent: str
+class GnafConfig(_StrictModel):
+    """G-NAF provider settings (spec §6.1, §19.2)."""
+
+    #: ``cache`` (default), ``remote``, or ``official`` — see §19.2.
+    mode: Literal["cache", "remote", "official"] = "cache"
+    #: ``"latest"`` (resolved at fetch time) or a 6-digit ``YYYYMM``.
+    release: str = "latest"
+    #: ``GDA2020`` (default) or ``GDA94``. Should match ``census.datum``;
+    #: a config-load WARNING is emitted on mismatch (see §6.1).
+    datum: Literal["GDA2020", "GDA94"] = "GDA2020"
+    #: Tier 3 (fuzzy) match-score floor in [0.0, 1.0] (spec §19.3).
+    fuzzy_threshold: float = 0.85
+
+    @field_validator("release")
+    @classmethod
+    def _release_format(cls, v: str) -> str:
+        if v == "latest":
+            return v
+        if not (len(v) == 6 and v.isdigit()):
+            raise ValueError(
+                f"geocoding.gnaf.release must be 'latest' or a 6-digit "
+                f"YYYYMM string (e.g. '202602'); got {v!r}"
+            )
+        return v
+
+    @field_validator("fuzzy_threshold")
+    @classmethod
+    def _fuzzy_in_unit_interval(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(
+                f"geocoding.gnaf.fuzzy_threshold must be in [0.0, 1.0]; got {v!r}"
+            )
+        return v
+
+
+class NominatimConfig(_StrictModel):
+    """Nominatim provider settings (spec §6.1).
+
+    ``user_agent`` is required by Nominatim's usage policy and so is
+    only required when ``nominatim`` is actually in
+    ``geocoding.providers`` — that cross-field check lives on
+    :class:`GeocodingConfig`.
+    """
+
+    user_agent: str | None = None
     rate_limit_per_second: float = 1.0
-    cache_enabled: bool = True
 
     @field_validator("user_agent")
     @classmethod
-    def _user_agent_non_empty(cls, v: str) -> str:
+    def _user_agent_non_empty(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
         if not v.strip():
             raise ValueError(
-                "geocoding.user_agent must be a non-empty string (Nominatim policy)"
+                "geocoding.nominatim.user_agent must be a non-empty string "
+                "(Nominatim policy)"
             )
         return v
 
@@ -113,8 +167,59 @@ class GeocodingConfig(_StrictModel):
     @classmethod
     def _rate_positive(cls, v: float) -> float:
         if v <= 0:
-            raise ValueError("geocoding.rate_limit_per_second must be > 0")
+            raise ValueError(
+                "geocoding.nominatim.rate_limit_per_second must be > 0"
+            )
         return v
+
+
+class GeocodingConfig(_StrictModel):
+    """Geocoder chain config (spec §6.1, §7.2).
+
+    ``providers`` is an ordered list — first hit wins. Setting it to
+    ``[nominatim]`` reproduces v0.9 behaviour for users who don't want
+    G-NAF; ``[gnaf]`` is offline-only.
+    """
+
+    providers: list[GeocoderName] = Field(
+        # cast via the list literal: mypy sees the bare strings as plain
+        # str, not Literal — explicit annotation propagates the Literal
+        # type from the parent annotation.
+        default_factory=lambda: cast(list[GeocoderName], ["gnaf", "nominatim"])
+    )
+    cache_enabled: bool = True
+    gnaf: GnafConfig = Field(default_factory=GnafConfig)
+    nominatim: NominatimConfig = Field(default_factory=NominatimConfig)
+
+    @field_validator("providers")
+    @classmethod
+    def _providers_non_empty_and_unique(
+        cls, v: list[GeocoderName]
+    ) -> list[GeocoderName]:
+        if not v:
+            raise ValueError(
+                "geocoding.providers must contain at least one provider "
+                "(e.g. [gnaf, nominatim] or [nominatim])"
+            )
+        if len(v) != len(set(v)):
+            raise ValueError(
+                f"geocoding.providers contains duplicates: {v}. "
+                "Each provider may appear at most once."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _nominatim_user_agent_required_if_used(self) -> GeocodingConfig:
+        # Nominatim's usage policy requires a unique User-Agent — bail at
+        # config-load if the user wired Nominatim into the chain without
+        # one, rather than failing later on the first network call.
+        if "nominatim" in self.providers and not self.nominatim.user_agent:
+            raise ValueError(
+                "geocoding.nominatim.user_agent is required when "
+                "'nominatim' is in geocoding.providers (Nominatim policy). "
+                "Set geocoding.nominatim.user_agent in your config."
+            )
+        return self
 
 
 class Config(_StrictModel):
@@ -142,6 +247,25 @@ class Config(_StrictModel):
                     f"expected format '<table>.<column>' (e.g. 'G02.Median_age_persons')"
                 )
         return v
+
+    @model_validator(mode="after")
+    def _warn_on_datum_mismatch(self) -> Config:
+        # Spec §6.1: a CRS mismatch between the census boundaries and
+        # the G-NAF data is the kind of silent drift that turns up six
+        # months later as a weird bug. Log once at config-load.
+        if (
+            "gnaf" in self.geocoding.providers
+            and self.geocoding.gnaf.datum != self.census.datum
+        ):
+            _log.warning(
+                "Datum mismatch: census.datum=%s but geocoding.gnaf.datum=%s. "
+                "These should normally match — silent CRS mismatch can produce "
+                "subtle position errors. Set them to the same value to silence "
+                "this warning.",
+                self.census.datum,
+                self.geocoding.gnaf.datum,
+            )
+        return self
 
 
 def load_config(path: Path | str) -> Config:

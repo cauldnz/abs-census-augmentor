@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "census-augment"
-version = "0.1.0"
+version = "1.0.0"
 description = "Augment Australian location datasets with ABS Census data at the SA2 statistical area level."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,10 +16,16 @@ dependencies = [
     "geopandas",
     "shapely",
     "pyproj",
+    "pyogrio",      # geopandas IO backend; we call it directly to read .dbf attrs without geometry (spec §19.4)
     "pandas",
     "requests",
     "openpyxl",
     "platformdirs",
+    # G-NAF support (spec §19, added in v1.0):
+    "duckdb",       # G-NAF indexing + FTS, native Parquet reads
+    "pyarrow",      # Parquet I/O for G-NAF
+    "rapidfuzz",    # Tier 3 fuzzy address matching
+    "boto3",        # Anonymous S3 access for G-NAF distribution
 ]
 
 [project.optional-dependencies]
@@ -56,5 +62,7 @@ module = [
     "shapely.*",
     "pyproj",
     "pyproj.*",
+    "pyogrio",
+    "pyogrio.*",
 ]
 ignore_missing_imports = true

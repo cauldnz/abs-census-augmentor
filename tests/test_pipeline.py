@@ -17,6 +17,7 @@ from census_augment.config import (
     DataSourcesConfig,
     GeocodingConfig,
     InputConfig,
+    NominatimConfig,
     OutputConfig,
 )
 from census_augment.data_sources.datapacks import DataPackMetadata
@@ -55,7 +56,7 @@ def _failed_result(address: str) -> GeocodeResult:
 
 
 def _success_result(
-    address: str, lat: float, lon: float, source: str = "fresh"
+    address: str, lat: float, lon: float, source: str = "nominatim_fresh"
 ) -> GeocodeResult:
     return GeocodeResult(
         address_input=address,
@@ -92,7 +93,12 @@ def _make_config(
         ),
         census=CensusConfig(),
         data_sources=DataSourcesConfig(),
-        geocoding=GeocodingConfig(user_agent="test/0.1 (test@example.com)"),
+        geocoding=GeocodingConfig(
+            providers=["nominatim"],
+            nominatim=NominatimConfig(
+                user_agent="test/0.1 (test@example.com)"
+            ),
+        ),
         variables=variables,
     )
 
@@ -151,7 +157,7 @@ def _empty_pipeline_pieces(tmp_path: Path) -> dict[str, Any]:
         datapacks=ds, catalog=catalog, variables={}, output_prefix="sa2_"
     )
     return {
-        "geocoder": _FakeGeocoder({}),
+        "geocoders": [_FakeGeocoder({})],
         "spatial": spatial,
         "enricher": enricher,
     }
@@ -204,11 +210,11 @@ def test_resolve_uses_input_latlon_when_present(tmp_path: Path) -> None:
     )
     fake_geo = _FakeGeocoder({})
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(
+    lats, lons, sources, _, _ = pipeline._resolve_coordinates(
         df,
         addr_col=config.input.address_column,
         lat_col=config.input.latitude_column,
@@ -230,11 +236,11 @@ def test_resolve_falls_back_to_address_when_latlon_null(tmp_path: Path) -> None:
         {"Fallback Address": _success_result("Fallback Address", -34.0, 150.0)}
     )
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(
+    lats, lons, sources, _, _ = pipeline._resolve_coordinates(
         df,
         addr_col=config.input.address_column,
         lat_col=config.input.latitude_column,
@@ -243,7 +249,7 @@ def test_resolve_falls_back_to_address_when_latlon_null(tmp_path: Path) -> None:
 
     assert lats == [-34.0]
     assert lons == [150.0]
-    assert sources == ["fresh"]
+    assert sources == ["nominatim_fresh"]
     assert fake_geo.calls == ["Fallback Address"]
 
 
@@ -254,11 +260,11 @@ def test_resolve_geocode_failure_propagates_source(tmp_path: Path) -> None:
     )
     fake_geo = _FakeGeocoder({})  # default: returns failed
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(
+    lats, lons, sources, _, _ = pipeline._resolve_coordinates(
         df,
         addr_col=config.input.address_column,
         lat_col=config.input.latitude_column,
@@ -276,21 +282,21 @@ def test_resolve_cache_source_propagates(tmp_path: Path) -> None:
         "address,lat,lon\nCached,,\n", encoding="utf-8"
     )
     fake_geo = _FakeGeocoder(
-        {"Cached": _success_result("Cached", -33.0, 151.0, source="cache")}
+        {"Cached": _success_result("Cached", -33.0, 151.0, source="nominatim_cache")}
     )
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    _, _, sources = pipeline._resolve_coordinates(
+    _, _, sources, _, _ = pipeline._resolve_coordinates(
         df,
         addr_col=config.input.address_column,
         lat_col=config.input.latitude_column,
         lon_col=config.input.longitude_column,
     )
 
-    assert sources == ["cache"]
+    assert sources == ["nominatim_cache"]
 
 
 def test_resolve_no_locator_at_all_yields_failed(tmp_path: Path) -> None:
@@ -301,11 +307,11 @@ def test_resolve_no_locator_at_all_yields_failed(tmp_path: Path) -> None:
     )
     fake_geo = _FakeGeocoder({})
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     df = pd.read_csv(config.input.path)
-    lats, lons, sources = pipeline._resolve_coordinates(
+    lats, lons, sources, _, _ = pipeline._resolve_coordinates(
         df,
         addr_col=config.input.address_column,
         lat_col=config.input.latitude_column,
@@ -399,8 +405,10 @@ def test_end_to_end_smoke(
         "geo_lat",
         "geo_lon",
         "geo_source",
+        "geo_match_score",
         "sa2_code",
         "sa2_name",
+        "sa2_resolution",
         "sa2_median_age",
         "sa2_total_pop",
     ]
@@ -414,7 +422,7 @@ def test_end_to_end_smoke(
     assert out.loc[0, "sa2_total_pop"] == 10200
 
     # Row 1: geocoded successfully into the same Sydney CBD polygon
-    assert out.loc[1, "geo_source"] == "fresh"
+    assert out.loc[1, "geo_source"] == "nominatim_fresh"
     assert out.loc[1, "sa2_code"] == 117011326
     assert out.loc[1, "sa2_median_age"] == 35
 
@@ -616,7 +624,7 @@ def test_augment_explicit_none_override_disables_locator(tmp_path: Path) -> None
     config = _make_config(tmp_path=tmp_path)  # configures all 3 cols
     fake_geo = _FakeGeocoder({})
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     # df has address present too — but we'll override to None so it's ignored
@@ -657,7 +665,7 @@ def test_augment_lenient_absent_lat_lon(tmp_path: Path) -> None:
         {"Sydney CBD": _success_result("Sydney CBD", -33.86, 151.21)}
     )
     pieces = _empty_pipeline_pieces(tmp_path)
-    pieces["geocoder"] = fake_geo
+    pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
 
     df_in = pd.DataFrame({"address": ["Sydney CBD"]})  # no lat/lon
@@ -701,8 +709,8 @@ def test_from_config_uses_null_cache_when_cache_disabled(
         config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
     )
 
-    assert isinstance(pipeline._geocoder, NominatimGeocoder)
-    assert isinstance(pipeline._geocoder._cache, NullCache)
+    assert isinstance(pipeline._geocoders[0], NominatimGeocoder)
+    assert isinstance(pipeline._geocoders[0]._cache, NullCache)
 
 
 @responses.activate
@@ -729,7 +737,7 @@ def test_from_config_uses_real_cache_by_default(
         config, data_dir=tmp_path / "data", cache_dir=tmp_path / "cache"
     )
 
-    cache = pipeline._geocoder._cache
+    cache = pipeline._geocoders[0]._cache
     assert isinstance(cache, GeocodeCache)
     assert not isinstance(cache, NullCache)
 
@@ -846,3 +854,326 @@ def test_run_raises_when_output_path_missing(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="output.path"):
         pipeline.run()
+
+
+# ---- Phase 6b: multi-provider chain --------------------------------------
+
+
+def test_pipeline_rejects_empty_geocoder_list(tmp_path: Path) -> None:
+    """At least one geocoder is required."""
+    config = _make_config(tmp_path=tmp_path)
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = []
+    with pytest.raises(ValueError, match="at least one geocoder"):
+        Pipeline(config=config, **pieces)
+
+
+def test_chain_first_provider_wins(tmp_path: Path) -> None:
+    """When the first geocoder hits, the second isn't consulted."""
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    config.input.path.write_text("address\n1 George St\n", encoding="utf-8")
+    first = _FakeGeocoder(
+        {"1 George St": _success_result("1 George St", -33.86, 151.21, source="gnaf_exact")}
+    )
+    second = _FakeGeocoder({})  # would also match; should never be called
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [first, second]
+    pipeline = Pipeline(config=config, **pieces)
+
+    df = pd.read_csv(config.input.path)
+    _, _, sources, _, _ = pipeline._resolve_coordinates(
+        df, addr_col="address", lat_col=None, lon_col=None
+    )
+    assert sources == ["gnaf_exact"]
+    assert first.calls == ["1 George St"]
+    assert second.calls == []  # short-circuited
+
+
+def test_chain_falls_through_on_miss(tmp_path: Path) -> None:
+    """First geocoder misses → second is consulted."""
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    config.input.path.write_text("address\n1 Pitt St\n", encoding="utf-8")
+    first = _FakeGeocoder({})  # always returns failed
+    second = _FakeGeocoder(
+        {
+            "1 Pitt St": _success_result(
+                "1 Pitt St", -33.87, 151.21, source="nominatim_fresh"
+            )
+        }
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [first, second]
+    pipeline = Pipeline(config=config, **pieces)
+
+    df = pd.read_csv(config.input.path)
+    _, _, sources, _, _ = pipeline._resolve_coordinates(
+        df, addr_col="address", lat_col=None, lon_col=None
+    )
+    assert sources == ["nominatim_fresh"]
+    assert first.calls == ["1 Pitt St"]
+    assert second.calls == ["1 Pitt St"]
+
+
+def test_chain_all_fail_yields_failed(tmp_path: Path) -> None:
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    config.input.path.write_text("address\nbogus\n", encoding="utf-8")
+    a = _FakeGeocoder({})
+    b = _FakeGeocoder({})
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [a, b]
+    pipeline = Pipeline(config=config, **pieces)
+
+    df = pd.read_csv(config.input.path)
+    _, _, sources, _, _ = pipeline._resolve_coordinates(
+        df, addr_col="address", lat_col=None, lon_col=None
+    )
+    assert sources == ["failed"]
+
+
+# ---- Phase 6b: MB fast path (spec §7.3) ----------------------------------
+
+
+def _success_with_mb(
+    address: str, lat: float, lon: float, mb_code: str, source: str = "gnaf_exact"
+) -> GeocodeResult:
+    return GeocodeResult(
+        address_input=address,
+        address_normalized=normalize_address(address),
+        lat=lat,
+        lon=lon,
+        source=source,  # type: ignore[arg-type]
+        provider="fake_gnaf",
+        timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        mb_code=mb_code,
+    )
+
+
+def test_mb_fast_path_resolves_sa2_without_spatial(tmp_path: Path) -> None:
+    """A geocoder that returns mb_code should resolve SA2 via the MB
+    lookup dict, with sa2_resolution='mb_code'."""
+    from census_augment.mb_correspondence import MbInfo
+
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    fake_geo = _FakeGeocoder(
+        {"1 George St": _success_with_mb("1 George St", -33.86, 151.21, "11701132601")}
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [fake_geo]
+    mb_lookup = {
+        "11701132601": MbInfo(
+            mb_code="11701132601", sa2_code="117011326", sa2_name="Sydney CBD"
+        )
+    }
+    pipeline = Pipeline(config=config, mb_lookup=mb_lookup, **pieces)
+
+    df_in = pd.DataFrame({"address": ["1 George St"]})
+    result = pipeline.augment(df_in)
+    assert result.df.loc[0, "sa2_code"] == "117011326"
+    assert result.df.loc[0, "sa2_name"] == "Sydney CBD"
+    assert result.df.loc[0, "sa2_resolution"] == "mb_code"
+    # Summary buckets the row in the mb_code column, not spatial_join
+    assert result.summary.sa2_resolution_counts["mb_code"] == 1
+    assert result.summary.sa2_resolution_counts["spatial_join"] == 0
+
+
+def test_mb_fast_path_falls_back_when_mb_not_in_lookup(tmp_path: Path) -> None:
+    """If a geocoder returns an mb_code we don't have in the lookup
+    (e.g. a brand-new mesh block), we fall through to spatial join."""
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    # Coords inside fake_sa2_gdf polygon 1 (Sydney CBD)
+    fake_geo = _FakeGeocoder(
+        {"1 George St": _success_with_mb("1 George St", -33.86, 151.211, "99999999999")}
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [fake_geo]
+    # Empty MB lookup — every row falls back to spatial
+    pipeline = Pipeline(config=config, mb_lookup={}, **pieces)
+
+    df_in = pd.DataFrame({"address": ["1 George St"]})
+    result = pipeline.augment(df_in)
+    # The empty pieces' boundaries cover (0,0)-(1,1) so this won't match;
+    # the resolution should be 'unmatched' (had coords, no SA2).
+    assert result.df.loc[0, "sa2_resolution"] == "unmatched"
+    assert result.summary.sa2_resolution_counts["unmatched"] == 1
+
+
+def test_no_mb_route_uses_spatial_join(tmp_path: Path) -> None:
+    """A row with input lat/lon (no mb_code) takes the spatial-join path."""
+    config = _make_config(tmp_path=tmp_path, address_column=None)
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, mb_lookup={}, **pieces)
+
+    df_in = pd.DataFrame({"lat": [0.5], "lon": [0.5]})  # inside 0,0-1,1 polygon
+    result = pipeline.augment(df_in)
+    assert result.df.loc[0, "sa2_resolution"] == "spatial_join"
+    assert result.summary.sa2_resolution_counts["spatial_join"] == 1
+    assert result.summary.sa2_resolution_counts["mb_code"] == 0
+
+
+def test_match_score_populated_for_fuzzy_only(tmp_path: Path) -> None:
+    """geo_match_score is populated for gnaf_fuzzy hits and null for others."""
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    config.input.path.write_text(
+        "address\nexact\nfuzzy\n", encoding="utf-8"
+    )
+    fake_geo = _FakeGeocoder({})
+    fake_geo._responses["exact"] = _success_result(
+        "exact", -33.86, 151.21, source="gnaf_exact"
+    )
+    fuzzy = GeocodeResult(
+        address_input="fuzzy",
+        address_normalized=normalize_address("fuzzy"),
+        lat=-33.86,
+        lon=151.21,
+        source="gnaf_fuzzy",
+        provider="fake_gnaf",
+        timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
+        match_score=0.87,
+    )
+    fake_geo._responses["fuzzy"] = fuzzy
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [fake_geo]
+    pipeline = Pipeline(config=config, **pieces)
+
+    df = pd.read_csv(config.input.path)
+    result = pipeline.augment(df)
+    # exact-match row: null match_score
+    assert pd.isna(result.df.loc[0, "geo_match_score"])
+    # fuzzy-match row: score populated
+    assert result.df.loc[1, "geo_match_score"] == 0.87
+
+
+# ---- Phase 6b: per-tier RunSummary counts --------------------------------
+
+
+def test_summary_per_tier_histogram(tmp_path: Path) -> None:
+    """RunSummary.geo_per_tier reports counts for every observed source value."""
+    config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
+    config.input.path.write_text(
+        "address\nexact_addr\nfuzzy_addr\nmiss_addr\n", encoding="utf-8"
+    )
+    fake_geo = _FakeGeocoder(
+        {
+            "exact_addr": _success_result(
+                "exact_addr", -33.86, 151.21, source="gnaf_exact"
+            ),
+            "fuzzy_addr": _success_result(
+                "fuzzy_addr", -33.86, 151.21, source="gnaf_fuzzy"
+            ),
+        }
+    )
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pieces["geocoders"] = [fake_geo]
+    pipeline = Pipeline(config=config, **pieces)
+
+    df = pd.read_csv(config.input.path)
+    result = pipeline.augment(df)
+    counts = result.summary.geo_per_tier
+    assert counts["gnaf_exact"] == 1
+    assert counts["gnaf_fuzzy"] == 1
+    assert counts["failed"] == 1
+    assert counts["nominatim_fresh"] == 0  # bucket initialised even when zero
+
+
+@responses.activate
+def test_from_config_with_gnaf_provider_uses_mb_fast_path(
+    tmp_path: Path,
+    fake_boundary_zip_bytes: bytes,
+    fake_datapack_zip_bytes: bytes,
+    fake_mb_correspondence_zip_bytes: bytes,
+    fake_gnaf_data_dir: Path,
+) -> None:
+    """End-to-end: providers=[gnaf, nominatim] wires GnafGeocoder and the
+    MB→SA2 lookup, and a G-NAF-matched row resolves SA2 via the fast path
+    (sa2_resolution='mb_code')."""
+    # fake_gnaf_data_dir already lives under tmp_path/data with the
+    # pre-populated 202602 release. Use it directly as Pipeline's data_dir.
+    target_data_dir = fake_gnaf_data_dir
+
+    config = _make_config(
+        tmp_path=tmp_path,
+        latitude_column=None,
+        longitude_column=None,
+        variables={"median_age": "G02.Median_age_persons"},
+    )
+    # Rebuild config with both providers and pinned G-NAF release.
+    config = config.model_copy(
+        update={
+            "geocoding": GeocodingConfig(
+                providers=["gnaf", "nominatim"],
+                nominatim=NominatimConfig(
+                    user_agent="test/0.1 (test@example.com)"
+                ),
+                gnaf=config.geocoding.gnaf.model_copy(
+                    update={"release": "202602"}
+                ),
+            )
+        }
+    )
+    config.input.path.write_text(
+        "address\n1 GEORGE STREET SYDNEY NSW 2000\n", encoding="utf-8"
+    )
+
+    boundaries_url = (
+        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
+    )
+    datapacks_url = (
+        f"{config.data_sources.datapacks_base_url}/"
+        "2021_GCP_SA2_for_AUS_short-header.zip"
+    )
+    mb_url = (
+        f"{config.data_sources.boundaries_base_url}/MB_2021_AUST_SHP_GDA2020.zip"
+    )
+    responses.add(
+        responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200
+    )
+    responses.add(
+        responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200
+    )
+    responses.add(
+        responses.GET, mb_url, body=fake_mb_correspondence_zip_bytes, status=200
+    )
+
+    pipeline = Pipeline.from_config(
+        config, data_dir=target_data_dir, cache_dir=tmp_path / "cache"
+    )
+
+    summary = pipeline.run()
+
+    out = pd.read_csv(config.output.path)
+    # G-NAF Tier 1 hit; MB fast path resolved SA2 via the .dbf lookup.
+    assert out.loc[0, "geo_source"] == "gnaf_exact"
+    assert out.loc[0, "sa2_resolution"] == "mb_code"
+    assert out.loc[0, "sa2_code"] == 117011326
+    assert summary.sa2_resolution_counts["mb_code"] == 1
+    assert summary.sa2_resolution_counts["spatial_join"] == 0
+    assert summary.geo_per_tier["gnaf_exact"] == 1
+
+
+def test_summary_format_includes_per_tier_section() -> None:
+    """When per-tier counts are non-empty, the human-readable summary
+    surfaces them under a 'Per-tier breakdown' heading."""
+    summary = RunSummary(
+        total_rows=3,
+        geo_input=0,
+        geo_cache=0,
+        geo_fresh=2,
+        geo_failed=1,
+        sa2_unmatched=0,
+        fully_enriched=2,
+        partially_enriched=0,
+        geo_per_tier={
+            "gnaf_exact": 1,
+            "gnaf_fuzzy": 1,
+            "failed": 1,
+            "nominatim_fresh": 0,  # zero counts shouldn't appear
+        },
+        sa2_resolution_counts={"mb_code": 2, "spatial_join": 0, "unmatched": 0},
+    )
+    text = summary.format_human_readable()
+    assert "Per-tier breakdown" in text
+    assert "gnaf_exact" in text
+    assert "gnaf_fuzzy" in text
+    assert "nominatim_fresh" not in text  # zero suppressed
+    assert "SA2 resolution path" in text
+    assert "mb_code" in text

@@ -102,7 +102,7 @@ def test_successful_lookup_returns_fresh_result(tmp_path: Path) -> None:
     assert result.is_success
     assert result.lat == -33.8688
     assert result.lon == 151.2093
-    assert result.source == "fresh"
+    assert result.source == "nominatim_fresh"
     assert result.provider == "nominatim"
     assert result.address_input == "1 Main St, Sydney"
     assert result.address_normalized == "1 main st, sydney"
@@ -163,11 +163,11 @@ def test_cache_hit_makes_no_http_request(tmp_path: Path) -> None:
     responses.add(responses.GET, SEARCH_URL, json=_ok_payload(), status=200)
     geocoder = _make_geocoder(tmp_path)
     first = geocoder.geocode("1 Main St")
-    assert first.source == "fresh"
+    assert first.source == "nominatim_fresh"
 
     # Second call should hit cache; no further HTTP
     second = geocoder.geocode("1 Main St")
-    assert second.source == "cache"
+    assert second.source == "nominatim_cache"
     assert second.lat == first.lat
     assert second.lon == first.lon
     assert len(responses.calls) == 1  # still just the first call
@@ -181,7 +181,7 @@ def test_normalized_variants_share_cache_entry(tmp_path: Path) -> None:
 
     for variant in ["1 MAIN ST", "  1 main st  ", "1 Main St."]:
         result = geocoder.geocode(variant)
-        assert result.source == "cache"
+        assert result.source == "nominatim_cache"
     assert len(responses.calls) == 1
 
 
@@ -202,8 +202,8 @@ def test_null_cache_disables_short_circuit(tmp_path: Path) -> None:
     first = geocoder.geocode("1 Main St")
     second = geocoder.geocode("1 Main St")
 
-    assert first.source == "fresh"
-    assert second.source == "fresh"  # not "cache" — NullCache always misses
+    assert first.source == "nominatim_fresh"
+    assert second.source == "nominatim_fresh"  # not cache — NullCache always misses
     assert len(responses.calls) == 2
 
 
@@ -296,7 +296,7 @@ def test_429_then_success_retries_and_succeeds(tmp_path: Path) -> None:
     result = geocoder.geocode("anywhere")
 
     assert result.is_success
-    assert result.source == "fresh"
+    assert result.source == "nominatim_fresh"
     assert len(responses.calls) == 2
     # Some sleep happened for back-off (>=1s default)
     assert any(s >= 1.0 for s in sleeps)

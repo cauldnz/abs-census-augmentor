@@ -14,6 +14,8 @@ from typing import Any
 import geopandas as gpd
 import openpyxl
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from shapely.geometry import Polygon
 
@@ -269,3 +271,196 @@ def fake_datapack_zip_bytes(
             _empty_xlsx_bytes(),
         )
     return zip_buf.getvalue()
+
+
+# ---- G-NAF fixtures (synthetic Parquet matching the SA2 polygons above) ----
+#
+# Synthetic G-NAF Core "addresses" with MB_CODE values that resolve (via the
+# fake_mb_correspondence fixture below) to the same 3 SA2 codes used in
+# fake_sa2_gdf. Coordinates fall inside those polygons. Address labels
+# exercise the four matching tiers (Phase 4):
+#
+#   * Tier 1 (exact ADDRESS_LABEL): match the input verbatim.
+#   * Tier 2 (component): differ only in punctuation / abbreviation.
+#   * Tier 3 (fuzzy): typo'd input maps to a known label.
+#   * Miss: addresses guaranteed to fall through every G-NAF tier
+#     (e.g. PO box surrogate) — exercised in Phase 4.
+
+_FAKE_GNAF_RECORDS = [
+    # (PID, ADDRESS_LABEL, LATITUDE, LONGITUDE, MB_CODE, POSTCODE)
+    # POSTCODE is the Tier 2 / Tier 3 pre-filter key (spec §19.3).
+    # SA2 117011326 (Sydney CBD area) — lat/lon inside fake_sa2_gdf polygon 1
+    (
+        "GANSW000000001",
+        "1 GEORGE STREET SYDNEY NSW 2000",
+        -33.864,
+        151.211,
+        "11701132601",
+        "2000",
+    ),
+    (
+        "GANSW000000002",
+        "100 PITT STREET SYDNEY NSW 2000",
+        -33.866,
+        151.211,
+        "11701132602",
+        "2000",
+    ),
+    (
+        "GANSW000000003",
+        "200 KENT STREET SYDNEY NSW 2000",
+        -33.868,
+        151.205,
+        "11701132603",
+        "2000",
+    ),
+    # SA2 117011327 (North Sydney area) — inside polygon 2
+    (
+        "GANSW000000004",
+        "10 BLUES POINT ROAD MCMAHONS POINT NSW 2060",
+        -33.835,
+        151.200,
+        "11701132701",
+        "2060",
+    ),
+    # SA2 117011328 (Eastern Suburbs) — inside polygon 3
+    (
+        "GANSW000000005",
+        "5 BONDI ROAD BONDI NSW 2026",
+        -33.880,
+        151.245,
+        "11701132801",
+        "2026",
+    ),
+]
+
+
+@pytest.fixture
+def fake_gnaf_parquet_bytes() -> bytes:
+    """In-memory G-NAF Core Parquet (5 synthetic Sydney addresses).
+
+    Schema matches the v1.0 spec §4.3 minimum:
+    ``ADDRESS_DETAIL_PID``, ``ADDRESS_LABEL``, ``LATITUDE``, ``LONGITUDE``,
+    ``MB_CODE``.
+    """
+    table = pa.table(
+        {
+            "ADDRESS_DETAIL_PID": [r[0] for r in _FAKE_GNAF_RECORDS],
+            "ADDRESS_LABEL": [r[1] for r in _FAKE_GNAF_RECORDS],
+            "LATITUDE": [r[2] for r in _FAKE_GNAF_RECORDS],
+            "LONGITUDE": [r[3] for r in _FAKE_GNAF_RECORDS],
+            "MB_CODE": [r[4] for r in _FAKE_GNAF_RECORDS],
+            "POSTCODE": [r[5] for r in _FAKE_GNAF_RECORDS],
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def fake_gnaf_data_dir(
+    tmp_path: Path, fake_gnaf_parquet_bytes: bytes
+) -> Path:
+    """Set up a tmp data_dir with one G-NAF release cached.
+
+    Creates ``<tmp>/data/gnaf/202602/addresses.parquet`` and returns
+    the ``data_dir`` to pass into :class:`GnafDataSource`.
+    """
+    data_dir = tmp_path / "data"
+    release_dir = data_dir / "gnaf" / "202602"
+    release_dir.mkdir(parents=True)
+    (release_dir / "addresses.parquet").write_bytes(fake_gnaf_parquet_bytes)
+    return data_dir
+
+
+@pytest.fixture
+def fake_gnaf_data_dir_with_two_releases(
+    tmp_path: Path, fake_gnaf_parquet_bytes: bytes
+) -> Path:
+    """A data_dir with two cached releases — useful for testing
+    ``release='latest'`` resolution."""
+    data_dir = tmp_path / "data"
+    for release in ("202511", "202602"):
+        rel_dir = data_dir / "gnaf" / release
+        rel_dir.mkdir(parents=True)
+        (rel_dir / "addresses.parquet").write_bytes(fake_gnaf_parquet_bytes)
+    return data_dir
+
+
+# ---- MB → SA2 correspondence fixtures (synthetic Mesh Block shapefile) ----
+#
+# The real MB→SA2 mapping (spec §15.1 resolution) is the .dbf attribute
+# table of ``MB_2021_AUST_SHP_GDA2020.zip``. We emit a tiny synthetic
+# shapefile with the same year-suffixed column names ABS uses, so the
+# parser exercises the column-detection logic. MB_CODE values match the
+# G-NAF fixture above so end-to-end (G-NAF mb_code → SA2) tests can
+# round-trip.
+
+_FAKE_MB_RECORDS = [
+    # (MB_CODE21, SA2_CODE21, SA2_NAME21)
+    # SA2 117011326 (Sydney CBD) — three MBs
+    ("11701132601", "117011326", "Sydney CBD"),
+    ("11701132602", "117011326", "Sydney CBD"),
+    ("11701132603", "117011326", "Sydney CBD"),
+    # SA2 117011327 (North Sydney) — one MB
+    ("11701132701", "117011327", "North Sydney"),
+    # SA2 117011328 (Eastern Suburbs) — one MB
+    ("11701132801", "117011328", "Eastern Suburbs"),
+]
+
+
+@pytest.fixture
+def fake_mb_gdf() -> gpd.GeoDataFrame:
+    """Synthetic Mesh Block GeoDataFrame with 5 MBs across 3 SA2s.
+
+    Geometry is a 1-degree square dummy per row (we never read it from
+    the .dbf; it's only present so geopandas can write a valid shapefile).
+    Column names follow the real ABS Mesh Block shapefile convention
+    (``MB_CODE21``, ``SA2_CODE21``, ``SA2_NAME21`` — 10-char DBF limit),
+    so the parser exercises its column-detection logic against the same
+    names production data uses.
+    """
+    return gpd.GeoDataFrame(
+        {
+            "MB_CODE21": [r[0] for r in _FAKE_MB_RECORDS],
+            "SA2_CODE21": [r[1] for r in _FAKE_MB_RECORDS],
+            "SA2_NAME21": [r[2] for r in _FAKE_MB_RECORDS],
+            "geometry": [
+                Polygon(
+                    [
+                        (151.20 + i * 0.01, -33.87),
+                        (151.21 + i * 0.01, -33.87),
+                        (151.21 + i * 0.01, -33.86),
+                        (151.20 + i * 0.01, -33.86),
+                    ]
+                )
+                for i in range(len(_FAKE_MB_RECORDS))
+            ],
+        },
+        crs="EPSG:7844",
+    )
+
+
+@pytest.fixture
+def fake_mb_correspondence_zip_bytes(
+    tmp_path: Path, fake_mb_gdf: gpd.GeoDataFrame
+) -> bytes:
+    """In-memory ZIP containing the synthetic Mesh Block shapefile.
+
+    Filename inside the ZIP follows the ABS convention:
+    ``MB_2021_AUST_GDA2020.shp`` (no ``SHP`` token in the inner name —
+    that token only appears on the outer ZIP filename, mirroring the
+    boundary fixture).
+    """
+    work_dir = tmp_path / "_fixture_mb"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    shp_path = work_dir / "MB_2021_AUST_GDA2020.shp"
+    fake_mb_gdf.to_file(shp_path, driver="ESRI Shapefile")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for sidecar in work_dir.iterdir():
+            zf.write(sidecar, arcname=sidecar.name)
+    return buf.getvalue()
+

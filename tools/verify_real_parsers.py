@@ -19,6 +19,9 @@ from census_augment.config import (
 )
 from census_augment.data_sources.boundaries import BoundariesDataSource
 from census_augment.data_sources.datapacks import DataPacksDataSource
+from census_augment.data_sources.gnaf import GnafDataSource
+from census_augment.geocoding.gnaf import GnafGeocoder
+from census_augment.mb_correspondence import MbCorrespondenceDataSource
 from census_augment.paths import default_data_dir
 
 
@@ -131,6 +134,84 @@ def main() -> int:
         failures.append("datapacks.metadata.spot_check")
     if not _check("Load G01 table", _load_g01):
         failures.append("datapacks.load_table")
+
+    # ------ Mesh Block correspondence ------
+    print("=== Mesh Block correspondence ===")
+    mb_ds = MbCorrespondenceDataSource(
+        year=census.year,
+        datum=census.datum,
+        base_url=DEFAULT_BOUNDARIES_URL,
+        root=data_dir / "mb",
+    )
+    if not mb_ds.is_cached():
+        print(
+            "  (skipped; no MB shapefile cached. "
+            "Run fetch_real_data.py to populate it.)"
+        )
+    else:
+        def _load_mb_correspondence() -> None:
+            lookup = mb_ds.load_correspondence()
+            # Australia has ~360k mesh blocks across all states.
+            assert len(lookup) > 100_000, (
+                f"only {len(lookup)} mesh blocks (expected ~360k)"
+            )
+            # Spot-check: pick a known Sydney CBD mesh block.
+            sample_mb = next(iter(lookup))
+            info = lookup[sample_mb]
+            assert info.sa2_code, f"empty sa2_code for {sample_mb}"
+            assert info.sa2_name, f"empty sa2_name for {sample_mb}"
+            print(
+                f"         -> {len(lookup):,} mesh blocks; "
+                f"sample: {sample_mb} -> {info.sa2_code} ({info.sa2_name})"
+            )
+
+        if not _check("Load MB->SA2 lookup (>= 100k entries)", _load_mb_correspondence):
+            failures.append("mb_correspondence")
+
+    # ------ G-NAF ------
+    print("=== G-NAF ===")
+    gnaf_ds = GnafDataSource(
+        release="latest",
+        datum=census.datum,
+        mode="cache",
+        data_dir=data_dir,
+    )
+    if not gnaf_ds.is_cached():
+        print(
+            "  (skipped; no G-NAF cache populated. "
+            "Drop GeoParquet files into <data_dir>/gnaf/{YYYYMM}/ to enable.)"
+        )
+    else:
+        def _open_gnaf() -> None:
+            con = gnaf_ds.open_connection()
+            row = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+            assert row is not None, "COUNT(*) returned no row?"
+            (count,) = row
+            assert count > 10_000_000, (
+                f"only {count:,} addresses (expected ~15.86M)"
+            )
+            print(
+                f"         -> {count:,} addresses; "
+                f"release {gnaf_ds.resolved_release}"
+            )
+
+        def _gnaf_tier1_hit() -> None:
+            geocoder = GnafGeocoder(data_source=gnaf_ds, fuzzy_threshold=0.85)
+            # A real Sydney address that should round-trip cleanly.
+            result = geocoder.geocode("1 Macquarie Street Sydney NSW 2000")
+            assert result.is_success, (
+                f"Tier 1 missed for a verbatim address; got source={result.source}"
+            )
+            assert result.mb_code, "G-NAF row had no MB_CODE"
+            print(
+                f"         -> {result.source} hit at "
+                f"({result.lat}, {result.lon}); mb_code={result.mb_code}"
+            )
+
+        if not _check("Open DuckDB connection (>= 10M rows)", _open_gnaf):
+            failures.append("gnaf.open_connection")
+        if not _check("Tier 1 exact match", _gnaf_tier1_hit):
+            failures.append("gnaf.tier1")
 
     # ------ Nominatim ------
     print("=== Nominatim ===")

@@ -23,7 +23,9 @@ from .config import (
     Config,
     DataSourcesConfig,
     GeocodingConfig,
+    GnafConfig,
     InputConfig,
+    NominatimConfig,
     OutputConfig,
     load_config,
 )
@@ -42,6 +44,8 @@ __all__ = [
     "CensusConfig",
     "DataSourcesConfig",
     "GeocodingConfig",
+    "GnafConfig",
+    "NominatimConfig",
     "load_config",
     # Catalog (programmatic discover)
     "VariableCatalog",

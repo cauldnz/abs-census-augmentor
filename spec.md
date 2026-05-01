@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v0.9
+> **Status:** Draft v1.0
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 
 ---
@@ -16,18 +16,19 @@ The output is a CSV with the original records plus appended columns drawn from t
 ## 2. Scope
 
 ### v1 — in scope
+
 - Input: CSV containing addresses and/or `(lat, lon)` coordinates (or a mix per row).
-- Geocoding via Nominatim (public OpenStreetMap API).
-- SA2-level statistical area assignment via point-in-polygon.
+- Geocoding via a tiered strategy: G-NAF (Geoscape's Geocoded National Address File) as the primary "gold-standard" source, with Nominatim (public OpenStreetMap API) as a fallback.
+- SA2-level statistical area assignment via either G-NAF's mesh-block code (when available, no spatial join needed) or point-in-polygon spatial join (fallback path).
 - 2021 Census DataPack — General Community Profile (GCP).
 - Output: enriched CSV.
 - Configuration-driven variable selection using human-readable names.
-- Local caching of geocoded addresses.
-- Runtime download of ABS data (boundaries + DataPacks); nothing checked into git.
+- Local caching of geocoded addresses, G-NAF data, and ABS data.
+- Runtime download of ABS data and G-NAF data; nothing checked into git.
 - A `discover` command to help users find census variables by keyword.
 
 ### Future / out of scope for v1
-- G-NAF-based geocoding (pluggable interface should support this later).
+
 - Paid geocoding providers (Google, Mapbox).
 - SA1 and SA3 levels (architecture should not preclude them).
 - Other DataPack profiles (Indigenous, Working Population, Time Series).
@@ -35,39 +36,56 @@ The output is a CSV with the original records plus appended columns drawn from t
 - Computed/derived variables (ratios, percentages combining multiple columns) — these are an explicit downstream concern of the data science feature engineering pipeline that consumes this tool's output, not a responsibility of this tool.
 - Output formats other than CSV (Parquet, GeoPackage).
 - Explicit input deduplication. Duplicate input rows are processed independently; efficiency on duplicate addresses comes from the geocoding cache.
+- Heavy NLP-based address parsers (`address-net`, `libpostal`) are deferred entirely to extensibility hooks (§13). v1 ships a lightweight rules-based normaliser sufficient for well-formed AU addresses, with no opt-in extras — the heavy NLP options carry system-level prerequisites (TensorFlow, libpostal C library) that we want v1 to stay clear of.
 
 ### Usage assumptions
-- **Target scale:** typically a few hundred rows per run. Nominatim's 1 req/sec policy is acceptable at this scale. Larger workloads are deferred to a future pluggable geocoder (see §13).
+
+- **Target scale:** typically a few hundred rows per run. With G-NAF as the primary geocoder, most rows are matched offline (instant); Nominatim's 1 req/sec policy applies only to the residual fallback set. See §19.6 for stronger performance claims when no Nominatim fallback is needed.
 
 ---
 
 ## 3. Architecture Overview
 
-A linear pipeline:
+A linear pipeline with a tiered geocoder:
 
 ```
-Input CSV  →  Geocoding  →  Spatial Join  →  Census Enrichment  →  Output CSV
-              (Nominatim)   (SA2 polygons)   (DataPack lookup)
-                  ↓                                  ↑
-            geocoding cache              metadata-driven config
+Input CSV
+   │
+   ▼
+Geocoding ─── Tier 1: G-NAF exact match  (offline, instant)
+              Tier 2: G-NAF component    (offline, instant)
+              Tier 3: G-NAF FTS / fuzzy  (offline, fast)
+              Tier 4: Nominatim fallback (rate-limited)
+   │
+   ▼
+SA2 Resolution ─── A: Mesh-block lookup (when G-NAF matched)
+                   B: Point-in-polygon  (lat/lon inputs + Nominatim hits)
+   │
+   ▼
+Census Enrichment (DataPack lookup)
+   │
+   ▼
+Output CSV
 ```
 
-Each stage is independently testable. Cached artifacts (geocoded addresses, downloaded boundaries and DataPacks) make re-runs cheap.
+Each stage is independently testable. Cached artifacts (G-NAF database, geocoded addresses, downloaded boundaries and DataPacks) make re-runs cheap.
 
 ---
 
 ## 4. Data Sources
 
 ### 4.1 ASGS SA2 Boundaries
+
 - **Source:** ABS Australian Statistical Geography Standard (ASGS) Edition 3 (covers Jul 2021 – Jun 2026).
 - **Format:** Shapefile (`.shp` + `.dbf` / `.prj` / `.shx` sidecars). Per-level GeoPackage is not offered by ABS at SA-level granularity; only a 505 MB bundled "main structure" GeoPackage exists, which is overkill for v1's SA2-only scope.
 - **CRS:** GDA2020 (EPSG:7844). Reproject input points as needed.
 - **Approximate size:** ~50 MB.
 - **Base URL (configurable):** `https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/digital-boundary-files`
 - **Filename pattern:** `{level}_{year}_AUST_SHP_{datum}.zip`, e.g. `SA2_2021_AUST_SHP_GDA2020.zip`. Note the `SHP` token sits between `AUST_` and the datum on the **ZIP** filename — the files **inside** the ZIP do not have it (they are named `SA2_2021_AUST_GDA2020.shp` etc.).
-- The tool downloads this on first use into `data/boundaries/` and caches it.
+- The tool downloads this on first use into `data/boundaries/` and caches it. Used only for the spatial-join fallback path (§7.3); G-NAF-matched rows skip it.
 
 ### 4.2 Census DataPacks (2021 GCP)
+
 - **Source:** ABS Census 2021 DataPacks page.
 - **Selection (defaults):** General Community Profile (`GCP`), SA2 level, all of Australia (`AUS`), short-header descriptor.
 - **Format:** ZIP archive containing one CSV per table (`G01`, `G02`, …) plus an Excel metadata file mapping cryptic column codes (e.g. `Tot_P_M`) to human-readable descriptions ("Total Persons Male").
@@ -77,13 +95,27 @@ Each stage is independently testable. Cached artifacts (geocoded addresses, down
 - The tool downloads, extracts, and indexes this on first use into `data/census/`.
 
 **Real DataPack layout (verified against 2021 GCP):**
+
 - CSVs live in a long-named subdirectory (e.g. `2021 Census GCP Statistical Area 2 for AUS/`) with names like `2021Census_G01_AUST_SA2.csv`. Discovery is by `rglob` and table-ID extraction, not fixed paths.
 - The `Metadata/` directory contains *three* `.xlsx` files; only `Metadata_*GCP*DataPack*.xlsx` (case-insensitive) is the descriptor we want. The others (`*geog_desc*.xlsx`, `*Sequential_Template*.xlsx`) are unrelated and ignored.
 - The descriptor sheet `Cell Descriptors Information` has ~10 rows of title/blank padding above the actual header row. The parser auto-detects the header row by scanning for a row containing `Short`, `Long`, and `DataPackfile`.
 - Six descriptor-sheet columns: `Sequential`, `Short`, `Long`, `DataPackfile`, `Profiletable`, `Columnheadingdescriptioninprofile`. The last is the user-readable description (e.g. "Median total household income ($/weekly)") and is what we expose via `discover`.
 - The `Table Number, Name, Population` sheet provides table-level names (e.g. `G02 → "Selected Medians and Averages"`). Note: some headers have trailing whitespace and must be stripped.
 
-> **Implementation note:** Both base URLs are exposed as `data_sources.boundaries_base_url` and `data_sources.datapacks_base_url` in config (see §6). Defaults ship with the spec and are validated to be reachable on first run; users can override either if ABS restructures their site.
+### 4.3 G-NAF (Geoscape Geocoded National Address File)
+
+- **Source:** Geoscape Australia, distributed under the Open G-NAF EULA (CC BY 4.0 with a mail-use restriction). Two distribution paths are supported (see §19).
+- **Selection:** **G-NAF Core** — the simplified single-table format introduced in August 2022. Cuts G-NAF's ~50 normalised tables down to two (current + retired), with `ADDRESS_DETAIL_PID`, `ADDRESS_LABEL` (pre-formatted), `LATITUDE`, `LONGITUDE`, `LEGAL_PARCEL_ID`, and crucially **`MB_CODE`** (the ABS Mesh Block code).
+- **Coverage (Feb 2026 release):** ~15.86 million current Australian addresses.
+- **Update cadence:** Quarterly (Feb / May / Aug / Nov).
+- **Datum:** GDA2020 (matches §4.1 boundaries). GDA94 also available; selectable in config.
+- **Distribution:**
+  1. **Primary path — pre-built GeoParquet** from the community-maintained [`gnaf-loader`](https://github.com/minus34/gnaf-loader) project, hosted on AWS S3 at `s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/` with `--no-sign-request` (public). Already cleaned of known data quirks (e.g. orphan addresses re-linked to gazetted localities, locality boundaries flattened). DuckDB queries this directly, with optional download-to-cache.
+  2. **Fallback path — official PSV from data.gov.au.** Used if S3 is unreachable or the user opts out of the third-party-curated copy. Larger and slower to load, but direct ABS/Geoscape provenance.
+
+The full G-NAF (~5 GB unpacked, multiple tables) is **not** used; G-NAF Core is sufficient for this tool's purposes.
+
+> **Implementation note:** Both ABS base URLs (boundaries, DataPacks) and the G-NAF S3 base URL are exposed in config (see §6). Defaults ship with the spec; users can override any if endpoints change.
 
 ---
 
@@ -112,23 +144,27 @@ census-augment/
 │       ├── config.py              # Pydantic schema + YAML loader
 │       ├── paths.py               # User-cache directory resolution (§9)
 │       ├── catalog.py             # Variable resolution + search + suggestions
-│       ├── spatial.py             # Point-in-polygon → SA2
+│       ├── spatial.py             # Point-in-polygon → SA2 (fallback path)
+│       ├── mb_correspondence.py   # MB_CODE → SA2_CODE lookup (fast path)
 │       ├── enrich.py              # SA2 + variables → enriched DataFrame
-│       ├── pipeline.py            # Orchestration; Pipeline.run + Pipeline.augment
+│       ├── pipeline.py            # Orchestration; multi-provider, MB/spatial split
 │       ├── data_sources/
-│       │   ├── _base.py           # Shared download/extract base (boundaries + datapacks)
+│       │   ├── _base.py           # Shared download/extract base
 │       │   ├── boundaries.py      # Shapefile download + load
-│       │   └── datapacks.py       # CSV + Excel-metadata parser
+│       │   ├── datapacks.py       # CSV + Excel-metadata parser
+│       │   └── gnaf.py            # G-NAF Core fetch + DuckDB indexing
 │       └── geocoding/
 │           ├── base.py            # Geocoder Protocol + GeocodeResult dataclass
 │           ├── cache.py           # Hash-keyed JSON cache (sharded)
-│           └── nominatim.py       # Nominatim impl with rate-limit + back-off
+│           ├── normalize.py       # AU-specific address normaliser (rules-based)
+│           ├── gnaf.py            # GnafGeocoder (Tiers 1–3); DuckDB-backed
+│           └── nominatim.py       # NominatimGeocoder (Tier 4); fallback
 ├── tools/                         # Real-data verification (see §17)
 │   ├── README.md
 │   ├── fetch_real_data.py
 │   └── verify_real_parsers.py
 └── tests/                         # Hermetic test suite (no real network)
-    ├── conftest.py                # Shared fixtures (synthetic SA2 + DataPack)
+    ├── conftest.py                # Shared fixtures (synthetic SA2 + DataPack + G-NAF)
     └── test_*.py
 ```
 
@@ -176,16 +212,30 @@ census:
   datum: GDA2020                   # GDA2020 or GDA94 for boundary files
 
 # Base URLs for ABS data downloads. Override only if ABS restructures their site.
-# Full filenames are constructed deterministically from the census.* values above.
 data_sources:
   boundaries_base_url: https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/digital-boundary-files
   datapacks_base_url: https://www.abs.gov.au/census/find-census-data/datapacks/download
+  gnaf_s3_base_url: s3://minus34.com/opendata           # Pre-built GeoParquet (default)
+  gnaf_official_base_url: https://data.gov.au/data/dataset  # PSV fallback
 
 geocoding:
-  provider: nominatim
-  user_agent: "census-augment/0.1 (you@example.com)"   # Required by Nominatim policy
-  rate_limit_per_second: 1
+  # Ordered list of geocoders. The first to return a result for a given row wins.
+  # 'gnaf' is the gold-standard offline matcher; 'nominatim' is the network fallback.
+  providers: [gnaf, nominatim]
   cache_enabled: true
+
+  gnaf:
+    # 'remote': query Parquet over HTTPS without downloading (fast first call, needs net at query time)
+    # 'cache':  download Parquet to user cache on first use, query locally thereafter (default)
+    # 'official': fetch official PSV from data.gov.au, build local DuckDB (heaviest, most provenance-clean)
+    mode: cache
+    release: latest                # 'latest' or specific YYYYMM (e.g. 202602). Pinned in resolved config.
+    datum: GDA2020                 # GDA2020 or GDA94. Should match census.datum.
+    fuzzy_threshold: 0.85          # Tier 3 score floor; below this, fall through to Nominatim.
+
+  nominatim:
+    user_agent: "census-augment/0.1 (you@example.com)"   # Required by Nominatim policy
+    rate_limit_per_second: 1
 
 # Variables to attach to each record.
 # Format: <friendly_name>: <table_id>.<column_name>
@@ -199,9 +249,15 @@ variables:
   born_overseas_count: G01.Birthplace_Elsewhere_P
 ```
 
-**Input column validation:** at least one of `input.address_column` OR both `input.latitude_column` and `input.longitude_column` must be set; the lat/lon pair must be set together (setting one without the other is a config error).
+**Input column validation:** at least one of `input.address_column` OR both `input.latitude_column` and `input.longitude_column` must be set; the lat/lon pair must be set together.
 
-**Optional path fields:** `input.path` and `output.path` are required only by the CLI's `run` command (which reads/writes CSVs). Library users calling `Pipeline.augment(df)` (see §18) can omit them — the column-name fields under `input` still describe the DataFrame regardless of where it came from.
+**Optional path fields:** `input.path` and `output.path` are required only by the CLI's `run` command. Library users calling `Pipeline.augment(df)` (see §18) can omit them.
+
+**Geocoder selection:** the `geocoding.providers` list controls which geocoders are tried, in order. Setting `providers: [nominatim]` reproduces the v0.9 behaviour for users who don't want G-NAF. Setting `providers: [gnaf]` is offline-only (no network at query time).
+
+**Datum consistency:** if `geocoding.gnaf.datum` differs from `census.datum`, a config-load **WARNING** is emitted. They should normally match — silent CRS mismatch is the kind of thing that turns up as a weird bug six months later.
+
+**Release pinning:** `geocoding.gnaf.release: latest` resolves to the most recent release at fetch time and is then *recorded* in the resolved-config snapshot, so subsequent runs use the same release. This keeps a re-run reproducible without forcing users to specify versions explicitly.
 
 ### 6.2 Variable resolution
 
@@ -215,6 +271,7 @@ variables:
   The metadata column matched against the reference depends on this setting; the human-readable description shown by `discover` always comes from the `Columnheadingdescriptioninprofile` field of the descriptor sheet.
 - Friendly names must match `^[a-z][a-z0-9_]*$`. The output column is `{prefix}{friendly_name}`.
 - A `discover` CLI command lets users search metadata to find the right `table.column` references:
+
   ```
   census-augment discover --search "income"
   census-augment discover --table G02
@@ -225,15 +282,29 @@ variables:
 ## 7. Pipeline Stages
 
 ### 7.1 Input parsing
+
 - Load the CSV with pandas.
 - Validate that referenced columns exist.
 - Determine per-row source: `coordinates` (if both lat/lon present and non-null) takes precedence over `address`.
 
-### 7.2 Geocoding
-- For each address-only row, check the geocoding cache first.
-- Cache key: SHA-256 hash of the normalized address (lowercase, whitespace-collapsed, trailing punctuation stripped).
+### 7.2 Geocoding (tiered)
+
+For each row needing geocoding, providers in `geocoding.providers` are tried in order. Each provider returns a `GeocodeResult` carrying lat/lon, optional `mb_code`, and a `match_quality` tag.
+
+**G-NAF geocoder** (offline, see §19 for full design):
+
+- **Tier 1 — exact `ADDRESS_LABEL`.** Normalise the input address (uppercase, collapse whitespace, expand AU street/state abbreviations via a small lookup table, strip punctuation), then exact-match against G-NAF's pre-formatted `ADDRESS_LABEL`. Fast and high-precision.
+- **Tier 2 — component match.** Parse the input into `number + street + locality + postcode + state` using the rules-based normaliser in `geocoding/normalize.py`, then exact-match each component (with postcode/state pre-filtering for performance).
+- **Tier 3 — FTS / fuzzy match.** Within a candidate set pre-filtered by postcode (or locality if no postcode), score candidates by similarity using DuckDB's FTS extension. Best score above `fuzzy_threshold` wins; otherwise fall through.
+- **Match quality** is recorded as `gnaf_exact`, `gnaf_component`, or `gnaf_fuzzy` (with the score for fuzzy hits surfaced in the run summary).
+
+**Nominatim geocoder** (network fallback, unchanged from v0.9):
+
+- For each address-only row that fell through G-NAF (or for runs configured with `providers: [nominatim]`), check the geocoding cache first.
+- Cache key: SHA-256 hash of the normalised address.
 - Cache layout: `cache/geocoding/{hash[:2]}/{hash}.json` (sharded so directories stay small).
 - Cache value:
+
   ```json
   {
     "address_input": "...",
@@ -246,25 +317,40 @@ variables:
   }
   ```
 - Respect Nominatim's rate limit (1 req/sec) and User-Agent policy.
-- If Nominatim returns HTTP 429 (Too Many Requests) or 503 (rate-limited), back off exponentially up to 3 retries before treating the lookup as failed.
+- If Nominatim returns HTTP 429 or 503, back off exponentially up to 3 retries before treating the lookup as failed.
+- Match quality is recorded as `nominatim_cache` (cache hit) or `nominatim_fresh` (network call).
 - Failed lookups: record retains `null` coordinates and is flagged in the run summary; pipeline continues. Failures are not cached — they are retried on the next run.
-- **Duplicate addresses are not explicitly deduplicated** before geocoding. Within a single run, a duplicate address will hit the cache as soon as the first occurrence is processed and written. This keeps row-level processing predictable and avoids reordering output, at the cost of one extra cache lookup per duplicate (negligible).
 
-### 7.3 Spatial join
-- Load SA2 GeoPackage into a GeoDataFrame.
-- Build a spatial index (`sindex`).
-- Input lat/lon are interpreted as EPSG:4326 (WGS84) — the de facto standard for consumer GPS, web mapping, and Nominatim output. Points are reprojected to the boundary CRS (GDA2020 / EPSG:7844) before the join.
-- Point-in-polygon for each record. Records outside any SA2 get `null` `sa2_code` and `sa2_name`.
+**G-NAF cache.** G-NAF queries hit a local DuckDB-indexed database (or remote Parquet, depending on `mode`). G-NAF lookups are deterministic and effectively free, so they are not memoised separately — caching the underlying database is sufficient.
+
+**Duplicate addresses are not explicitly deduplicated** before geocoding. Within a single run, a duplicate address hits the cache (or a deterministic G-NAF lookup) on its second occurrence. Output ordering is preserved.
+
+### 7.3 SA2 resolution
+
+Two paths, picked per-row based on what the geocoder produced:
+
+- **Fast path — mesh-block lookup.** If the geocoder returned an `mb_code`, resolve `mb_code → sa2_code` via the ABS-published correspondence (§19.4), bypassing the spatial join entirely. This applies to all G-NAF-matched rows. Faster, deterministic, and arguably more correct than centroid-in-polygon (G-NAF's mesh-block assignment uses parcel-level intelligence, not just point geometry).
+- **Fallback path — point-in-polygon.** For lat/lon inputs and Nominatim-resolved rows (which return coordinates but no `mb_code`):
+  - Load SA2 GeoPackage into a GeoDataFrame.
+  - Build a spatial index (`sindex`).
+  - Input lat/lon are interpreted as EPSG:4326 (WGS84). Points are reprojected to the boundary CRS (GDA2020 / EPSG:7844) before the join.
+  - Point-in-polygon for each record. Records outside any SA2 get `null` `sa2_code` and `sa2_name`.
+
+The boundary file (§4.1) is downloaded only when the fallback path is needed for at least one row in the run.
+
+**Implementation note (batched, not per-row).** Rows are partitioned into the two groups (those with `mb_code`, those without) and each group is processed in one batch — `mb_code` lookups via dict indexing, lat/lon lookups via a single `sjoin` call. Results are then re-merged into the original input order. Read the per-row "decision" above as logical, not as a row-by-row Python loop.
 
 ### 7.4 Census enrichment
+
 - Determine the unique set of `(table)` references across all configured variables.
 - Load only those tables from the DataPack.
 - Build a single lookup keyed by SA2 code.
 - Join enriched columns onto the dataset.
 
 ### 7.5 Output
+
 - Write CSV with all original columns preserved, in original order, followed by appended columns (see §8).
-- Print a run summary: total rows, geocoded (cache hit / fresh), unmatched SA2, fully enriched, errors.
+- Print a run summary: total rows; per-tier hit counts (`gnaf_exact`, `gnaf_component`, `gnaf_fuzzy`, `nominatim_cache`, `nominatim_fresh`, `failed`); SA2 resolution path counts (`mb_code`, `spatial_join`, `unmatched`); fully enriched / partially enriched counts.
 
 ---
 
@@ -276,17 +362,23 @@ Original input columns are preserved unchanged. The following columns are append
 |---|---|
 | `geo_lat` | Resolved latitude (from input or geocoding). |
 | `geo_lon` | Resolved longitude. |
-| `geo_source` | One of `input`, `cache`, `fresh`, `failed`. |
+| `geo_source` | One of `input`, `gnaf_exact`, `gnaf_component`, `gnaf_fuzzy`, `nominatim_cache`, `nominatim_fresh`, `failed`. |
+| `geo_match_score` | For `gnaf_fuzzy`: similarity score (0.0–1.0). Null otherwise. |
 | `sa2_code` | 9-digit SA2 code from ASGS. `null` if no match. |
 | `sa2_name` | SA2 human-readable name. |
+| `sa2_resolution` | One of `mb_code`, `spatial_join`, `unmatched`. Indicates which §7.3 path resolved this row. |
 | `sa2_<friendly_name>` | One column per configured variable, with the configured prefix. |
 
 Example header for a config with two variables:
 
 ```
-address, lat, lon, geo_lat, geo_lon, geo_source, sa2_code, sa2_name,
+address, lat, lon,
+geo_lat, geo_lon, geo_source, geo_match_score,
+sa2_code, sa2_name, sa2_resolution,
 sa2_median_age, sa2_median_household_income_weekly
 ```
+
+> **v1.0 is a breaking change from v0.9.** The `geo_source` enum has changed (was `input | cache | fresh | failed`; now provider-prefixed: `input | gnaf_* | nominatim_* | failed`). Two new columns (`geo_match_score`, `sa2_resolution`) appear in the output. Anyone reading v0.9 output CSVs alongside v1.0 needs to handle both schemas. See `CHANGELOG.md` for the full upgrade note.
 
 ---
 
@@ -294,11 +386,13 @@ sa2_median_age, sa2_median_household_income_weekly
 
 | Cache | Default location | Format | Invalidation |
 |---|---|---|---|
-| Geocoded addresses | `<cache_dir>/geocoding/` | JSON per address (sharded) | Manual delete; key is hash of normalized address |
+| Geocoded addresses (Nominatim) | `<cache_dir>/geocoding/` | JSON per address (sharded) | Manual delete; key is hash of normalised address |
 | ASGS boundaries | `<data_dir>/boundaries/` | Shapefile (extracted) | Re-download with `census-augment fetch --boundaries --refresh` |
 | Census DataPacks | `<data_dir>/census/` | Extracted CSVs + metadata | Re-download with `census-augment fetch --census --refresh` |
+| G-NAF Core (cache mode) | `<data_dir>/gnaf/{release}/` | GeoParquet files | Re-fetch with `census-augment fetch --gnaf --refresh` or by changing `geocoding.gnaf.release` |
+| MB → SA2 correspondence | `<data_dir>/mb/MB_{year}_AUST_SHP_{datum}/` | Shapefile (.dbf only is read) | Re-fetched alongside boundaries; lookup dict built lazily from .dbf attribute table (see §15.1 / §19.4) |
 
-**Defaults** are platform-appropriate user cache directories (via the `platformdirs` package), so downloads are shared across runs and across notebooks regardless of CWD — a single ~50 MB boundary download serves every project on the machine.
+**Defaults** are platform-appropriate user cache directories (via the `platformdirs` package), so downloads are shared across runs and across notebooks regardless of CWD.
 
 | OS | `<data_dir>` | `<cache_dir>` |
 |---|---|---|
@@ -308,20 +402,26 @@ sa2_median_age, sa2_median_household_income_weekly
 
 **Override precedence:** explicit kwarg / CLI flag > `CENSUS_AUGMENT_DATA_DIR` / `CENSUS_AUGMENT_CACHE_DIR` env vars > platform default.
 
+**G-NAF size on disk:** ~500 MB for G-NAF Core Parquet (cache mode); ~5 GB if user opts into the official PSV path with full G-NAF.
+
 ---
 
 ## 10. Error Handling
 
 | Condition | Behavior |
 |---|---|
-| Address fails to geocode | Warn; row keeps null coords; flagged in summary; pipeline continues. Failures are not cached. |
+| Address fails to match G-NAF at any tier | Fall through to next provider in `geocoding.providers`. Not an error. |
+| Address fails to geocode in all providers | Warn; row keeps null coords; flagged in summary; pipeline continues. Failures are not cached. |
 | Nominatim rate-limit response (HTTP 429 / 503) | Back off exponentially up to 3 retries; if still rate-limited, treat as failed lookup. |
 | Coordinates fall outside Australia / no SA2 match | Warn; row keeps null SA2; flagged in summary; pipeline continues. |
-| Some configured variables missing or suppressed for a matched SA2 | Leave those cells as null; flag the row in the summary as "partially enriched"; pipeline continues. |
+| G-NAF row matched but `mb_code` is null | Fall through to spatial-join path using G-NAF's `lat`/`lon`. Logged at INFO. |
+| G-NAF release `latest` cannot be resolved (S3 listing fails) | Cascading fallback: (1) most recent cached release if any; (2) suggest `mode: official` in the abort message; (3) abort. |
+| G-NAF S3 unreachable in `remote` mode | Abort with cascading suggestions: (a) switch to `mode: cache` (still requires S3 for first download), (b) switch to `mode: official` (no S3 dependency at all), (c) point at a previously-fetched cached release if one exists. |
+| Some configured variables missing or suppressed for a matched SA2 | Leave those cells as null; flag the row as "partially enriched"; pipeline continues. |
 | Variable reference not found in metadata | **Fail fast at config load.** Suggest near-matches. |
 | Required input column missing | **Fail fast at startup.** |
 | Network failure during data download | Retry with exponential backoff (3 attempts); then abort with clear message. |
-| Required `user_agent` missing for Nominatim | **Fail fast at config load.** |
+| Required `user_agent` missing for Nominatim | **Fail fast at config load** — but only if `nominatim` is in `geocoding.providers`. |
 
 A summary report is printed at the end of every run.
 
@@ -339,42 +439,50 @@ census-augment run --config config.yaml
 census-augment discover --config config.yaml --search "income"
 census-augment discover --config config.yaml --table G02
 
-# Pre-fetch ABS data
+# Pre-fetch data
 census-augment fetch --config config.yaml --boundaries
 census-augment fetch --config config.yaml --census
-census-augment fetch --config config.yaml --boundaries --census --refresh
+census-augment fetch --config config.yaml --gnaf
+census-augment fetch --config config.yaml --boundaries --census --gnaf --refresh
 
 # Validate config (structurally; --full also validates against DataPack)
 census-augment validate --config config.yaml
 census-augment validate --config config.yaml --full
 
+# Inspect resolved G-NAF release (useful for reproducibility)
+census-augment gnaf-info --config config.yaml
+
 # Global flag (any command)
 census-augment --verbose <command> ...        # DEBUG-level logging
 
-# Cache override (any command that uses ABS data)
+# Cache override (any command that uses ABS or G-NAF data)
 census-augment <command> --data-dir /path/to/data --cache-dir /path/to/cache
 ```
 
-Cache flag precedence is documented in §9.
+The `gnaf-info` command reports: the resolved G-NAF release (e.g. `202602`), the release date, the `mode` in effect (`remote` / `cache` / `official`), the local on-disk cache path (when applicable), and the on-disk size. Useful for capacity planning and reproducibility.
 
 ---
 
 ## 12. Dependencies
 
-Suggested (Claude Code may adjust):
-
-- `geopandas` — spatial join
+- `geopandas` — spatial join (fallback path)
 - `shapely` — geometry primitives
 - `pyproj` — CRS transforms
 - `pandas` — tabular data
 - `pydantic` — config validation
 - `pyyaml` — config parsing
-- `typer` (or `click`) — CLI
+- `typer` — CLI
 - `requests` — HTTP downloads
 - `openpyxl` — read DataPack metadata Excel file
 - `platformdirs` — user-cache directory resolution (§9)
+- **`duckdb`** — G-NAF indexing and FTS (new in v1.0)
+- **`pyarrow`** — Parquet I/O for G-NAF (new in v1.0)
+- **`rapidfuzz`** — fast Levenshtein/token-set scoring for Tier 3 fuzzy match (new in v1.0)
+- **`boto3`** (or `s3fs`) — anonymous S3 access for `remote`/`cache` modes (new in v1.0)
 
 Test deps: `pytest`, `pytest-mock`, `responses` (HTTP mocking).
+
+v1 deliberately ships with no NLP-parser optional extras. `address-net` (TensorFlow-based) and `libpostal` (C library + ~2 GB data files) both have system-level prerequisites that we want v1 to stay clear of. They remain pluggable via the `Geocoder` and `Normalizer` interfaces (§13) for any user who wants to layer them in without forking.
 
 ---
 
@@ -382,9 +490,10 @@ Test deps: `pytest`, `pytest-mock`, `responses` (HTTP mocking).
 
 The architecture should make these additions cheap, without restructuring:
 
-- **New geocoder** (G-NAF, Google, Mapbox): implement the `Geocoder` interface in `geocoding/base.py`; register by name in config.
-- **New SA level** (SA1, SA3): boundary loader and spatial join already key on SA code. Add boundary file resolution and update level enum.
-- **New census year** (2026): data source loader takes year as a parameter; variable catalog is year-scoped.
+- **New geocoder.** Implement the `Geocoder` Protocol in `geocoding/base.py`; register in the providers list in config. v1 ships `gnaf` and `nominatim`; future candidates include G-NAF Live (Geoscape API), Google, Mapbox.
+- **Better address parser.** Plug in `address-net` or `libpostal` behind the same `geocoding/normalize.py` interface. v1 ships a rules-based normaliser; the pluggable design lets users opt in to NLP-based parsing without forking, and crucially without v1 itself depending on those heavy components.
+- **New SA level** (SA1, SA3): boundary loader and spatial join already key on SA code. Add boundary file resolution and update level enum. The MB-correspondence path naturally extends — G-NAF's `MB_CODE` resolves to all higher SA levels.
+- **New census year** (2026): data source loader takes year as a parameter; variable catalog is year-scoped. G-NAF's `MB_CODE` is tied to ABS Mesh Block vintages — when 2026 mesh blocks land, the correspondence file gets a new vintage.
 - **New DataPack profile** (Indigenous, Working Population): DataPack downloader takes profile as a parameter; metadata index is profile-scoped.
 - **New input/output formats**: parser and writer modules behind a small format interface.
 
@@ -392,29 +501,44 @@ The architecture should make these additions cheap, without restructuring:
 
 ## 14. Resolved Decisions
 
-These were open questions in v0.1, resolved in v0.2:
+These were open questions in earlier drafts, resolved through discussion:
 
-1. **Address deduplication.** *Decision: Do not explicitly deduplicate.* Rely on the geocoding cache for efficiency. Avoids reordering output rows and keeps row-level processing predictable. Documented in §7.2.
-2. **DataPack download URL stability.** *Decision: Ship with known-good base URLs and construct filenames deterministically.* Two configurable base URLs in `data_sources` (one for boundaries, one for DataPacks). Filenames built from `census.*` config values. Documented in §4 and §6.1.
-3. **Computed variables.** *Decision: Out of scope for this tool entirely.* This tool's job is raw census variable attachment; ratios, percentages, and other derived metrics are the responsibility of the downstream feature engineering pipeline. Documented in §2.
-4. **Partial enrichment policy.** *Decision: Leave missing/suppressed cells as null and flag the row as "partially enriched" in the run summary.* No row is dropped due to missing census values. Documented in §10.
-5. **Boundary version pinning.** *Decision: Add explicit `census.asgs_edition` and `census.datum` config fields with sensible defaults (3 / GDA2020).* Forces deliberate handling when a new ASGS edition is released. Documented in §6.1.
-6. **Target scale and geocoder choice.** *Decision: design for a few hundred rows per run.* At this scale Nominatim's 1 req/sec policy is acceptable (~5 minutes of geocoding for 300 fresh addresses; cache hits on re-runs are instant). Larger scales are deferred to the pluggable geocoder hook in §13 (G-NAF, paid providers). Documented in §2.
-7. **Input lat/lon CRS.** *Decision: assume input lat/lon are EPSG:4326 (WGS84).* Most consumer/web/GPS-derived coordinates are WGS84; reprojection to the boundary CRS (GDA2020 / EPSG:7844) is handled internally. v1 does not expose this as configurable — convert externally if your data is GDA94 or a projected CRS. Documented in §7.3.
-8. **Nominatim rate-limit handling.** *Decision: back off exponentially on HTTP 429/503 with up to 3 retries; if still rate-limited, treat as a failed lookup. Failed lookups are not cached.* Aligns with the overall "geocoding failure → null coords, flag, continue" policy (§10) and avoids stalling the pipeline on persistent throttling, while letting next-run retries pick up after a transient outage. Documented in §7.2 and §10.
-9. **Verified ABS endpoints.** *Decision: corrected boundary filename to the `_SHP_` variant; format is Shapefile.* Real ABS does not offer per-level GeoPackage at SA granularity; only Shapefile per-level (or a 505 MB bundled main-structure GeoPackage). Per-level Shapefile is the right v1 fit at ~50 MB. Documented in §4.1.
-10. **Real DataPack metadata structure.** *Decision: parse the real `Cell Descriptors Information` sheet with title-row tolerance and descriptor-mode-aware code lookup; use `Columnheadingdescriptioninprofile` (not `Long`) for human descriptions; pick metadata file by name pattern.* Confirmed against 2021 GCP. Documented in §4.2 and §6.2.
-11. **Verified Nominatim response shape.** *Decision: parser as designed works against the live service.* `lat` / `lon` are strings (parsed to float), response is a JSON array of objects, descriptive User-Agent format `name/version (email)` is accepted. Documented in §7.2.
-12. **Real-data verification strategy.** *Decision: hermetic pytest suite stays mocked; opt-in `tools/` scripts download real ABS files and exercise the parsers against them.* Avoids CI flake from ABS uptime while making real-world validation a discoverable, deliberate developer activity. Documented in §17.
-13. **Library / programmatic use as a first-class entry point.** *Decision: same `Pipeline` class, two entry points — `Pipeline.run()` for file-in/file-out (CLI) and `Pipeline.augment(df)` for DataFrame-in/DataFrame-out (notebooks/library).* Returns an `AugmentResult` with the DataFrame, run summary, and typed boolean Series for per-row classification. Documented in §18.
-14. **User-level cache by default.** *Decision: default cache locations use `platformdirs`-managed user cache directories rather than CWD-relative `./data` / `./cache`.* Friendlier for library use (one shared cache across notebooks), avoids the CLI surprise of "where did this 50 MB go". Override via env vars or explicit flags/kwargs. Documented in §9 and §18.
-15. **Optional input/output paths in Config.** *Decision: `input.path` and `output.path` are optional fields on the Config schema.* CLI's `run` command validates they're set; library use doesn't need them. The input column-name fields (`address_column`, `latitude_column`, `longitude_column`) remain — they describe the DataFrame regardless of provenance. Documented in §6.1 and §18.
-16. **Lenient column resolution in `augment`.** *Decision: configured locator columns that are absent from the input DataFrame are dropped with a WARNING and surfaced in `RunSummary.unused_configured_columns`, rather than failing the run.* Per-call kwargs use a sentinel to distinguish "not provided" from "explicitly `None`", so callers can disable a locator for one call without rebuilding Config. Makes a Config written for a CLI CSV re-usable in notebooks with differently-shaped DataFrames. Documented in §18.2.
-17. **Wire `geocoding.cache_enabled` through.** *Decision: implement as a `NullCache` (no-op `get`/`set`) injected by `Pipeline.from_config` when the flag is `False`; the `NominatimGeocoder` stays unchanged.* Honours the existing config field that was previously a no-op. Useful for forcing fresh geocodes when debugging stale cache entries, or in tests that need to verify HTTP behaviour without cache short-circuit. Documented in §6.1 (existing field) and §7.2.
+1. **Address deduplication.** *Decision: Do not explicitly deduplicate.* Rely on the geocoding cache for efficiency.
+2. **DataPack download URL stability.** *Decision: Ship with known-good base URLs and construct filenames deterministically.*
+3. **Computed variables.** *Decision: Out of scope for this tool entirely.*
+4. **Partial enrichment policy.** *Decision: Leave missing/suppressed cells as null and flag the row as "partially enriched" in the run summary.*
+5. **Boundary version pinning.** *Decision: Add explicit `census.asgs_edition` and `census.datum` config fields with sensible defaults (3 / GDA2020).*
+6. **Target scale and geocoder choice (v0.9).** *Decision: design for a few hundred rows per run, Nominatim acceptable.* **Updated in v1.0:** with G-NAF as primary, even few-thousand-row runs are practical (see §19.6).
+7. **Input lat/lon CRS.** *Decision: assume input lat/lon are EPSG:4326 (WGS84).*
+8. **Nominatim rate-limit handling.** *Decision: back off exponentially on HTTP 429/503 with up to 3 retries; failed lookups are not cached.*
+9. **Verified ABS endpoints.** *Decision: corrected boundary filename to the `_SHP_` variant; format is Shapefile.*
+10. **Real DataPack metadata structure.** *Decision: parse the real `Cell Descriptors Information` sheet with title-row tolerance and descriptor-mode-aware code lookup.*
+11. **Verified Nominatim response shape.** *Decision: parser as designed works against the live service.*
+12. **Real-data verification strategy.** *Decision: hermetic pytest suite stays mocked; opt-in `tools/` scripts download real ABS files.*
+13. **Library / programmatic use as a first-class entry point.** *Decision: same `Pipeline` class, two entry points.*
+14. **User-level cache by default.** *Decision: default cache locations use `platformdirs`-managed user cache directories.*
+15. **Optional input/output paths in Config.** *Decision: optional fields, CLI's `run` command validates they're set.*
+16. **Lenient column resolution in `augment`.** *Decision: configured locator columns absent from the input DataFrame are dropped with a WARNING.*
+17. **Wire `geocoding.cache_enabled` through.** *Decision: implement as a `NullCache` injected when the flag is `False`.*
+
+**v1.0 additions (G-NAF support):**
+
+18. **G-NAF as first-class geocoder.** *Decision: G-NAF is shipped as the primary geocoder, not a future-pluggable option.* Nominatim becomes the fallback. Users wanting v0.9 behaviour set `providers: [nominatim]`. Documented in §7.2 and §19.
+19. **G-NAF Core, not full G-NAF.** *Decision: use Geoscape's simplified single-table G-NAF Core distribution.* Same coverage (~15.86 M addresses), much simpler schema, includes the critical `MB_CODE` field. Full G-NAF (~50 normalised tables, ~5 GB) is overkill for our use case. Documented in §4.3.
+20. **DuckDB as G-NAF backend.** *Decision: use DuckDB rather than SQLite.* Columnar engine, native Parquet reads, FTS extension, embedded (no server). Better fit than SQLite for a 15 M-row analytical lookup workload. Documented in §12 and §19.
+21. **Two G-NAF distribution paths, default to pre-built Parquet.** *Decision: default `mode: cache` uses [`gnaf-loader`](https://github.com/minus34/gnaf-loader) pre-built GeoParquet on AWS S3 (anonymous access).* `mode: remote` queries S3 directly without local download; `mode: official` falls back to ABS PSV for users wanting direct provenance. Documented in §4.3, §6.1, §19.
+22. **Mesh-block fast path for SA2 resolution.** *Decision: when G-NAF returns an `mb_code`, resolve SA2 via the ABS-published MB→SA1→SA2 correspondence file rather than running a spatial join.* Faster, deterministic, and arguably more correct (parcel-level intelligence vs centroid-in-polygon). Spatial join remains for lat/lon inputs and Nominatim hits. Documented in §7.3 and §19.4.
+23. **Tiered matching with explicit confidence.** *Decision: four match tiers (`gnaf_exact`, `gnaf_component`, `gnaf_fuzzy`, `nominatim_*`) with the tier surfaced in the output `geo_source` column.* Lets downstream feature engineering filter on geocoding quality. `gnaf_fuzzy` rows additionally carry a similarity score in `geo_match_score`. Documented in §7.2 and §8.
+24. **Lightweight rules-based normaliser for v1; no NLP-parser extras.** *Decision: ship a rules-based AU normaliser (`geocoding/normalize.py`) handling AS4590 street-type abbreviations, state abbreviations, postcode extraction, punctuation/whitespace.* `address-net` and `libpostal` are *not* shipped as optional extras — both have system-level prerequisites (TensorFlow, libpostal C library) that conflict with the goal of a clean `pip install -e .`. They remain pluggable via the `Normalizer` interface (§13) for users who want to take on those dependencies themselves. Documented in §12 and §13.
+25. **G-NAF release pinning.** *Decision: `geocoding.gnaf.release: latest` resolves to the most recent quarterly release at first fetch and is then recorded in a resolved-config snapshot.* Re-runs are reproducible without forcing users to specify `202602` etc explicitly; an explicit value pins the release indefinitely. Documented in §6.1.
+26. **License attribution.** *Decision: G-NAF attribution lives in the README, not in output files. Also printed by `tools/fetch_real_data.py` when it downloads G-NAF.* The Open G-NAF EULA requires attribution but doesn't mandate per-output stamping. README mention plus the on-download attribution print is sufficient for a data-science tool whose output is intermediate. Documented in §19.5.
+27. **`GeocodeResult` extended with `mb_code` / `match_quality` / `match_score`.** *Decision: extend the existing dataclass rather than introduce a parallel type.* Backwards-compatible for the field set (new fields default to `None`). Documented in §19.1.
+28. **v1.0 is a breaking change from v0.9 in the output schema.** *Decision: bump major version; document in CHANGELOG; provide upgrade note.* `geo_source` enum has changed values; two new columns (`geo_match_score`, `sa2_resolution`) appear. The internal Python API (`Pipeline.augment(df)` etc.) stays mostly compatible; the breakage is in the *file format*. Documented in §8 and `CHANGELOG.md`.
+29. **MB → SA2 correspondence is the .dbf attribute table of the Mesh Block shapefile.** *Decision: build the MB→SA2 lookup dict by reading the `.dbf` of `MB_{year}_AUST_SHP_{datum}.zip` (downloaded from the same Digital Boundary Files endpoint as SA2 boundaries), not from the ABS *correspondences* page.* HEAD-checks confirmed that the correspondences page hosts only **change files** between ASGS editions (e.g. 2016→2021 transitions) — it has no within-edition hierarchy lookups. The Mesh Block shapefile carries `MB_CODE21`, `SA2_CODE21`, `SA2_NAME21` columns, which is exactly what we need; reading attributes only (via `pyogrio.read_dataframe(read_geometry=False)`) keeps the cost cheap. Resolves former §15.1. Documented in §4.2, §15.1, §17, §19.4.
 
 ## 15. Open Questions
 
-1. **2026 Census format drift.** When ABS publishes the 2026 Census DataPacks (expected mid-2027), the metadata Excel format may change — recall §14 #10 documents what we currently expect (Cell Descriptors Information sheet, title-row prefix, six specific column names). The parser is deliberately localised to `_parse_metadata_xlsx` in `src/census_augment/data_sources/datapacks.py` so a 2026 adjustment is one localised change rather than a refactor. **First integration check:** run `tools/verify_real_parsers.py` against the 2026 DataPack as soon as it's available; the descriptor-mode-aware code lookup (§14 #10) generalises to any new descriptor mode if ABS introduces one. The boundary filename pattern in §4.1 will likely also need a year bump (`SA2_2026_AUST_SHP_GDA2020.zip`?) — confirm against the live ABS URL before adjusting.
+1. *(Resolved — see §14 decision #29.)* **MB → SA2 correspondence file source.** Originally listed as open: ABS's correspondence page only hosts *change files* (e.g. 2016→2021 transitions), not within-edition hierarchy lookups. The MB→SA2 mapping lives in the **`.dbf` attribute table of the Mesh Block shapefile** (`MB_2021_AUST_SHP_GDA2020.zip`), downloaded from the same Digital Boundary Files endpoint as SA2 boundaries (§4.1). Implementation reads only the .dbf columns (no geometry) for cheap O(1) lookup table construction.
 
 ---
 
@@ -423,28 +547,35 @@ These were open questions in v0.1, resolved in v0.2:
 The implementation is considered done when:
 
 - A user can run `census-augment run --config config.example.yaml` end-to-end on a sample input of mixed addresses + coordinates and produce an enriched CSV.
-- All boundary and DataPack files are downloaded automatically on first run.
-- Geocoding cache is populated and reused on the second run (verifiable by faster runtime).
+- All boundary, DataPack, and G-NAF files are downloaded automatically on first run.
+- G-NAF Tier 1 (exact `ADDRESS_LABEL`) match works on a sample of 50+ well-formed AU addresses with ≥95% hit rate, exercised by `tools/verify_real_parsers.py`.
+- G-NAF Tiers 2–3 are exercised by deliberately malformed test fixtures.
+- Nominatim fallback is exercised by addresses guaranteed to miss G-NAF (e.g. PO boxes, business names without addresses).
+- Mesh-block fast path is exercised: a G-NAF-matched row produces a `sa2_code` without the spatial-join code path being entered.
+- Geocoding cache is populated and reused on the second run for Nominatim hits.
 - `census-augment discover --search "income"` returns matching census variables.
-- Config errors (bad variable references, missing input columns) produce clear, actionable error messages.
-- Test suite covers: config validation, cache hit/miss, spatial join correctness on a small fixture, end-to-end pipeline on a tiny dataset.
-- **Library use:** `pipeline.augment(df)` produces an enriched DataFrame and an `AugmentResult` (with run summary + per-row classification masks) without touching the filesystem beyond the shared user cache for ABS data.
+- `census-augment gnaf-info` reports the resolved G-NAF release, mode, on-disk path, and size.
+- Config errors (bad variable references, missing input columns, missing user agent when Nominatim is enabled) produce clear, actionable error messages.
+- Test suite covers: config validation, cache hit/miss, G-NAF tier behaviour on synthetic fixtures, MB→SA2 lookup correctness, spatial join correctness, end-to-end pipeline on a tiny dataset.
+- **Library use:** `pipeline.augment(df)` produces an enriched DataFrame and an `AugmentResult` (with run summary including per-tier counts) without touching the filesystem beyond the shared user cache.
 
 ---
 
 ## 17. Real-data verification
 
-The pytest suite is **hermetic**: every external interaction (Nominatim, ABS downloads) is mocked. To validate that parsers work against the **real** ABS endpoints and files, two scripts live under `tools/`:
+The pytest suite is **hermetic**: every external interaction (Nominatim, ABS downloads, G-NAF S3) is mocked. To validate that parsers and matchers work against the **real** endpoints and files:
 
-- **`tools/fetch_real_data.py`** downloads the real boundary ZIP and DataPack ZIP into the configured cache (defaults to the platform user cache per §9; override via `CENSUS_AUGMENT_DATA_DIR`) and optionally captures one Nominatim sample response. It uses the actual `BoundariesDataSource` and `DataPacksDataSource` classes, so running it exercises the production code path.
-- **`tools/verify_real_parsers.py`** runs the parsers against the locally-cached real files and prints a tick/cross summary. Non-zero exit on failure. Suitable as a manual smoke test or a low-frequency scheduled job.
+- **`tools/fetch_real_data.py`** downloads real boundary ZIP, DataPack ZIP, and G-NAF Parquet into the configured cache. Uses the actual production data-source classes. Prints the G-NAF attribution string (per §19.5) when it downloads G-NAF.
+- **`tools/verify_real_parsers.py`** runs the parsers and the G-NAF matcher (against a small known-good address set — see §16's 95% hit rate criterion) against locally-cached real files and prints a tick/cross summary.
 
-When to run:
-1. After initial dev environment setup.
-2. After ABS publishes new versions of the boundaries / DataPacks (e.g. when 2026 Census lands).
-3. Whenever code touches the parsers.
+**Test fixtures (synthetic).** The hermetic test suite uses synthetic fixtures generated in `tests/conftest.py`, never binary blobs in the repo:
 
-This dual approach keeps the test suite fast and offline-safe while making real-world validation a deliberate, audited path to ground-truth.
+- **SA2 boundaries:** ~3 polygons covering known Sydney/Melbourne areas in EPSG:7844.
+- **DataPack:** a small in-memory ZIP with G01.csv + G02.csv + a synthesised metadata Excel matching the real ABS layout (title rows, `Cell Descriptors Information` sheet, etc.).
+- **G-NAF:** a small in-memory Parquet (~50 addresses) covering the test SA2 polygons and exercising all four match tiers (exact, component, fuzzy, miss). Includes representative `MB_CODE` values that resolve via the MB→SA2 correspondence fixture.
+- **MB→SA2 correspondence:** a synthetic Mesh Block shapefile (5 mesh blocks across 3 SA2s) with ABS's `MB_CODE21` / `SA2_CODE21` / `SA2_NAME21` column names. The fixture's mesh-block codes line up with the G-NAF fixture's `MB_CODE` values so end-to-end MB-fast-path tests round-trip.
+
+When to run the real-data scripts: after dev environment setup; after ABS or Geoscape publishes new versions; whenever code touches the parsers or matcher.
 
 ---
 
@@ -457,12 +588,10 @@ The same `Pipeline` class supports two entry points:
 
 ### 18.1 Constructing a pipeline
 
-Three ways, in increasing power:
-
 ```python
 from census_augment import Pipeline, Config, load_config
 
-# A. Notebook-friendly factory (most common for library use)
+# A. Notebook-friendly factory
 pipeline = Pipeline.create(
     variables={"median_age": "G02.Median_age_persons"},
     user_agent="my-app/1.0 (me@example.com)",
@@ -470,11 +599,11 @@ pipeline = Pipeline.create(
     longitude_column="lon",
 )
 
-# B. Programmatic Config (full control without YAML)
+# B. Programmatic Config
 cfg = Config(input=..., output=..., census=..., ...)
 pipeline = Pipeline.from_config(cfg)
 
-# C. From YAML (same as the CLI uses)
+# C. From YAML
 pipeline = Pipeline.from_config(load_config("config.yaml"))
 ```
 
@@ -483,56 +612,104 @@ pipeline = Pipeline.from_config(load_config("config.yaml"))
 ```python
 result = pipeline.augment(
     df,
-    # Optional per-call overrides; default to whatever's in config.input.
     address_column="street",
     latitude_column="latitude",
     longitude_column="longitude",
 )
 ```
 
-**Override semantics for the column kwargs.** Each kwarg has three behaviours:
+Override semantics: omit (use config), pass `"col"` (use that column), pass `None` explicitly (disable locator). Lenient column resolution: missing configured columns are dropped with a WARNING and surfaced on `result.summary.unused_configured_columns`.
 
-- *Omit* the kwarg → use `config.input.*` (or `None` if not set in config).
-- Pass `"some_column"` → use that column for this call.
-- Pass `None` explicitly → disable this locator for this call (useful when the configured column is intentionally absent from the DataFrame).
-
-Internally a sentinel distinguishes "not provided" from "explicitly `None`" — passing `None` truly turns a configured locator off rather than silently falling back to config.
-
-**Lenient column resolution.** A configured (or override-set) column that's *absent from the DataFrame* is dropped with a `WARNING` log and listed on `result.summary.unused_configured_columns` — the call proceeds with the remaining locators. If no usable locator remains after lenient resolution, `augment` raises `ValueError` with a message that lists the resolved locators alongside the DataFrame's actual columns. This means a Config written for a CLI CSV can be re-used in notebooks against DataFrames with different schemas without rebuilding it.
-
-Returns an `AugmentResult` with:
-
-| Field | Type | Meaning |
-|---|---|---|
-| `df` | `pandas.DataFrame` | The input DataFrame plus geo + sa2 + enrichment columns. |
-| `summary` | `RunSummary` | Aggregated counts (same shape as CLI). Includes `unused_configured_columns: list[str]` listing locators that were configured but absent from the input. |
-| `added_columns` | `list[str]` | Names of columns added by this augment (handy for `df[result.added_columns]`). |
-| `is_fully_enriched` | `pandas.Series[bool]` | True for rows where all enrichment cells are non-null. |
-| `geocoding_failed` | `pandas.Series[bool]` | True for rows whose geocoding ended in `failed`. |
-| `sa2_unmatched` | `pandas.Series[bool]` | True for rows that had coords but didn't match any SA2 polygon. |
-
-All three boolean Series share `df`'s index, so `result.df[~result.geocoding_failed]` is the natural filter.
+`AugmentResult` fields: `df`, `summary` (now including per-tier geocoding counts), `added_columns`, `is_fully_enriched`, `geocoding_failed`, `sa2_unmatched`.
 
 ### 18.3 Cache directories
 
-See §9. By default `Pipeline.augment(df)` and `Pipeline.run()` share a single user-level cache, so the ~50 MB boundary download (and ~40 MB DataPack download) happens once across all notebooks and runs. Override via env vars or kwargs.
+Per §9. Default user-level cache is shared across notebooks and runs.
 
 ### 18.4 Public API
 
-Top-level imports from `census_augment`:
-
 ```python
 from census_augment import (
-    # Main entry point
     Pipeline, AugmentResult, RunSummary,
-    # Config schema
     Config, InputConfig, OutputConfig, CensusConfig,
-    DataSourcesConfig, GeocodingConfig, load_config,
-    # Catalog (for programmatic discover)
+    DataSourcesConfig, GeocodingConfig, GnafConfig, NominatimConfig,
+    load_config,
     VariableCatalog, CatalogError,
-    # For implementing a custom geocoder per §13
-    Geocoder,
+    Geocoder, GeocodeResult,
 )
 ```
 
-Internal subsystems (`BoundariesDataSource`, `DataPacksDataSource`, `SpatialIndex`, `CensusEnricher`, `NominatimGeocoder`, `GeocodeCache`) remain importable from their submodules but are not promoted to the top level — they may evolve internally between versions.
+---
+
+## 19. G-NAF Geocoder
+
+This section details the G-NAF geocoder added in v1.0. It implements the `Geocoder` Protocol so it composes naturally with future geocoders.
+
+### 19.1 Why G-NAF
+
+- **Authoritative.** Geoscape's geocoded address index for Australia, derived from ~50 million contributed addresses across state/territory land records and Commonwealth agencies, distilled into ~15.86 million current addresses. This is the same dataset used by AusPost, emergency services, and most government systems.
+- **Offline.** Once downloaded, all geocoding is local — no rate limits, no network jitter.
+- **Includes mesh-block code.** G-NAF Core's `MB_CODE` is the ABS Mesh Block identifier, which deterministically rolls up to SA1, SA2, SA3, SA4 via the ASGS hierarchy. This bypasses the spatial join entirely for matched addresses.
+- **Free.** Distributed under the Open G-NAF EULA (CC BY 4.0 with mail-use restriction; not relevant to geocoding).
+
+> **`GeocodeResult` extension.** To carry the new information, the existing `GeocodeResult` dataclass gains three optional fields:
+>
+> - `mb_code: str | None` — 11-digit ABS Mesh Block identifier when the geocoder can produce one (G-NAF can; Nominatim cannot).
+> - `match_quality: str | None` — one of `gnaf_exact`, `gnaf_component`, `gnaf_fuzzy`, `nominatim_cache`, `nominatim_fresh`, or `failed`. Becomes the `geo_source` value in the output (§8).
+> - `match_score: float | None` — Tier 3 fuzzy similarity score in `[0.0, 1.0]`. Null for non-fuzzy matches.
+>
+> All three default to `None`, so existing code paths that don't populate them stay backwards-compatible internally. Output consumers see the new schema documented in §8.
+
+### 19.2 Distribution and modes
+
+Configured via `geocoding.gnaf.mode`:
+
+| Mode | What happens | When to use |
+|---|---|---|
+| `remote` | DuckDB queries pre-built GeoParquet on `s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/` directly (anonymous, no download). | Quick prototyping; CI; environments with reliable network and limited disk. |
+| `cache` *(default)* | First run downloads GeoParquet from the same S3 path into `<data_dir>/gnaf/{release}/`; subsequent runs query locally. | Most users — one-time ~500 MB download, then offline forever. |
+| `official` | Downloads official PSV from data.gov.au, parses, and builds a local DuckDB. Larger and slower (PSV → load → index ~10 minutes), but provenance is direct from ABS/Geoscape with no third-party intermediary. | Users with provenance / supply-chain concerns about third-party pre-built data. |
+
+The `release` field accepts `latest` (resolves at fetch time and is then recorded) or an explicit `YYYYMM` like `202602`.
+
+### 19.3 Matching tiers
+
+Implemented as four cascading attempts, each only run if previous tiers missed:
+
+1. **Tier 1 — exact `ADDRESS_LABEL`.** The input is normalised (uppercase, whitespace collapsed, AS4590 street-type abbreviations expanded, state abbreviations expanded, punctuation stripped) and equality-matched against G-NAF's `ADDRESS_LABEL`. ~70–80% hit rate on well-formed inputs.
+2. **Tier 2 — component match.** The input is parsed into `(unit_number, street_number, street_name, street_type, locality, state, postcode)` using a rules-based AU normaliser. Each component is exact-matched, with postcode (or postcode + state) used as a pre-filter to keep candidate sets small. Catches cases where input field order or punctuation differs from `ADDRESS_LABEL`.
+3. **Tier 3 — FTS / fuzzy.** Within a candidate set pre-filtered by postcode (or locality if no postcode), score candidates against the input using DuckDB's FTS extension and `rapidfuzz` token-set ratio. Best-scoring candidate above `fuzzy_threshold` wins. Catches typos, alternative spellings, abbreviation mismatches the rules-based normaliser missed. Records the score in `geo_match_score`.
+4. **Tier 4 — Nominatim.** Out-of-band: handled by the next provider in `geocoding.providers`, not by the G-NAF geocoder itself.
+
+The output `geo_source` column distinguishes which tier matched (`gnaf_exact`, `gnaf_component`, `gnaf_fuzzy`).
+
+### 19.4 Mesh-block to SA2 correspondence
+
+When G-NAF returns a match, the result carries an `mb_code` (11-digit ABS Mesh Block). We resolve SA2 from this via:
+
+- **Source:** the **`.dbf` attribute table of the ABS Mesh Block shapefile** (`MB_{year}_AUST_SHP_{datum}.zip`), downloaded from the same Digital Boundary Files endpoint as SA2 boundaries (§4.1). The ABS *correspondences* page only hosts cross-edition *change files* (e.g. 2016→2021 transitions); within-edition hierarchy lookups live in the boundary shapefiles themselves. Resolved §15.1.
+- **Loading:** read only the .dbf attribute columns via `pyogrio.read_dataframe(read_geometry=False)` — no geometry parsing, fast on a ~100 MB shapefile.
+- **Lookup:** loaded into a dict keyed by `mb_code` (mapping to `(sa2_code, sa2_name)`); lookup is O(1).
+- **Column resolution:** ABS's column names are year-suffixed (`MB_CODE21`, `SA2_CODE21`, `SA2_NAME21` for the shapefile; `MB_CODE_2021`, `SA2_MAINCODE_2021`, `SA2_NAME_2021` for the CSV variant). The parser detects both forms and picks the highest-year-suffixed column when multiple coexist (spec §13 extensibility hook).
+- **Vintage:** Mesh blocks have a vintage (e.g. `MB_2021`). G-NAF Core's `MB_CODE` is currently the 2021 vintage. When ABS publishes 2026 mesh blocks alongside the 2026 Census, this becomes a config-driven choice.
+
+If `mb_code` is null on a G-NAF row (rare but possible for very recent additions), the pipeline falls back to the spatial-join path using G-NAF's lat/lon. This is logged at INFO and counted in the run summary.
+
+### 19.5 License and attribution
+
+G-NAF is licensed under the Open G-NAF End User Licence Agreement, based on CC BY 4.0 with one important restriction: the data must not be used for the generation or compilation of addresses for the sending of mail unless the user has verified each address against a secondary source. This tool does not generate mail-targeted addresses; it geocodes existing inputs and attaches statistical aggregates. The restriction does not constrain our use case.
+
+The README must include the attribution string:
+
+> Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.
+
+`tools/fetch_real_data.py` also prints this string when it downloads G-NAF, so first-time users see it explicitly. Per-output-file attribution is not required for our use case.
+
+### 19.6 Performance expectations
+
+For the target scale (a few hundred rows per run):
+
+- First run with `mode: cache`: ~30–60 seconds for the one-time S3 download (depends on network).
+- Subsequent runs: G-NAF lookup latency is essentially zero. Total run time dominated by Nominatim fallback for un-matched addresses (1 req/sec).
+- On a few-thousand-row run with mostly well-formed inputs: expect Tier 1 to handle ~80%+ instantly, with the residual 20% spread across Tiers 2–4. Total runtime is bounded by the Tier 4 fall-through size × 1 second.
+- **For runs configured `providers: [gnaf]` (no Nominatim fallback) — or where every row matches G-NAF — there is no per-row network cost at all.** Tens of thousands of rows complete in seconds. This is the v1.0 unlock over v0.9, where Nominatim's 1 req/sec policy capped practical throughput at a few hundred rows.
