@@ -60,7 +60,7 @@ result.df[result.is_fully_enriched]   # filter to clean rows
 
 > **First-run download:** the first call to `pipeline.augment(df)` (or `Pipeline.run()`, or any `census-augment` CLI command that touches the data) downloads ~50 MB of SA2 boundaries and ~40 MB of Census DataPacks into the user cache. Subsequent calls — including across notebooks, scripts, and CLI runs on the same machine — reuse the cache and are instant. See "Where data is cached" below.
 >
-> **G-NAF is also auto-downloaded** but is much larger (~10 GB). When `geocoding.providers` includes `gnaf` and the local cache is empty, the first run anonymously fetches the latest gnaf-loader snapshot from `s3://minus34.com/opendata/`. Run `census-augment fetch --gnaf` to do this explicitly up front. To skip G-NAF entirely set `providers: [nominatim]`.
+> **G-NAF has two modes — pick one that fits.** With `geocoding.gnaf.mode: cache` (default), the first run downloads ~10 GB of parquet locally for offline querying. With `geocoding.gnaf.mode: remote`, DuckDB streams directly from S3 via httpfs — no download, but each query is HTTPS-bound. See "[G-NAF setup](#g-naf-setup)" for the trade-offs. To skip G-NAF entirely set `providers: [nominatim]`.
 
 ### As a CLI
 
@@ -127,9 +127,33 @@ v1.0 implementation per [`spec.md` §16](spec.md). G-NAF integration, mesh-block
 
 ## G-NAF setup
 
-When `geocoding.providers` includes `gnaf`, the first call that needs G-NAF anonymously downloads the [gnaf-loader](https://github.com/minus34/gnaf-loader) snapshot from `s3://minus34.com/opendata/` into your user cache. About **10 GB across ~50 parquet files** — it's a one-off, but a large one. After that, everything is local and offline.
+`census-augment` ships two G-NAF distribution modes (set via `geocoding.gnaf.mode`); pick whichever matches your environment.
 
-### One-shot prefetch (recommended)
+| Mode | What happens | Best for |
+| --- | --- | --- |
+| `cache` *(default)* | First call downloads the [gnaf-loader](https://github.com/minus34/gnaf-loader) snapshot (~10 GB across ~50 parquet files) from `s3://minus34.com/opendata/` to your user cache. Subsequent calls run entirely offline. | Production runs, large workloads, anywhere bandwidth is cheaper than disk-divided-by-time. |
+| `remote` | DuckDB queries the same parquet files directly over HTTPS via its `httpfs` extension. **No download.** Each query pulls only the parquet metadata + the columns/rows it needs. | Prototyping, CI, disk-constrained environments, occasional one-off queries. |
+
+To use remote mode:
+
+```yaml
+geocoding:
+  providers: [gnaf, nominatim]
+  gnaf:
+    mode: remote
+    release: latest        # or "202602"
+```
+
+That's it. No prefetch step. Open a notebook, run `Pipeline.augment(df)`, DuckDB does the rest.
+
+**Trade-offs of remote mode:**
+
+- *Speed.* Each query is HTTPS-bound — single Tier-1 lookup is ~100ms (parquet metadata fetch + ranged read). Tier 2/3 (postcode-bucket scans) read more bytes. Fine for thousands of addresses; not ideal for hundreds of thousands.
+- *Bandwidth.* Cumulative reads can get pricey. A workload that does ~10k geocodes might pull ~500 MB across queries; if you'll re-run that workload many times, cache mode pays off.
+- *Offline use.* Doesn't work without network. If your laptop's spotty, prefer cache.
+- *No local schema validation up-front* — the `httpfs` extension itself has to be installable (DuckDB downloads it once on first use, then caches in `~/.duckdb/extensions/`).
+
+### One-shot prefetch (recommended for cache mode)
 
 Pull the data ahead of your first run so it isn't on the critical path of your first augmentation:
 

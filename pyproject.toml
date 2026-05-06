@@ -34,7 +34,7 @@ dev = [
     "pytest",
     "pytest-mock",
     "responses",
-    "moto[s3]>=5",   # Hermetic S3 mocking for the G-NAF anonymous-fetch tests.
+    "moto[s3,server]>=5",   # Hermetic S3 mocking. The 'server' extra adds Flask so ThreadedMotoServer works (used by the remote-mode httpfs tests).
     "ruff",
     "mypy",
     "types-requests",

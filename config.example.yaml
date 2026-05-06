@@ -35,9 +35,14 @@ geocoding:
   cache_enabled: true
 
   gnaf:
-    # 'cache' (default): download Parquet to user cache on first use, query locally thereafter.
-    # 'remote':  query Parquet over HTTPS without downloading (deferred in v1.0).
-    # 'official': fetch official PSV from data.gov.au, build local DuckDB (deferred in v1.0).
+    # 'cache'   (default): download Parquet to user cache on first use,
+    #                      query locally thereafter (~10 GB on disk).
+    # 'remote':            stream Parquet directly over HTTPS via DuckDB's
+    #                      httpfs extension — no download, but each query
+    #                      pulls bytes from S3. Best for prototyping,
+    #                      CI, and disk-constrained environments.
+    # 'official':          fetch official PSV from data.gov.au, build
+    #                      local DuckDB (deferred — not yet implemented).
     mode: cache
     release: latest                # 'latest' or specific YYYYMM (e.g. 202602). Pinned in resolved config.
     datum: GDA2020                 # GDA2020 or GDA94. Should match census.datum.

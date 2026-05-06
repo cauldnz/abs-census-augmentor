@@ -312,6 +312,7 @@ class Pipeline:
                     mode=config.geocoding.gnaf.mode,
                     data_dir=data_dir,
                     s3_base_url=config.data_sources.gnaf_s3_base_url,
+                    s3_https_endpoint=config.data_sources.gnaf_s3_https_endpoint,
                     official_base_url=config.data_sources.gnaf_official_base_url,
                 )
                 geocoders.append(

@@ -211,8 +211,18 @@ def fetch(
             mode=cfg.geocoding.gnaf.mode,
             data_dir=effective_data_dir,
             s3_base_url=cfg.data_sources.gnaf_s3_base_url,
+            s3_https_endpoint=cfg.data_sources.gnaf_s3_https_endpoint,
             official_base_url=cfg.data_sources.gnaf_official_base_url,
         )
+        if cfg.geocoding.gnaf.mode == "remote":
+            typer.echo(
+                "G-NAF mode='remote' streams parquet directly from S3 — "
+                "nothing to fetch. Run `census-augment gnaf-info` to confirm "
+                "remote-mode connectivity, or switch to mode='cache' for a "
+                "local download.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
         try:
             gnaf_path = gnaf_ds.fetch(refresh=refresh)
         except (RuntimeError, NotImplementedError) as e:
@@ -256,11 +266,34 @@ def gnaf_info(
         mode=cfg.geocoding.gnaf.mode,
         data_dir=effective_data_dir,
         s3_base_url=cfg.data_sources.gnaf_s3_base_url,
+        s3_https_endpoint=cfg.data_sources.gnaf_s3_https_endpoint,
         official_base_url=cfg.data_sources.gnaf_official_base_url,
     )
     typer.echo(f"Mode:           {gnaf_ds.mode}")
     typer.echo(f"Datum:          {gnaf_ds.datum}")
     typer.echo(f"Configured release: {cfg.geocoding.gnaf.release}")
+
+    if gnaf_ds.mode == "remote":
+        # Remote mode: don't talk about local cache; report what we'd
+        # actually query when an open_connection() lands.
+        try:
+            resolved = gnaf_ds.resolved_release
+        except RuntimeError as e:
+            typer.echo(f"Resolved release: <unresolved> ({e})", err=True)
+            raise typer.Exit(code=1) from e
+        typer.echo(f"Resolved release: {resolved} (S3)")
+        endpoint = (
+            cfg.data_sources.gnaf_s3_https_endpoint
+            or "https://{bucket}.s3.amazonaws.com"
+        )
+        typer.echo(f"Endpoint:       {endpoint}")
+        typer.echo(f"S3 base:        {cfg.data_sources.gnaf_s3_base_url}")
+        typer.echo(
+            "(Streaming mode — no local cache. Each query pulls bytes via "
+            "DuckDB's httpfs extension.)"
+        )
+        return
+
     if gnaf_ds.is_cached():
         try:
             resolved = gnaf_ds.resolved_release

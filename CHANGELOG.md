@@ -9,6 +9,50 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-06
+
+### Added
+
+- **`mode: remote` is now implemented.** DuckDB streams G-NAF parquet
+  directly from S3 via the `httpfs` extension — no local cache,
+  queries pull only the bytes they need. Set `geocoding.gnaf.mode:
+  remote` in your config; everything else (release resolution, the
+  geocoder tiers, the MB fast path) works unchanged.
+- New config knob: `data_sources.gnaf_s3_https_endpoint` lets you
+  point at an S3-compatible mirror (MinIO, Cloudflare R2, ...) or a
+  test server. When set, path-style addressing is forced; default
+  `None` uses AWS's virtual-hosted style.
+- `census-augment gnaf-info` now reports remote-mode connectivity
+  details (resolved release, configured endpoint, S3 base) instead
+  of the cache-mode "not cached" message that's meaningless when
+  streaming.
+
+### Changed
+
+- `census-augment fetch --gnaf` now exits with a friendly error in
+  remote mode (rather than silently no-opping or downloading) — the
+  fetch is meaningless when you're not caching.
+- `_resolve_release` ignores local cache when `mode='remote'`. The
+  whole point of remote mode is to skip the download; preferring a
+  stale local cache for resolution would be confusing.
+
+### Internals
+
+- `GnafDataSource` now dispatches `open_connection` on mode:
+  `_open_cache_connection` (existing path) and `_open_remote_connection`
+  (new). `_validate_schema` is split into `_validate_schema_local`
+  (parquet footer via pyarrow) and `_validate_schema_remote`
+  (DuckDB `DESCRIBE gnaf` over httpfs).
+- New `_build_object_url` helper — virtual-hosted by default,
+  path-style when an endpoint override is configured.
+- New `_list_parquet_objects_on_s3` shared between cache (download)
+  and remote (URL construction) paths.
+- `moto[s3,server]>=5` (was `moto[s3]>=5`): the `server` extra
+  pulls in Flask, needed for `ThreadedMotoServer` which the new
+  end-to-end remote-mode tests use to exercise DuckDB's httpfs
+  against a real HTTP server (moto's `@mock_aws` only intercepts
+  boto3, not httpfs's libcurl).
+
 ## [1.1.0] - 2026-05-06
 
 ### Added
