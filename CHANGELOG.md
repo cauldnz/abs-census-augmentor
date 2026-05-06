@@ -9,6 +9,41 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-06
+
+### Added
+
+- **Anonymous S3 fetch for G-NAF.** `census-augment fetch --gnaf` now
+  actually downloads the `gnaf-loader` GeoParquet snapshot from
+  `s3://minus34.com/opendata/` (configurable). v1.0 left this as a
+  manual `aws s3 sync --no-sign-request ...` step; the same operation
+  is now built in. ~10 GB across ~50 parquet files; idempotent on
+  re-run (skips files already on disk, byte-for-byte).
+- **`release: "latest"` resolves against S3** when there's no local
+  cache. Pick up newly-published quarterly releases without editing
+  the config.
+- **`fetch --gnaf --refresh` re-checks S3 for newer releases** even
+  when a cache exists, so a quarterly drop is one command away.
+- **`tools/fetch_real_data.py` now downloads G-NAF too** (with a
+  `--skip-gnaf` flag for iterating on the smaller paths).
+
+### Changed
+
+- README's "G-NAF setup" section trimmed: no more "you must populate
+  the cache yourself" instructions. The auto-download path is the
+  primary flow; bring-your-own-parquet is documented as a fallback.
+- `census-augment fetch --gnaf` help text reflects the new behaviour.
+
+### Internals
+
+- `moto[s3]>=5` added to dev dependencies; new tests (`test_gnaf.py`)
+  cover S3 listing, atomic-write, partial-resume, and the
+  cache-then-fallback-to-S3 logic. Hermetic — no real network.
+- New `_parse_s3_url`, `_list_releases_on_s3`,
+  `_download_release_from_s3` and `_download_one` helpers on
+  `GnafDataSource`. `_make_s3_client` uses anonymous `botocore`
+  config (`signature_version=UNSIGNED`).
+
 ## [1.0.0] - 2026-05-02
 
 v1.0 implements `spec.md` v1.0 — G-NAF as the primary geocoder with the

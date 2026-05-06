@@ -33,6 +33,7 @@ dev = [
     "pytest",
     "pytest-mock",
     "responses",
+    "moto[s3]>=5",   # Hermetic S3 mocking for the G-NAF anonymous-fetch tests.
     "ruff",
     "mypy",
     "types-requests",
@@ -64,5 +65,11 @@ module = [
     "pyproj.*",
     "pyogrio",
     "pyogrio.*",
+    "boto3",
+    "boto3.*",
+    "botocore",
+    "botocore.*",
+    "tqdm",
+    "tqdm.*",
 ]
 ignore_missing_imports = true

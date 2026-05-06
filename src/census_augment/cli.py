@@ -164,10 +164,11 @@ def fetch(
         False,
         "--gnaf",
         help=(
-            "Pre-fetch the G-NAF Core dataset. Currently only validates "
-            "the cache layout (S3 download lands in a follow-up — see "
-            "spec §19.2). Also fetches the Mesh Block correspondence "
-            "shapefile alongside (used for the §7.3 fast path)."
+            "Pre-fetch the G-NAF Core dataset (anonymous S3 download "
+            "from the configured gnaf-loader bucket; ~10 GB across ~50 "
+            "parquet files). Also fetches the Mesh Block correspondence "
+            "shapefile alongside (used for the §7.3 fast path). "
+            "Idempotent — re-running is cheap when the cache is warm."
         ),
     ),
     refresh: bool = typer.Option(
