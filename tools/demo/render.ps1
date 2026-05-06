@@ -11,7 +11,7 @@
 #   2. Mounts your repo at /vhs and your local ABS cache (boundaries +
 #      DataPacks) at the container's expected path. No network needed
 #      during rendering as long as the cache is populated.
-#   3. Runs vhs against tools/demo/demo.tape — the GIF lands at
+#   3. Runs vhs against tools/demo/demo.tape - the GIF lands at
 #      docs/demo.gif on the host.
 
 $ErrorActionPreference = "Stop"
@@ -30,14 +30,14 @@ try { docker version --format '{{.Server.Version}}' | Out-Null } catch {
 # so the heavy data is on disk *before* we rope Docker in.
 $hostCache = Join-Path $env:LOCALAPPDATA "census-augment\census-augment\Cache"
 if (-not (Test-Path (Join-Path $hostCache "data\boundaries"))) {
-    Write-Host "ABS cache not yet populated — running 'census-augment fetch' on the host first..." -ForegroundColor Yellow
+    Write-Host "ABS cache not yet populated - running 'census-augment fetch' on the host first..." -ForegroundColor Yellow
     uv run census-augment fetch --config tools/demo/config.yaml --boundaries --census
     if ($LASTEXITCODE -ne 0) {
         Write-Error "census-augment fetch failed. Resolve the error above and re-run."
     }
 }
 
-# Build the image (cheap when nothing changed — Docker re-uses layers).
+# Build the image (cheap when nothing changed - Docker re-uses layers).
 Write-Host "Building census-augment-vhs image (cached layers reused if source unchanged)..." -ForegroundColor Cyan
 docker build -f tools/demo/Dockerfile -t census-augment-vhs .
 if ($LASTEXITCODE -ne 0) { Write-Error "Docker build failed." }
@@ -46,8 +46,8 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Docker build failed." }
 New-Item -ItemType Directory -Force -Path docs | Out-Null
 
 # Render. Mounts:
-#   ${PWD}    -> /vhs                                 — repo (tape, config, csv)
-#   $hostCache -> /root/.cache/census-augment         — pre-populated ABS data
+#   ${PWD}     -> /vhs                          (repo: tape, config, csv)
+#   $hostCache -> /root/.cache/census-augment   (pre-populated ABS data)
 Write-Host "Rendering tools/demo/demo.tape -> docs/demo.gif ..." -ForegroundColor Cyan
 docker run --rm `
     -v "${PWD}:/vhs" `
