@@ -60,10 +60,11 @@ census-augment discover --search "income"
 - **Type hints everywhere.** `mypy` should pass before committing.
 - **Pydantic models** for config and any structured intermediate data.
 - **Tests next to features.** Every new module gets a corresponding `tests/test_<module>.py`. No new logic merges without a test.
-- **Mock all network calls in tests.** Never hit ABS or Nominatim from the test suite.
+- **Mock all network calls in tests.** Never hit ABS, Nominatim, or S3 from the test suite. We use `responses` for HTTP mocking and `moto` (`@mock_aws`) for S3.
 - **Small functions, pure where possible.** Side effects (I/O, network) live at the edges.
 - **Errors should be loud and helpful.** Use Pydantic validation errors with context, not bare exceptions.
 - **Logging over print.** Use the `logging` module; the CLI configures handlers.
+- **`.ps1` scripts must be pure ASCII.** PowerShell 5.1 (the default on Windows) reads `.ps1` files as Windows-1252 unless they have a BOM, so UTF-8 em dashes / smart quotes / arrows in comments produce mojibake and break the parser. Use plain hyphens, straight quotes, and `->` instead of `→`.
 
 ---
 

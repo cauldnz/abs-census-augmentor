@@ -39,6 +39,10 @@ from census_augment.config import (
 )
 from census_augment.data_sources.boundaries import BoundariesDataSource
 from census_augment.data_sources.datapacks import DataPacksDataSource
+from census_augment.data_sources.gnaf import (
+    DEFAULT_GNAF_S3_BASE_URL,
+    GnafDataSource,
+)
 from census_augment.mb_correspondence import MbCorrespondenceDataSource
 from census_augment.paths import default_data_dir
 
@@ -69,6 +73,23 @@ def main() -> int:
         "--skip-nominatim",
         action="store_true",
         help="Skip the Nominatim sample query",
+    )
+    p.add_argument(
+        "--skip-gnaf",
+        action="store_true",
+        help=(
+            "Skip the G-NAF download (~10 GB). Useful when iterating on "
+            "the boundaries/DataPack code paths."
+        ),
+    )
+    p.add_argument(
+        "--gnaf-release",
+        default="latest",
+        help=(
+            "G-NAF release to fetch (YYYYMM, e.g. '202602'). Defaults to "
+            "'latest' — picks whichever release is highest in the "
+            f"configured S3 bucket ({DEFAULT_GNAF_S3_BASE_URL})."
+        ),
     )
     args = p.parse_args()
 
@@ -144,17 +165,21 @@ def main() -> int:
             )
             print(f"  saved:  {sample_path}")
 
-    # Note: G-NAF download is intentionally NOT included here. S3
-    # listing/anonymous fetch is deferred (spec §19.2); to populate the
-    # G-NAF cache today, manually drop GeoParquet files into
-    # <data_dir>/gnaf/{YYYYMM}/ (e.g. via the `gnaf-loader` snapshot
-    # at s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/). When
-    # you do, the attribution below applies.
     print("=== G-NAF ===")
-    print("  (S3 download deferred — see spec §19.2; populate the cache manually.)")
     print("  Attribution:")
     for line in GNAF_ATTRIBUTION.split(". "):
         print(f"    {line}")
+    if args.skip_gnaf:
+        print("  (skipped via --skip-gnaf)")
+    else:
+        gnaf_ds = GnafDataSource(
+            release=args.gnaf_release,
+            data_dir=data_dir,
+        )
+        print(f"  S3:    {gnaf_ds.s3_base_url}")
+        gnaf_path = gnaf_ds.fetch(refresh=args.refresh)
+        print(f"  cache: {gnaf_path}")
+        print(f"  release: {gnaf_ds.resolved_release}")
 
     print()
     print("Done. Run `python tools/verify_real_parsers.py` to validate.")

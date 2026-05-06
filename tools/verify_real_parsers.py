@@ -179,7 +179,7 @@ def main() -> int:
     if not gnaf_ds.is_cached():
         print(
             "  (skipped; no G-NAF cache populated. "
-            "Drop GeoParquet files into <data_dir>/gnaf/{YYYYMM}/ to enable.)"
+            "Run `python tools/fetch_real_data.py` to download from S3.)"
         )
     else:
         def _open_gnaf() -> None:

@@ -26,6 +26,7 @@ dependencies = [
     "pyarrow",      # Parquet I/O for G-NAF
     "rapidfuzz",    # Tier 3 fuzzy address matching
     "boto3",        # Anonymous S3 access for G-NAF distribution
+    "tqdm",         # Progress bars for the multi-GB G-NAF download
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,7 @@ dev = [
     "pytest",
     "pytest-mock",
     "responses",
+    "moto[s3]>=5",   # Hermetic S3 mocking for the G-NAF anonymous-fetch tests.
     "ruff",
     "mypy",
     "types-requests",
@@ -64,5 +66,11 @@ module = [
     "pyproj.*",
     "pyogrio",
     "pyogrio.*",
+    "boto3",
+    "boto3.*",
+    "botocore",
+    "botocore.*",
+    "tqdm",
+    "tqdm.*",
 ]
 ignore_missing_imports = true

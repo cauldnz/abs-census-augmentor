@@ -534,30 +534,37 @@ def test_fetch_gnaf_downloads_mb_correspondence_and_prints_attribution(
     assert "MB lookup:" in result.stdout
 
 
-@responses.activate
 def test_fetch_gnaf_reports_missing_cache_clearly(
     tmp_path: Path,
     fake_mb_correspondence_zip_bytes: bytes,
 ) -> None:
-    """When G-NAF can't resolve (no cached release) the CLI exits non-zero
-    with a useful message — but doesn't surface a stack trace."""
+    """When G-NAF can't resolve (no cached release *and* no releases on S3)
+    the CLI exits non-zero with a useful message — but doesn't surface a
+    stack trace."""
+    import boto3
+    from moto import mock_aws
+
     config_path = _write_config(tmp_path, address_only=True)
 
-    responses.add(
-        responses.GET, _MB_URL, body=fake_mb_correspondence_zip_bytes, status=200
-    )
+    with mock_aws():
+        # Set up an empty bucket at the default s3_base_url's location.
+        # Listing succeeds but returns no geoscape-* prefixes -> "no releases" error.
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="minus34.com", ObjectOwnership="ObjectWriter")
+        s3.delete_public_access_block(Bucket="minus34.com")
+        s3.put_bucket_acl(Bucket="minus34.com", ACL="public-read")
 
-    result = runner.invoke(
-        app,
-        [
-            "fetch",
-            "--config",
-            str(config_path),
-            "--data-dir",
-            str(tmp_path / "empty_data"),  # no cache prepopulated
-            "--gnaf",
-        ],
-    )
+        result = runner.invoke(
+            app,
+            [
+                "fetch",
+                "--config",
+                str(config_path),
+                "--data-dir",
+                str(tmp_path / "empty_data"),  # no cache prepopulated
+                "--gnaf",
+            ],
+        )
 
     assert result.exit_code == 1
     output = result.stdout + (result.stderr or "")

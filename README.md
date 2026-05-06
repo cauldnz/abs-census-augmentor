@@ -60,7 +60,7 @@ result.df[result.is_fully_enriched]   # filter to clean rows
 
 > **First-run download:** the first call to `pipeline.augment(df)` (or `Pipeline.run()`, or any `census-augment` CLI command that touches the data) downloads ~50 MB of SA2 boundaries and ~40 MB of Census DataPacks into the user cache. Subsequent calls — including across notebooks, scripts, and CLI runs on the same machine — reuse the cache and are instant. See "Where data is cached" below.
 >
-> **G-NAF is not auto-downloaded.** The `config.example.yaml` defaults to `providers: [gnaf, nominatim]`, but you must populate the G-NAF cache yourself before running — see "[G-NAF setup](#g-naf-setup)" below. If you skip that, switch to `providers: [nominatim]` to use Nominatim only.
+> **G-NAF is also auto-downloaded** but is much larger (~10 GB). When `geocoding.providers` includes `gnaf` and the local cache is empty, the first run anonymously fetches the latest gnaf-loader snapshot from `s3://minus34.com/opendata/`. Run `census-augment fetch --gnaf` to do this explicitly up front. To skip G-NAF entirely set `providers: [nominatim]`.
 
 ### As a CLI
 
@@ -127,52 +127,51 @@ v1.0 implementation per [`spec.md` §16](spec.md). G-NAF integration, mesh-block
 
 ## G-NAF setup
 
-> **There is no automated G-NAF download.** This tool does not fetch the G-NAF GeoParquet from anywhere — *you must manually populate the cache yourself* before any G-NAF feature works. `census-augment fetch --gnaf` only validates the cache layout and downloads the (small) Mesh Block correspondence shapefile alongside; it does **not** download G-NAF itself. Automated S3 fetch is on the roadmap but deferred for v1.0 — see [`CHANGELOG.md`](CHANGELOG.md).
+When `geocoding.providers` includes `gnaf`, the first call that needs G-NAF anonymously downloads the [gnaf-loader](https://github.com/minus34/gnaf-loader) snapshot from `s3://minus34.com/opendata/` into your user cache. About **10 GB across ~50 parquet files** — it's a one-off, but a large one. After that, everything is local and offline.
 
-### What you need to do
+### One-shot prefetch (recommended)
 
-1. **Pick a release.** Geoscape publishes G-NAF quarterly. Hugh Saalmans' [`gnaf-loader`](https://github.com/minus34/gnaf-loader) project mirrors a pre-built GeoParquet snapshot of each release at `s3://minus34.com/opendata/geoscape-{YYYYMM}/geoparquet/` (anonymous public-read access). For example, `geoscape-202602` is the February 2026 release.
+Pull the data ahead of your first run so it isn't on the critical path of your first augmentation:
 
-2. **Find your data directory.** Run `census-augment gnaf-info --config config.yaml` — it prints the path the tool expects, e.g.:
+```bash
+census-augment fetch --config config.yaml --gnaf
+```
 
-   ```
-   Path:           /home/you/.cache/census-augment/data/gnaf/{YYYYMM}/ (none yet)
-   Hint: run `census-augment fetch --gnaf` (or populate
-       /home/you/.cache/census-augment/data/gnaf/{YYYYMM}/ manually) to enable G-NAF.
-   ```
+This:
 
-   On Linux that resolves to `~/.cache/census-augment/data/gnaf/`; macOS uses `~/Library/Caches/census-augment/data/gnaf/`; Windows uses `%LOCALAPPDATA%\census-augment\Cache\data\gnaf\`. Override via `CENSUS_AUGMENT_DATA_DIR`.
+1. Anonymously lists `s3://minus34.com/opendata/geoscape-*/` to find the latest release (or honours `geocoding.gnaf.release: "202602"` if you've pinned one).
+2. Downloads every `*.parquet` under `.../geoparquet/` to `<data_dir>/gnaf/{YYYYMM}/` with atomic-rename semantics — interrupted runs resume from the partial cache, no half-files left behind.
+3. Fetches the small (~50 MB) Mesh Block correspondence shapefile alongside, since the `mb_code → SA2` fast path depends on it.
 
-3. **Download the Parquet files into a YYYYMM subdirectory of that path.** The directory name must be exactly the 6-digit release identifier — `202602`, not `2026-02` or `feb-2026`. With the AWS CLI:
+### Refreshing to a newer release
 
-   ```bash
-   mkdir -p ~/.cache/census-augment/data/gnaf/202602
-   aws s3 sync --no-sign-request \
-       s3://minus34.com/opendata/geoscape-202602/geoparquet/ \
-       ~/.cache/census-augment/data/gnaf/202602/
-   ```
+```bash
+census-augment fetch --config config.yaml --gnaf --refresh
+```
 
-   The full snapshot is roughly 10 GB across ~50 Parquet files. If you don't have the AWS CLI, any S3 client that supports anonymous reads (e.g. `s5cmd`, `rclone`, or a small `boto3` script with `signature_version=UNSIGNED`) works. Browser-based downloads also work — `https://minus34.com.s3.amazonaws.com/opendata/geoscape-202602/geoparquet/` lists the files.
+With `release: "latest"` (the default), `--refresh` re-checks S3 to pick up any newer quarterly that's dropped since you last fetched. With an explicit `release: "202602"`, `--refresh` re-downloads that same release.
 
-4. **Verify the cache.** Run `census-augment gnaf-info --config config.yaml` again. You should see:
+### Inspecting the cache
 
-   ```
-   Resolved release: 202602
-   Path:             /home/you/.cache/census-augment/data/gnaf/202602
-   Cached size:      9847.3 MB (52 parquet file(s))
-   ```
+```bash
+census-augment gnaf-info --config config.yaml
+```
 
-5. **Pin the release in your config** (recommended for reproducibility):
+Prints the resolved release, the on-disk path, and the cached size in MB.
 
-   ```yaml
-   geocoding:
-     gnaf:
-       release: "202602"   # or 'latest' to pick up whichever release is in the cache
-   ```
+### Pinning a specific release
 
-### Schema requirements
+For reproducibility (e.g. running the same pipeline against the same data at different times):
 
-The Parquet must include these columns (the parser will raise loudly if they're missing):
+```yaml
+geocoding:
+  gnaf:
+    release: "202602"   # default is "latest"
+```
+
+### Bringing your own G-NAF parquet
+
+If your organisation builds G-NAF from the official Geoscape PSVs (data.gov.au) instead of using gnaf-loader, drop your own `*.parquet` files into `<data_dir>/gnaf/{YYYYMM}/` — the auto-download is skipped when the cache is already populated. The parser requires these columns (it'll raise loudly if any are missing):
 
 - `ADDRESS_DETAIL_PID` — G-NAF's stable address identifier
 - `ADDRESS_LABEL` — the pre-formatted "1 GEORGE STREET SYDNEY NSW 2000" string
@@ -180,11 +179,9 @@ The Parquet must include these columns (the parser will raise loudly if they're 
 - `MB_CODE` — 11-digit ABS Mesh Block (powers the §7.3 fast path)
 - `POSTCODE` — required for the Tier 2/3 pre-filter
 
-The `gnaf-loader` snapshot covers all of these. If you build your own Parquet from the official Geoscape PSV files (data.gov.au), make sure those columns are preserved.
-
 ### Opting out of G-NAF entirely
 
-If you'd rather not deal with the cache, switch to Nominatim-only — that's the v0.1 behaviour:
+If you'd rather not deal with a 10 GB cache, switch to Nominatim-only:
 
 ```yaml
 geocoding:

@@ -1,15 +1,85 @@
-"""Tests for census_augment.data_sources.gnaf (Phase 2: cache-mode plumbing)."""
+"""Tests for census_augment.data_sources.gnaf.
+
+Phase 2 (cache-mode plumbing) + Phase 8 (anonymous S3 fetch + listing,
+hermetic-tested via ``moto``).
+"""
 
 from __future__ import annotations
 
 import io
 from pathlib import Path
+from typing import Any
 
+import boto3
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from moto import mock_aws
 
 from census_augment.data_sources.gnaf import GnafDataSource
+
+
+# ---- moto helpers ---------------------------------------------------------
+
+
+_TEST_BUCKET = "minus34.com"
+_TEST_BASE = f"s3://{_TEST_BUCKET}/opendata"
+
+
+def _make_public_bucket() -> Any:
+    """Create the test bucket with public-read ACL (mirrors gnaf-loader prod).
+
+    Returns the (signed) admin S3 client so callers can put objects on it.
+    Must be called inside an ``@mock_aws`` context.
+    """
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=_TEST_BUCKET, ObjectOwnership="ObjectWriter")
+    s3.delete_public_access_block(Bucket=_TEST_BUCKET)
+    s3.put_bucket_acl(Bucket=_TEST_BUCKET, ACL="public-read")
+    return s3
+
+
+def _populate_mock_bucket(
+    *,
+    releases: dict[str, dict[str, bytes]],
+) -> None:
+    """Set up a moto S3 bucket mirroring the gnaf-loader layout.
+
+    ``releases`` maps a release YYYYMM (e.g. "202602") to a dict of
+    parquet filename -> bytes. Files are written under
+    ``opendata/geoscape-{YYYYMM}/geoparquet/{filename}`` with
+    ``public-read`` ACLs so the unsigned client in
+    :class:`GnafDataSource` (which mirrors real anonymous-S3 access)
+    can read them.
+
+    Must be called inside an ``@mock_aws`` context.
+    """
+    s3 = _make_public_bucket()
+    for release, files in releases.items():
+        for filename, body in files.items():
+            s3.put_object(
+                Bucket=_TEST_BUCKET,
+                Key=f"opendata/geoscape-{release}/geoparquet/{filename}",
+                Body=body,
+                ACL="public-read",
+            )
+
+
+def _gnaf_parquet_bytes() -> bytes:
+    """Tiny valid G-NAF Core parquet (matches the conftest fixture's schema)."""
+    table = pa.table(
+        {
+            "ADDRESS_DETAIL_PID": ["GANSW000000001"],
+            "ADDRESS_LABEL": ["1 GEORGE STREET SYDNEY NSW 2000"],
+            "LATITUDE": [-33.864],
+            "LONGITUDE": [151.211],
+            "MB_CODE": ["11701132601"],
+            "POSTCODE": ["2000"],
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    return buf.getvalue()
 
 
 # ---- constructor validation ----------------------------------------------
@@ -94,11 +164,40 @@ def test_resolved_release_picks_highest_when_latest(
     assert ds.resolved_release == "202602"  # higher of 202511 / 202602
 
 
-def test_resolved_release_raises_when_latest_no_cache(tmp_path: Path) -> None:
-    """``release='latest'`` with no cache raises (S3 listing not implemented)."""
-    ds = GnafDataSource(release="latest", data_dir=tmp_path / "data")
+@mock_aws
+def test_resolved_release_raises_when_latest_no_cache_and_no_s3_releases(
+    tmp_path: Path,
+) -> None:
+    """``release='latest'`` with empty cache *and* empty S3 raises clearly."""
+    _make_public_bucket()  # bucket exists but has no geoscape-*/ prefixes
+
+    ds = GnafDataSource(
+        release="latest",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
     with pytest.raises(RuntimeError, match="cannot be resolved"):
         _ = ds.resolved_release
+
+
+@mock_aws
+def test_resolved_release_falls_through_to_s3_when_no_local_cache(
+    tmp_path: Path,
+) -> None:
+    """``release='latest'`` with empty cache resolves from S3."""
+    _populate_mock_bucket(
+        releases={
+            "202508": {"addresses.parquet": _gnaf_parquet_bytes()},
+            "202602": {"addresses.parquet": _gnaf_parquet_bytes()},
+        }
+    )
+    ds = GnafDataSource(
+        release="latest",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    # Highest YYYYMM on S3 wins.
+    assert ds.resolved_release == "202602"
 
 
 # ---- DuckDB connection + view -------------------------------------------
@@ -188,18 +287,12 @@ def test_schema_validation_fails_on_missing_required_column(
         ds.open_connection()
 
 
-def test_schema_validation_fails_on_empty_release_dir(tmp_path: Path) -> None:
-    """A release directory with no Parquet files fails noisily."""
-    data_dir = tmp_path / "data"
-    (data_dir / "gnaf" / "202602").mkdir(parents=True)
-    # No parquet files written
-    ds = GnafDataSource(release="202602", data_dir=data_dir)
-    # is_cached returns False (no parquet), so resolved_release falls back to
-    # 'latest' resolution which finds nothing — but request is explicit, so it
-    # uses the explicit value. Then fetch() raises NotImplementedError because
-    # no cached files. So this test checks the right behaviour:
-    with pytest.raises(NotImplementedError, match="manually place"):
-        ds.open_connection()
+def test_validate_schema_fails_on_empty_release_dir(tmp_path: Path) -> None:
+    """The schema validator fails noisily on a release dir with no Parquet."""
+    rel_dir = tmp_path / "data" / "gnaf" / "202602"
+    rel_dir.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="No .parquet files"):
+        GnafDataSource._validate_schema(rel_dir)  # type: ignore[attr-defined]
 
 
 # ---- deferred modes raise NotImplementedError ----------------------------
@@ -221,9 +314,209 @@ def test_official_mode_raises_not_implemented(fake_gnaf_data_dir: Path) -> None:
         ds.open_connection()
 
 
-def test_fetch_in_cache_mode_with_uncached_release_raises(tmp_path: Path) -> None:
-    """If we ask for a release that's not in the cache, S3 download isn't
-    yet implemented — should raise with a useful suggestion."""
-    ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
-    with pytest.raises(NotImplementedError, match="manually place"):
+@mock_aws
+def test_fetch_in_cache_mode_downloads_from_s3_on_cache_miss(
+    tmp_path: Path,
+) -> None:
+    """A cache miss triggers an anonymous S3 download to the local cache dir."""
+    parquet_bytes = _gnaf_parquet_bytes()
+    _populate_mock_bucket(
+        releases={"202602": {"addresses.parquet": parquet_bytes}}
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    rel_dir = ds.fetch()
+
+    # Download landed in the right place with the right content.
+    assert rel_dir == tmp_path / "data" / "gnaf" / "202602"
+    files = sorted(rel_dir.glob("*.parquet"))
+    assert len(files) == 1
+    assert files[0].name == "addresses.parquet"
+    assert files[0].read_bytes() == parquet_bytes
+
+
+@mock_aws
+def test_fetch_raises_when_release_does_not_exist_on_s3(
+    tmp_path: Path,
+) -> None:
+    """Asking for a release the S3 bucket doesn't have produces a clear error."""
+    _make_public_bucket()  # no releases populated
+
+    ds = GnafDataSource(
+        release="999999",  # explicit, doesn't exist on S3
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    with pytest.raises(RuntimeError, match="No .parquet files found"):
         ds.fetch()
+
+
+@mock_aws
+def test_fetch_skips_files_already_present_locally(tmp_path: Path) -> None:
+    """Re-running fetch after a partial download resumes (no re-download)."""
+    parquet_bytes = _gnaf_parquet_bytes()
+    _populate_mock_bucket(
+        releases={
+            "202602": {
+                "a.parquet": parquet_bytes,
+                "b.parquet": parquet_bytes,
+            }
+        }
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+
+    # Pretend a previous run got partway: 'a.parquet' is already on disk.
+    rel_dir = tmp_path / "data" / "gnaf" / "202602"
+    rel_dir.mkdir(parents=True)
+    (rel_dir / "a.parquet").write_bytes(parquet_bytes)
+
+    # is_cached() should now be true (one parquet file present), so fetch()
+    # short-circuits and never even hits S3 — that's also fine. Force an
+    # explicit S3 download by passing refresh=True.
+    ds.fetch(refresh=True)
+
+    # Both files should be present.
+    assert (rel_dir / "a.parquet").exists()
+    assert (rel_dir / "b.parquet").exists()
+    # No leftover .tmp files.
+    assert not list(rel_dir.glob("*.tmp"))
+
+
+@mock_aws
+def test_fetch_with_refresh_re_resolves_latest_from_s3(tmp_path: Path) -> None:
+    """``refresh=True`` + ``release='latest'`` re-checks S3 for newer releases.
+
+    Even if a local cache exists, calling fetch(refresh=True) when the
+    user asked for 'latest' should pick up newer releases from S3.
+    """
+    parquet_bytes = _gnaf_parquet_bytes()
+    _populate_mock_bucket(
+        releases={
+            "202508": {"addresses.parquet": parquet_bytes},
+            "202602": {"addresses.parquet": parquet_bytes},  # newer
+        }
+    )
+
+    # Pre-populate cache with the older release only.
+    rel_dir_old = tmp_path / "data" / "gnaf" / "202508"
+    rel_dir_old.mkdir(parents=True)
+    (rel_dir_old / "addresses.parquet").write_bytes(parquet_bytes)
+
+    ds = GnafDataSource(
+        release="latest",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+
+    # Without refresh, latest resolves from cache (202508).
+    assert ds.resolved_release == "202508"
+
+    # Re-do the test with a fresh data source and refresh=True.
+    ds2 = GnafDataSource(
+        release="latest",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    new_dir = ds2.fetch(refresh=True)
+    assert ds2.resolved_release == "202602"
+    assert new_dir.name == "202602"
+    assert (new_dir / "addresses.parquet").exists()
+
+
+@mock_aws
+def test_fetch_atomic_no_tmp_files_after_success(tmp_path: Path) -> None:
+    """Successful download leaves no ``.tmp`` files behind."""
+    _populate_mock_bucket(
+        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}}
+    )
+    ds = GnafDataSource(
+        release="202602",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    rel_dir = ds.fetch()
+    assert not list(rel_dir.glob("*.tmp"))
+
+
+@mock_aws
+def test_list_releases_on_s3_returns_sorted_yyyymm(tmp_path: Path) -> None:
+    """Direct unit test for the listing helper — sorted, no dupes."""
+    _populate_mock_bucket(
+        releases={
+            "202602": {"x.parquet": b"a"},
+            "202508": {"x.parquet": b"a"},
+            "202511": {"x.parquet": b"a"},
+        }
+    )
+    ds = GnafDataSource(
+        release="latest",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    assert ds._list_releases_on_s3() == ["202508", "202511", "202602"]  # type: ignore[attr-defined]
+
+
+@mock_aws
+def test_list_releases_on_s3_ignores_non_geoscape_prefixes(
+    tmp_path: Path,
+) -> None:
+    """Other ``opendata/`` siblings (``geoscape-foo/``, ``census-/``) are skipped."""
+    s3 = _make_public_bucket()
+    for key in (
+        "opendata/geoscape-202602/geoparquet/x.parquet",
+        "opendata/geoscape-foobar/geoparquet/x.parquet",
+        "opendata/census-202602/x.parquet",
+    ):
+        s3.put_object(Bucket=_TEST_BUCKET, Key=key, Body=b"a", ACL="public-read")
+
+    ds = GnafDataSource(
+        release="latest",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    assert ds._list_releases_on_s3() == ["202602"]  # type: ignore[attr-defined]
+
+
+@mock_aws
+def test_open_connection_works_after_s3_fetch(tmp_path: Path) -> None:
+    """End-to-end: cache miss -> S3 download -> DuckDB opens cleanly."""
+    _populate_mock_bucket(
+        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}}
+    )
+    ds = GnafDataSource(
+        release="202602",
+        data_dir=tmp_path / "data",
+        s3_base_url=_TEST_BASE,
+    )
+    con = ds.open_connection()
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    assert rows[0] == 1
+
+
+# ---- s3 url parsing -----------------------------------------------------
+
+
+def test_parse_s3_url_with_prefix(tmp_path: Path) -> None:
+    from census_augment.data_sources.gnaf import _parse_s3_url
+
+    assert _parse_s3_url("s3://bucket/key/prefix") == ("bucket", "key/prefix")
+    assert _parse_s3_url("s3://bucket/key/prefix/") == ("bucket", "key/prefix")
+    assert _parse_s3_url("s3://bucket") == ("bucket", "")
+    assert _parse_s3_url("s3://bucket/") == ("bucket", "")
+
+
+def test_parse_s3_url_rejects_non_s3(tmp_path: Path) -> None:
+    from census_augment.data_sources.gnaf import _parse_s3_url
+
+    with pytest.raises(ValueError, match="s3://"):
+        _parse_s3_url("https://example.com/x")
