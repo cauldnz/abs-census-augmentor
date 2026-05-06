@@ -26,6 +26,7 @@ dependencies = [
     "pyarrow",      # Parquet I/O for G-NAF
     "rapidfuzz",    # Tier 3 fuzzy address matching
     "boto3",        # Anonymous S3 access for G-NAF distribution
+    "tqdm",         # Progress bars for the multi-GB G-NAF download
 ]
 
 [project.optional-dependencies]
