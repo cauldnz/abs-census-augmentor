@@ -24,13 +24,19 @@ RUN apt-get update \
         python3 python3-pip bsdmainutils git \
     && rm -rf /var/lib/apt/lists/*
 
-# Bake the project into the image. We install editable from /work so the
-# python paths point at /work/src; then we mount the actual repo at /vhs
-# at runtime so the tape file, config, and input CSV come from disk.
+# Bake the project into the image. Non-editable install: census-augment
+# lands in site-packages and we throw away the build dir, keeping the
+# image lean. The repo is mounted at /vhs at runtime for the tape file,
+# config, and input CSV; the installed census-augment doesn't reach back
+# into it.
+#
+# README.md is COPY'd because hatchling reads pyproject.toml's
+# `readme = "README.md"` field at build time and errors if it's missing.
 WORKDIR /work
-COPY pyproject.toml /work/
+COPY pyproject.toml README.md /work/
 COPY src /work/src/
-RUN pip install --break-system-packages --no-cache-dir -e /work
+RUN pip install --break-system-packages --no-cache-dir /work \
+    && rm -rf /work
 
 WORKDIR /vhs
 # vhs base image already sets ENTRYPOINT ["vhs"], so `docker run <image> tape.tape`
