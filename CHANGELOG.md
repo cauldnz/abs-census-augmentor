@@ -9,6 +9,18 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed
+
+- **`pyproject.toml` distribution name now matches the GitHub repo.**
+  Was `census-augment`; is now `abs-census-augmentor`. uv (and modern
+  pip) enforce name-equality between the requested distribution and
+  the metadata reported by the build backend, so `uv add
+  abs-census-augmentor @ git+https://github.com/cauldnz/abs-census-augmentor.git`
+  was rejected with a name-mismatch error. Resolves #7. The
+  CLI command (`census-augment`) and the import name
+  (`from census_augment import ...`) are unchanged — distribution
+  name is independent of both.
+
 ## [1.2.0] - 2026-05-06
 
 ### Added

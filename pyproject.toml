@@ -3,7 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "census-augment"
+# Distribution name matches the GitHub repo so `pip install ...@git+...`
+# and `uv add ...@git+...` work without a name-equality error. The
+# import name and CLI command both stay `census_augment` /
+# `census-augment` — those are independent of the distribution name.
+name = "abs-census-augmentor"
 version = "1.0.0"
 description = "Augment Australian location datasets with ABS Census data at the SA2 statistical area level."
 readme = "README.md"
