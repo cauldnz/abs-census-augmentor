@@ -7,6 +7,7 @@ hermetic-tested via ``moto``).
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 from typing import Any
 
@@ -316,11 +317,22 @@ def test_fetch_raises_in_remote_mode(fake_gnaf_data_dir: Path) -> None:
 
 
 def test_build_object_url_default_aws_virtual_hosted(tmp_path: Path) -> None:
-    """Default URL construction is virtual-hosted AWS style."""
+    """Default URL construction (dot-less bucket) is virtual-hosted AWS style."""
+    ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
+    assert ds._build_object_url(  # type: ignore[attr-defined]
+        "my-gnaf", "opendata/x.parquet"
+    ) == "https://my-gnaf.s3.amazonaws.com/opendata/x.parquet"
+
+
+def test_build_object_url_dotted_bucket_uses_path_style(tmp_path: Path) -> None:
+    """Bucket names with dots can't use virtual-hosted (TLS cert mismatch)
+    against ``*.s3.amazonaws.com``. Auto-switch to path-style on the global
+    endpoint, which redirects to the bucket's region.
+    """
     ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
     assert ds._build_object_url(  # type: ignore[attr-defined]
         "minus34.com", "opendata/x.parquet"
-    ) == "https://minus34.com.s3.amazonaws.com/opendata/x.parquet"
+    ) == "https://s3.amazonaws.com/minus34.com/opendata/x.parquet"
 
 
 def test_build_object_url_with_endpoint_override(tmp_path: Path) -> None:
@@ -745,3 +757,138 @@ def test_remote_mode_validates_schema(
     )
     with pytest.raises(RuntimeError, match="missing required columns.*MB_CODE"):
         ds.open_connection()
+
+
+# ---- parquet filter (issue #8: gnaf-loader bucket co-locates ABS bdys) --
+
+
+def test_listing_default_filter_excludes_subdir_parquets(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Default rule: only flat parquets directly under ``geoparquet/``.
+
+    The gnaf-loader bucket publishes G-NAF Core flat at the root of
+    ``geoparquet/`` and ABS / OSM boundary tables in named
+    subdirectories. Without filtering, schema validation chokes on
+    the first non-G-NAF parquet DuckDB sees.
+    """
+    bucket, base = _unique_bucket("filter-default")
+    parquet_bytes = _gnaf_parquet_bytes()
+    # Mix one good (flat) and several bad (in subdirs) parquets.
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "addresses.parquet": parquet_bytes,  # G-NAF Core ✓
+                "abs_2016_gccsa/part-00000-aaa.snappy.parquet": parquet_bytes,
+                "abs_2016_gccsa/part-00001-bbb.snappy.parquet": parquet_bytes,
+                "osm_amenities/part-00000.parquet": parquet_bytes,
+            }
+        },
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+    )
+    objs = ds._list_parquet_objects_on_s3("202602")  # type: ignore[attr-defined]
+    keys = [k for k, _ in objs]
+    assert keys == ["opendata/geoscape-202602/geoparquet/addresses.parquet"]
+
+
+def test_listing_custom_filter_overrides_default(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Override regex matches the relative key (post-``geoparquet/``)."""
+    bucket, base = _unique_bucket("filter-custom")
+    parquet_bytes = _gnaf_parquet_bytes()
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "addresses.parquet": parquet_bytes,
+                "lookup/locality.parquet": parquet_bytes,  # in subdir, but G-NAF
+                "abs_2016_gccsa/part-00000.parquet": parquet_bytes,
+            }
+        },
+    )
+
+    # Match anything that doesn't start with 'abs_'.
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        parquet_filter=r"^(?!abs_)",
+    )
+    objs = ds._list_parquet_objects_on_s3("202602")  # type: ignore[attr-defined]
+    keys = sorted(k.rsplit("/", 1)[-1] for k, _ in objs)
+    # Both G-NAF parquets included, ABS one filtered out.
+    assert keys == ["addresses.parquet", "locality.parquet"]
+
+
+def test_remote_mode_end_to_end_with_mixed_bucket_contents(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Issue #8 reproduction: bucket has ABS boundaries alongside G-NAF
+    Core; remote mode should query just the G-NAF parquets cleanly."""
+    bucket, base = _unique_bucket("issue-8-mixed")
+    # Build an ABS-shaped parquet (no MB_CODE / ADDRESS_LABEL etc.) that
+    # would fail schema validation if it slipped past the filter.
+    abs_bytes_buf = io.BytesIO()
+    pq.write_table(
+        pa.table(
+            {
+                "gid": [1],
+                "gcc_16code": ["1GSYD"],
+                "gcc_16name": ["Greater Sydney"],
+                "area_sqm": [12345.0],
+                "geom": ["MULTIPOLYGON(...)"],
+                "state": ["NSW"],
+            }
+        ),
+        abs_bytes_buf,
+    )
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "addresses.parquet": _gnaf_parquet_bytes(),
+                # Same partitioned-subdirectory layout as the real bucket.
+                "abs_2016_gccsa/part-00000-aaa.snappy.parquet": (
+                    abs_bytes_buf.getvalue()
+                ),
+            }
+        },
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+    )
+    con = ds.open_connection()  # would fail without filter
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    assert rows[0] == 1
+
+
+def test_parquet_filter_param_compiles_lazily_on_construction(
+    tmp_path: Path,
+) -> None:
+    """Bad regex passed to constructor surfaces immediately, not at use time."""
+    with pytest.raises(re.error):
+        GnafDataSource(
+            release="202602",
+            data_dir=tmp_path / "data",
+            parquet_filter=r"[unclosed-class",  # invalid regex
+        )

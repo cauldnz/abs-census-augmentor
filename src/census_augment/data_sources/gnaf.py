@@ -117,6 +117,7 @@ class GnafDataSource:
         data_dir: Path,
         s3_base_url: str = DEFAULT_GNAF_S3_BASE_URL,
         s3_https_endpoint: str | None = None,
+        parquet_filter: str | None = None,
         official_base_url: str = DEFAULT_GNAF_OFFICIAL_BASE_URL,
     ) -> None:
         if datum not in ("GDA2020", "GDA94"):
@@ -137,6 +138,9 @@ class GnafDataSource:
         self._s3_base_url = s3_base_url.rstrip("/")
         self._s3_https_endpoint = (
             s3_https_endpoint.rstrip("/") if s3_https_endpoint else None
+        )
+        self._parquet_filter: re.Pattern[str] | None = (
+            re.compile(parquet_filter) if parquet_filter else None
         )
         self._official_base_url = official_base_url.rstrip("/")
         self._resolved_release: str | None = None
@@ -470,15 +474,25 @@ class GnafDataSource:
     def _build_object_url(self, bucket: str, key: str) -> str:
         """HTTPS URL DuckDB should read for ``s3://bucket/key``.
 
-        - Default (``s3_https_endpoint=None``): virtual-hosted style on
-          AWS, ``https://{bucket}.s3.amazonaws.com/{key}``. Works for
-          any public AWS S3 bucket.
-        - Override set: path-style on the configured endpoint,
-          ``{endpoint}/{bucket}/{key}``. For S3-compatible mirrors or
-          test servers (moto, MinIO, R2, ...).
+        - Override set (``s3_https_endpoint``): path-style on the
+          configured endpoint, ``{endpoint}/{bucket}/{key}``. For
+          S3-compatible mirrors or test servers (moto, MinIO, R2, ...).
+        - Bucket name contains a dot (e.g. ``minus34.com``): forced
+          path-style on the global endpoint
+          ``https://s3.amazonaws.com/{bucket}/{key}``. AWS's wildcard
+          cert ``*.s3.amazonaws.com`` only matches a single subdomain
+          level, so the virtual-hosted ``minus34.com.s3.amazonaws.com``
+          fails TLS hostname verification (libcurl errors with
+          ``SEC_E_WRONG_PRINCIPAL`` / ``hostname mismatch``). The
+          global endpoint redirects to the bucket's region.
+        - Otherwise: virtual-hosted style on AWS,
+          ``https://{bucket}.s3.amazonaws.com/{key}``.
         """
         if self._s3_https_endpoint:
             return f"{self._s3_https_endpoint}/{bucket}/{key}"
+        if "." in bucket:
+            # Dotted bucket names break virtual-hosted TLS; use path-style.
+            return f"https://s3.amazonaws.com/{bucket}/{key}"
         return f"https://{bucket}.s3.amazonaws.com/{key}"
 
     def _list_releases_on_s3(self) -> list[str]:
@@ -514,11 +528,31 @@ class GnafDataSource:
         return sorted(releases)
 
     def _list_parquet_objects_on_s3(self, release: str) -> list[tuple[str, int]]:
-        """Return ``[(key, size_bytes), ...]`` for ``*.parquet`` in the release.
+        """Return ``[(key, size_bytes), ...]`` for the G-NAF Core ``*.parquet``
+        files in the release.
+
+        The gnaf-loader bucket publishes G-NAF Core *and* sibling
+        datasets (ABS boundaries like ``abs_2016_gccsa/``) under the
+        same ``geoparquet/`` prefix. Without filtering, DuckDB's
+        ``read_parquet([...])`` chokes on the schema mismatch. The
+        filtering rule:
+
+        - Default: only flat parquets *directly* under
+          ``geoparquet/`` — partitioned subdirectories like
+          ``abs_2016_gccsa/part-00000-*.snappy.parquet`` are skipped.
+          gnaf-loader's G-NAF Core dump lands at the root of
+          ``geoparquet/``; the ABS / OSM boundary tables are
+          Spark-partitioned into named subdirectories.
+        - Override: pass a regex via the constructor's
+          ``parquet_filter`` parameter (or
+          ``data_sources.gnaf_parquet_filter`` in YAML). The regex is
+          matched against the *relative* key — i.e. the part after
+          ``geoparquet/``. Useful if the bucket layout shifts or if a
+          mirror uses a different convention.
 
         Shared between cache mode (download) and remote mode (URL
-        construction). Sizes are used by cache mode's resume-skip check;
-        remote mode ignores them.
+        construction). Sizes are used by cache mode's resume-skip
+        check; remote mode ignores them.
         """
         bucket, base_prefix = _parse_s3_url(self._s3_base_url)
         prefix = (base_prefix + "/") if base_prefix else ""
@@ -533,10 +567,34 @@ class GnafDataSource:
         for page in paginator.paginate(Bucket=bucket, Prefix=release_prefix):
             for obj in page.get("Contents", []) or []:
                 key = obj["Key"]
-                if key.endswith(".parquet"):
-                    objs.append((key, int(obj["Size"])))
+                if not key.endswith(".parquet"):
+                    continue
+                relative = (
+                    key[len(release_prefix):]
+                    if key.startswith(release_prefix)
+                    else key
+                )
+                if not self._matches_parquet_filter(relative):
+                    _log.debug(
+                        "Skipping non-G-NAF parquet (filter excluded): %s",
+                        key,
+                    )
+                    continue
+                objs.append((key, int(obj["Size"])))
 
         return objs
+
+    def _matches_parquet_filter(self, relative_key: str) -> bool:
+        """Decide whether a parquet key (relative to ``geoparquet/``) is G-NAF.
+
+        Default rule: relative key must have no slashes — i.e. the
+        parquet sits directly under ``geoparquet/``, not in a
+        partitioned subdirectory like ``abs_2016_gccsa/``. Override
+        with the ``parquet_filter`` constructor arg (regex).
+        """
+        if self._parquet_filter is not None:
+            return self._parquet_filter.search(relative_key) is not None
+        return "/" not in relative_key
 
     def _download_release_from_s3(self, release: str) -> Path:
         """Download all ``*.parquet`` files for ``release`` to local cache.

@@ -9,6 +9,40 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-05-07
+
+### Fixed
+
+- **G-NAF remote (and cache) mode no longer pulls in non-G-NAF
+  parquets from the gnaf-loader bucket.** The bucket co-locates
+  G-NAF Core flat parquets at the root of `geoparquet/` with ABS /
+  OSM boundary tables in named subdirectories (e.g.
+  `abs_2016_gccsa/part-00000-*.snappy.parquet`). Previously,
+  `_list_parquet_objects_on_s3` returned everything; remote mode
+  fed the lot to DuckDB's `read_parquet([...])` and the schema
+  validator caught the boundary parquet's `gcc_16code` /
+  `gcc_16name` / `geom` columns as a "missing required columns"
+  failure. Cache mode had the same bug latent — it'd download all
+  the boundary files alongside G-NAF.
+
+  The default filter now accepts only flat parquets directly under
+  `geoparquet/`. Override via the new `parquet_filter` constructor
+  arg (or `data_sources.gnaf_parquet_filter` in YAML) — a regex
+  matched against the relative key — for buckets with a different
+  layout. Resolves #8.
+
+- **Dotted bucket names (e.g. `minus34.com`) auto-switch to
+  path-style URLs in remote mode.** AWS's wildcard cert
+  `*.s3.amazonaws.com` only matches a single subdomain level, so
+  `minus34.com.s3.amazonaws.com` (virtual-hosted) fails TLS hostname
+  verification — libcurl reports `SEC_E_WRONG_PRINCIPAL` /
+  hostname-mismatch. `_build_object_url` now detects dots in the
+  bucket name and constructs `https://s3.amazonaws.com/{bucket}/{key}`
+  (path-style on the global endpoint, which redirects to the
+  bucket's region). Users no longer need to set
+  `s3_https_endpoint` manually for the gnaf-loader default.
+  Also from #8.
+
 ## [1.2.1] - 2026-05-07
 
 ### Fixed
