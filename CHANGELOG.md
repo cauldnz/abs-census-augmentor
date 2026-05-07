@@ -9,6 +9,8 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-05-07
+
 ### Fixed
 
 - **`pyproject.toml` distribution name now matches the GitHub repo.**
@@ -20,6 +22,14 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
   CLI command (`census-augment`) and the import name
   (`from census_augment import ...`) are unchanged — distribution
   name is independent of both.
+- **`pyproject.toml` `version` field is now in sync with the
+  CHANGELOG history.** Was stuck at `1.0.0` while the changelog
+  documented 1.1.0 and 1.2.0 features — anyone who installed from
+  main between those releases got artefacts metadata-tagged as
+  v1.0.0. Bumped straight to `1.2.1` to align with reality and
+  treat the name-fix above as the patch release. Going forward,
+  CLAUDE.md's contributor conventions require pyproject.toml's
+  `version` and the CHANGELOG to move together.
 
 ## [1.2.0] - 2026-05-06
 

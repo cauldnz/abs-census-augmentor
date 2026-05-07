@@ -65,6 +65,7 @@ census-augment discover --search "income"
 - **Errors should be loud and helpful.** Use Pydantic validation errors with context, not bare exceptions.
 - **Logging over print.** Use the `logging` module; the CLI configures handlers.
 - **`.ps1` scripts must be pure ASCII.** PowerShell 5.1 (the default on Windows) reads `.ps1` files as Windows-1252 unless they have a BOM, so UTF-8 em dashes / smart quotes / arrows in comments produce mojibake and break the parser. Use plain hyphens, straight quotes, and `->` instead of `→`.
+- **`pyproject.toml` version and `CHANGELOG.md` move together.** Whenever you cut a new release section in `CHANGELOG.md` (anything that's not under the `[Unreleased]` heading), update `pyproject.toml`'s `[project].version` to the same value in the same commit. The two drifted between 1.0.0 and 1.2.0 because PRs added CHANGELOG entries without bumping pyproject — anyone installing from `main` got artefacts metadata-tagged as 1.0.0 even though the code had moved on. Don't repeat that.
 
 ---
 
