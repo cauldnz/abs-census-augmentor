@@ -9,14 +9,11 @@ distribution modes (spec §19.2):
   ``s3_base_url`` bucket — defaults to the ``gnaf-loader`` snapshot at
   ``s3://minus34.com/opendata/``) or by manually populating the
   directory.
-- ``remote`` — DuckDB queries S3 directly via httpfs (deferred).
+- ``remote`` — DuckDB queries GeoParquet directly over HTTPS via the
+  ``httpfs`` extension. No download; queries pull only the bytes they
+  need. Best for prototyping, CI, and disk-constrained environments.
 - ``official`` — fetch official PSV from data.gov.au and build a local
   DuckDB (deferred).
-
-In v1.1 the ``cache`` mode is fully wired: a cache miss triggers an
-anonymous boto3 listing/download against ``s3_base_url``. ``remote`` /
-``official`` continue to raise ``NotImplementedError`` with migration
-messages.
 """
 
 from __future__ import annotations
@@ -91,13 +88,24 @@ class GnafDataSource:
     Release-resolution rules (spec §19.2 + §6.1):
 
     - ``release="202602"`` (or any 6-digit YYYYMM) → use that release directly.
-    - ``release="latest"`` → the highest-numbered subdirectory under
-      ``<data_dir>/gnaf/`` that contains ``*.parquet`` files. If no such
-      cache exists, falls through to listing the configured S3 bucket
-      and picking the highest ``geoscape-{YYYYMM}/`` prefix.
+    - ``release="latest"``:
+
+        * In ``cache`` mode, prefers the highest-numbered subdirectory
+          under ``<data_dir>/gnaf/`` that contains ``*.parquet`` files;
+          falls back to the highest ``geoscape-{YYYYMM}/`` prefix on
+          S3 if no local cache exists.
+        * In ``remote`` mode, always lists S3 — local cache is ignored
+          (the whole point is to skip the download).
 
     Once resolved, the release is recorded so subsequent calls in the
     same instance use a stable value.
+
+    The optional ``s3_https_endpoint`` parameter lets you point at a
+    non-AWS S3-compatible endpoint (MinIO, Cloudflare R2, a moto test
+    server, ...). When set, it overrides both the boto3 listing endpoint
+    and the URLs DuckDB reads from in ``remote`` mode. The default —
+    ``None`` — uses ``https://{bucket}.s3.amazonaws.com/{key}`` per
+    AWS's virtual-hosted style.
     """
 
     def __init__(
@@ -108,6 +116,7 @@ class GnafDataSource:
         mode: GnafMode = "cache",
         data_dir: Path,
         s3_base_url: str = DEFAULT_GNAF_S3_BASE_URL,
+        s3_https_endpoint: str | None = None,
         official_base_url: str = DEFAULT_GNAF_OFFICIAL_BASE_URL,
     ) -> None:
         if datum not in ("GDA2020", "GDA94"):
@@ -126,6 +135,9 @@ class GnafDataSource:
         self._mode = mode
         self._data_dir = Path(data_dir)
         self._s3_base_url = s3_base_url.rstrip("/")
+        self._s3_https_endpoint = (
+            s3_https_endpoint.rstrip("/") if s3_https_endpoint else None
+        )
         self._official_base_url = official_base_url.rstrip("/")
         self._resolved_release: str | None = None
         self._connection: duckdb.DuckDBPyConnection | None = None
@@ -185,17 +197,23 @@ class GnafDataSource:
           re-resolved against S3 even if a local cache exists, so a
           newer release is picked up when one drops.
 
-        For ``mode='remote'`` / ``mode='official'``, raises
-        :class:`NotImplementedError` with a migration message.
+        For ``mode='remote'``: nothing to fetch — querying happens
+        directly over HTTPS. Raises a clear error so the user notices
+        the misconfiguration rather than silently no-opping.
+
+        For ``mode='official'``: raises :class:`NotImplementedError`.
         """
-        if self._mode != "cache":
+        if self._mode == "remote":
+            raise RuntimeError(
+                "fetch() is meaningless in remote mode — there's nothing "
+                "to download. Either switch to mode='cache' (download "
+                "the parquet to disk), or call open_connection() directly "
+                "and let DuckDB stream from S3."
+            )
+        if self._mode == "official":
             raise NotImplementedError(
-                f"GnafDataSource mode={self._mode!r} is not yet implemented "
-                "in this release. Only 'cache' is supported. "
-                "Set geocoding.gnaf.mode: cache in your config and either "
-                "let `census-augment fetch --gnaf` populate the cache "
-                "or place GeoParquet files manually in "
-                f"{self.gnaf_root}/{{YYYYMM}}/."
+                "GnafDataSource mode='official' is not yet implemented. "
+                "Use 'cache' or 'remote' instead."
             )
 
         # `refresh` + 'latest' must re-resolve directly against S3,
@@ -236,27 +254,35 @@ class GnafDataSource:
     def open_connection(self) -> duckdb.DuckDBPyConnection:
         """Open (or return cached) a DuckDB connection wired to query G-NAF.
 
-        On first call: locates the cached release, validates the schema,
-        creates an in-memory DuckDB connection with a ``gnaf`` view that
-        unions all Parquet files in the release directory.
+        Dispatches on ``mode``:
+
+        - ``cache``: locates the cached release (downloading from S3 if
+          needed), validates the schema, creates a ``gnaf`` view over
+          the local Parquet files.
+        - ``remote``: lists the release's parquet keys on S3, loads
+          DuckDB's ``httpfs`` extension, creates a ``gnaf`` view that
+          ``read_parquet`` s the public HTTPS URLs directly. No
+          download.
+        - ``official``: raises :class:`NotImplementedError`.
+
+        The resulting connection is cached on the instance — repeat
+        calls return the same connection.
         """
         if self._connection is not None:
             return self._connection
 
-        release_dir = self.fetch()
-        self._validate_schema(release_dir)
-
-        con = duckdb.connect(":memory:")
-        # DuckDB needs forward-slash paths for the read_parquet glob even on Windows.
-        glob = str(release_dir / "*.parquet").replace("\\", "/")
-        con.execute(f"CREATE VIEW gnaf AS SELECT * FROM read_parquet('{glob}')")
-        _log.info(
-            "Opened G-NAF connection: release=%s, files=%d",
-            self.resolved_release,
-            len(list(release_dir.glob("*.parquet"))),
-        )
-        self._connection = con
-        return con
+        if self._mode == "cache":
+            self._connection = self._open_cache_connection()
+        elif self._mode == "remote":
+            self._connection = self._open_remote_connection()
+        elif self._mode == "official":
+            raise NotImplementedError(
+                "GnafDataSource mode='official' is not yet implemented. "
+                "Use 'cache' or 'remote' instead."
+            )
+        else:  # pragma: no cover — guarded by __init__
+            raise AssertionError(f"unreachable mode: {self._mode!r}")
+        return self._connection
 
     def close(self) -> None:
         """Close the DuckDB connection if it's open."""
@@ -264,6 +290,76 @@ class GnafDataSource:
             self._connection.close()
             self._connection = None
             _log.debug("Closed G-NAF connection")
+
+    # ---- mode-specific connection openers --------------------------------
+
+    def _open_cache_connection(self) -> duckdb.DuckDBPyConnection:
+        """Cache-mode: ``gnaf`` view over local Parquet files."""
+        release_dir = self.fetch()
+        self._validate_schema_local(release_dir)
+
+        con = duckdb.connect(":memory:")
+        # DuckDB needs forward-slash paths for the read_parquet glob even on Windows.
+        glob = str(release_dir / "*.parquet").replace("\\", "/")
+        con.execute(f"CREATE VIEW gnaf AS SELECT * FROM read_parquet('{glob}')")
+        _log.info(
+            "Opened G-NAF cache connection: release=%s, files=%d",
+            self.resolved_release,
+            len(list(release_dir.glob("*.parquet"))),
+        )
+        return con
+
+    def _open_remote_connection(self) -> duckdb.DuckDBPyConnection:
+        """Remote-mode: ``gnaf`` view over HTTPS URLs via DuckDB's httpfs.
+
+        Lists parquet keys with boto3 (the same anonymous client used by
+        cache mode), converts to public HTTPS URLs, then hands the list
+        to DuckDB. Each query pulls only the bytes it needs (parquet
+        column projection + HTTP range requests).
+        """
+        release = self.resolved_release
+        objs = self._list_parquet_objects_on_s3(release)
+        if not objs:
+            bucket, base_prefix = _parse_s3_url(self._s3_base_url)
+            prefix = (base_prefix + "/") if base_prefix else ""
+            release_prefix = (
+                f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
+            )
+            raise RuntimeError(
+                f"No .parquet files found at "
+                f"s3://{bucket}/{release_prefix}. "
+                f"Either release {release!r} doesn't exist on this S3 bucket, "
+                "or its layout has changed."
+            )
+
+        bucket, _ = _parse_s3_url(self._s3_base_url)
+        urls = [self._build_object_url(bucket, key) for key, _ in objs]
+
+        con = duckdb.connect(":memory:")
+        # httpfs is auto-installable from DuckDB's extension repo. INSTALL is
+        # idempotent (re-running with the extension cached is a no-op).
+        con.execute("INSTALL httpfs")
+        con.execute("LOAD httpfs")
+
+        # SQL list literal of URLs. Single-quote each, comma-separate.
+        # URLs come from listing our own configured endpoint, so SQL
+        # injection isn't a concern (and any apostrophe in an S3 key
+        # would have already broken upstream tooling).
+        url_list_sql = "[" + ", ".join(f"'{u}'" for u in urls) + "]"
+        con.execute(
+            f"CREATE VIEW gnaf AS SELECT * FROM read_parquet({url_list_sql})"
+        )
+
+        self._validate_schema_remote(con)
+
+        _log.info(
+            "Opened G-NAF remote connection: release=%s, files=%d, "
+            "endpoint=%s",
+            release,
+            len(urls),
+            self._s3_https_endpoint or "https://*.s3.amazonaws.com",
+        )
+        return con
 
     # ---- internals ------------------------------------------------------
 
@@ -279,40 +375,42 @@ class GnafDataSource:
     def _resolve_release(self) -> str:
         """Resolve ``release='latest'`` to a specific YYYYMM.
 
-        Tries local cache first (offline-friendly). If empty, falls
-        through to listing S3.
+        - cache mode: prefers local cache (offline-friendly), falls back
+          to S3.
+        - remote mode: ignores local cache; always lists S3.
         """
         if self._release_request != "latest":
             return self._release_request
 
-        cached = self._find_cached_releases()
-        if cached:
-            picked = cached[-1]
-            _log.info(
-                "Resolved release='latest' from cache: %s (cache: %s)",
-                picked,
-                cached,
-            )
-            return picked
+        # Cache mode: prefer local. Remote mode: skip local entirely.
+        if self._mode == "cache":
+            cached = self._find_cached_releases()
+            if cached:
+                picked = cached[-1]
+                _log.info(
+                    "Resolved release='latest' from cache: %s (cache: %s)",
+                    picked,
+                    cached,
+                )
+                return picked
 
-        # No local cache — try S3.
+        # No useable local cache (or remote mode) — list S3.
         try:
             on_s3 = self._list_releases_on_s3()
         except Exception as e:
             raise RuntimeError(
-                "release='latest' cannot be resolved: no G-NAF releases "
-                f"are cached under {self.gnaf_root} and listing the "
-                f"configured S3 bucket ({self._s3_base_url}) failed: "
+                "release='latest' cannot be resolved: "
+                f"listing the configured S3 bucket "
+                f"({self._s3_base_url}) failed: "
                 f"{type(e).__name__}: {e}. "
                 "Specify an explicit release like '202602', check your "
-                "network, or pre-populate the cache."
+                "network, or pre-populate the cache (cache mode only)."
             ) from e
 
         if not on_s3:
             raise RuntimeError(
-                "release='latest' cannot be resolved: no G-NAF releases "
-                f"are cached under {self.gnaf_root}, and no "
-                f"geoscape-{{YYYYMM}}/ prefixes were found at "
+                "release='latest' cannot be resolved: "
+                f"no geoscape-{{YYYYMM}}/ prefixes were found at "
                 f"{self._s3_base_url}. Has the bucket layout changed?"
             )
 
@@ -344,6 +442,10 @@ class GnafDataSource:
         signed requests from arbitrary AWS accounts. We use UNSIGNED so
         the client never tries to look up credentials.
 
+        If ``s3_https_endpoint`` was configured (S3-compatible mirror
+        or a moto test server), it's threaded through as ``endpoint_url``
+        so listing hits the same place DuckDB will read from.
+
         Imported lazily so the rest of the package doesn't pay the boto3
         startup cost for callers that never touch S3 (e.g. tests that
         pre-populate the cache).
@@ -352,10 +454,32 @@ class GnafDataSource:
         from botocore import UNSIGNED  # noqa: PLC0415
         from botocore.config import Config  # noqa: PLC0415
 
-        return boto3.client(
-            "s3",
-            config=Config(signature_version=UNSIGNED),
-        )
+        kwargs: dict[str, Any] = {
+            "config": Config(signature_version=UNSIGNED),
+        }
+        if self._s3_https_endpoint:
+            kwargs["endpoint_url"] = self._s3_https_endpoint
+            # S3-compatible servers (and moto) typically use path-style
+            # addressing. DuckDB likewise. Force it on the boto3 side too.
+            kwargs["config"] = Config(
+                signature_version=UNSIGNED,
+                s3={"addressing_style": "path"},
+            )
+        return boto3.client("s3", **kwargs)
+
+    def _build_object_url(self, bucket: str, key: str) -> str:
+        """HTTPS URL DuckDB should read for ``s3://bucket/key``.
+
+        - Default (``s3_https_endpoint=None``): virtual-hosted style on
+          AWS, ``https://{bucket}.s3.amazonaws.com/{key}``. Works for
+          any public AWS S3 bucket.
+        - Override set: path-style on the configured endpoint,
+          ``{endpoint}/{bucket}/{key}``. For S3-compatible mirrors or
+          test servers (moto, MinIO, R2, ...).
+        """
+        if self._s3_https_endpoint:
+            return f"{self._s3_https_endpoint}/{bucket}/{key}"
+        return f"https://{bucket}.s3.amazonaws.com/{key}"
 
     def _list_releases_on_s3(self) -> list[str]:
         """List all ``geoscape-{YYYYMM}/`` prefixes in the bucket (sorted ASC).
@@ -389,6 +513,31 @@ class GnafDataSource:
 
         return sorted(releases)
 
+    def _list_parquet_objects_on_s3(self, release: str) -> list[tuple[str, int]]:
+        """Return ``[(key, size_bytes), ...]`` for ``*.parquet`` in the release.
+
+        Shared between cache mode (download) and remote mode (URL
+        construction). Sizes are used by cache mode's resume-skip check;
+        remote mode ignores them.
+        """
+        bucket, base_prefix = _parse_s3_url(self._s3_base_url)
+        prefix = (base_prefix + "/") if base_prefix else ""
+        release_prefix = (
+            f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
+        )
+
+        s3 = self._make_s3_client()
+        paginator = s3.get_paginator("list_objects_v2")
+
+        objs: list[tuple[str, int]] = []
+        for page in paginator.paginate(Bucket=bucket, Prefix=release_prefix):
+            for obj in page.get("Contents", []) or []:
+                key = obj["Key"]
+                if key.endswith(".parquet"):
+                    objs.append((key, int(obj["Size"])))
+
+        return objs
+
     def _download_release_from_s3(self, release: str) -> Path:
         """Download all ``*.parquet`` files for ``release`` to local cache.
 
@@ -407,16 +556,7 @@ class GnafDataSource:
             f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
         )
 
-        s3 = self._make_s3_client()
-        paginator = s3.get_paginator("list_objects_v2")
-
-        # Collect all parquet keys for the release (with sizes for tqdm).
-        parquet_objects: list[tuple[str, int]] = []
-        for page in paginator.paginate(Bucket=bucket, Prefix=release_prefix):
-            for obj in page.get("Contents", []) or []:
-                key = obj["Key"]
-                if key.endswith(".parquet"):
-                    parquet_objects.append((key, int(obj["Size"])))
+        parquet_objects = self._list_parquet_objects_on_s3(release)
 
         if not parquet_objects:
             raise RuntimeError(
@@ -441,6 +581,7 @@ class GnafDataSource:
             release_prefix,
         )
 
+        s3 = self._make_s3_client()
         for key, size in parquet_objects:
             filename = key.rsplit("/", 1)[-1]
             dest = rel_dir / filename
@@ -519,8 +660,11 @@ class GnafDataSource:
             raise
 
     @staticmethod
-    def _validate_schema(release_dir: Path) -> None:
-        """Sanity-check the cached Parquet has the expected G-NAF Core columns."""
+    def _validate_schema_local(release_dir: Path) -> None:
+        """Sanity-check the cached Parquet has the expected G-NAF Core columns.
+
+        Cheap: reads only the parquet footer schema, no data scan.
+        """
         import pyarrow.parquet as pq  # imported here so cache-only callers don't pay the cost upfront
 
         parquet_files = sorted(release_dir.glob("*.parquet"))
@@ -537,4 +681,26 @@ class GnafDataSource:
                 f"columns: {sorted(missing)}. Got: {sorted(present)}. "
                 "This usually means the Parquet wasn't generated from "
                 "G-NAF Core, or the Geoscape schema has changed."
+            )
+
+    # Back-compat alias (kept for any external callers since v1.0).
+    _validate_schema = _validate_schema_local
+
+    @staticmethod
+    def _validate_schema_remote(con: duckdb.DuckDBPyConnection) -> None:
+        """Validate the ``gnaf`` view's schema in remote mode.
+
+        Uses ``DESCRIBE``, which DuckDB answers from the parquet footer
+        metadata — small range request, no full file scan.
+        """
+        rows = con.execute("DESCRIBE gnaf").fetchall()
+        # DESCRIBE returns (column_name, column_type, null, key, default, extra)
+        present = {r[0] for r in rows}
+        missing = _REQUIRED_COLUMNS - present
+        if missing:
+            raise RuntimeError(
+                f"G-NAF remote view is missing required columns: "
+                f"{sorted(missing)}. Got: {sorted(present)}. "
+                "This usually means the bucket's parquet wasn't generated "
+                "from G-NAF Core, or the Geoscape schema has changed."
             )

@@ -101,6 +101,12 @@ class DataSourcesConfig(_StrictModel):
     boundaries_base_url: str = DEFAULT_BOUNDARIES_URL
     datapacks_base_url: str = DEFAULT_DATAPACKS_URL
     gnaf_s3_base_url: str = DEFAULT_GNAF_S3_BASE_URL
+    #: Override the HTTPS endpoint DuckDB and boto3 hit when listing /
+    #: streaming G-NAF parquet (remote mode). ``None`` (default) uses
+    #: AWS's virtual-hosted style: ``https://{bucket}.s3.amazonaws.com``.
+    #: Set this for S3-compatible mirrors (MinIO, R2, ...) or test
+    #: servers — path-style addressing is forced when set.
+    gnaf_s3_https_endpoint: str | None = None
     gnaf_official_base_url: str = DEFAULT_GNAF_OFFICIAL_BASE_URL
 
 

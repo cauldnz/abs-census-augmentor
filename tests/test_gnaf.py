@@ -298,20 +298,54 @@ def test_validate_schema_fails_on_empty_release_dir(tmp_path: Path) -> None:
 # ---- deferred modes raise NotImplementedError ----------------------------
 
 
-def test_remote_mode_raises_not_implemented(fake_gnaf_data_dir: Path) -> None:
-    ds = GnafDataSource(
-        release="202602", mode="remote", data_dir=fake_gnaf_data_dir
-    )
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
-        ds.open_connection()
-
-
 def test_official_mode_raises_not_implemented(fake_gnaf_data_dir: Path) -> None:
     ds = GnafDataSource(
         release="202602", mode="official", data_dir=fake_gnaf_data_dir
     )
     with pytest.raises(NotImplementedError, match="not yet implemented"):
         ds.open_connection()
+
+
+def test_fetch_raises_in_remote_mode(fake_gnaf_data_dir: Path) -> None:
+    """fetch() in remote mode is meaningless — should raise loudly."""
+    ds = GnafDataSource(
+        release="202602", mode="remote", data_dir=fake_gnaf_data_dir
+    )
+    with pytest.raises(RuntimeError, match="meaningless in remote mode"):
+        ds.fetch()
+
+
+def test_build_object_url_default_aws_virtual_hosted(tmp_path: Path) -> None:
+    """Default URL construction is virtual-hosted AWS style."""
+    ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
+    assert ds._build_object_url(  # type: ignore[attr-defined]
+        "minus34.com", "opendata/x.parquet"
+    ) == "https://minus34.com.s3.amazonaws.com/opendata/x.parquet"
+
+
+def test_build_object_url_with_endpoint_override(tmp_path: Path) -> None:
+    """A configured endpoint switches to path-style addressing."""
+    ds = GnafDataSource(
+        release="202602",
+        data_dir=tmp_path / "data",
+        s3_https_endpoint="http://localhost:5000",
+    )
+    assert ds._build_object_url(  # type: ignore[attr-defined]
+        "minus34.com", "opendata/x.parquet"
+    ) == "http://localhost:5000/minus34.com/opendata/x.parquet"
+
+
+def test_build_object_url_endpoint_trailing_slash_stripped(
+    tmp_path: Path,
+) -> None:
+    ds = GnafDataSource(
+        release="202602",
+        data_dir=tmp_path / "data",
+        s3_https_endpoint="http://localhost:5000/",  # trailing slash
+    )
+    assert ds._build_object_url(  # type: ignore[attr-defined]
+        "minus34.com", "opendata/x.parquet"
+    ) == "http://localhost:5000/minus34.com/opendata/x.parquet"
 
 
 @mock_aws
@@ -520,3 +554,194 @@ def test_parse_s3_url_rejects_non_s3(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="s3://"):
         _parse_s3_url("https://example.com/x")
+
+
+# ---- remote mode (DuckDB httpfs) ---------------------------------------
+#
+# These exercise the end-to-end remote-mode path against a moto S3 server.
+# DuckDB's httpfs reads parquet over HTTP via libcurl, so moto's
+# ThreadedMotoServer (which speaks real HTTP) is the right fixture --
+# unlike the pure-boto3 tests which can use ``@mock_aws`` (in-process).
+#
+# httpfs is a DuckDB extension. ``INSTALL httpfs`` will hit DuckDB's
+# extension repo on first call and cache locally; subsequent calls are
+# no-ops. CI fresh containers do incur this one-time download.
+
+
+@pytest.fixture(scope="module")
+def moto_s3_server() -> Any:
+    """Module-scoped moto S3 server. Yields the endpoint URL.
+
+    Listens on 127.0.0.1 specifically (the moto default 0.0.0.0 is a
+    bind-only address — you can't *connect* to it on Windows).
+
+    Module-scoped because spinning up/tearing down a moto server is
+    relatively expensive (Flask app start). Tests isolate themselves
+    by using unique bucket names rather than relying on a clean server
+    — moto's S3 state persists across ThreadedMotoServer restarts in
+    the same Python process anyway, so a per-test server wouldn't help.
+    """
+    from moto.server import ThreadedMotoServer  # noqa: PLC0415
+
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
+    server.start()
+    _, port = server.get_host_and_port()
+    endpoint = f"http://127.0.0.1:{port}"
+    try:
+        yield endpoint
+    finally:
+        server.stop()
+
+
+def _unique_bucket(test_name: str) -> tuple[str, str]:
+    """Generate a unique bucket name + s3 base URL for a given test.
+
+    Bucket names must be globally unique within the moto server's
+    lifetime (which spans the test module).
+    """
+    bucket = f"test-bucket-{test_name}"
+    return bucket, f"s3://{bucket}/opendata"
+
+
+def _populate_moto_server(
+    endpoint: str,
+    bucket: str,
+    releases: dict[str, dict[str, bytes]],
+) -> None:
+    """Write parquet objects to the named bucket on the running moto server."""
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        region_name="us-east-1",
+    )
+    s3.create_bucket(Bucket=bucket, ObjectOwnership="ObjectWriter")
+    s3.delete_public_access_block(Bucket=bucket)
+    s3.put_bucket_acl(Bucket=bucket, ACL="public-read")
+    for release, files in releases.items():
+        for filename, body in files.items():
+            s3.put_object(
+                Bucket=bucket,
+                Key=f"opendata/geoscape-{release}/geoparquet/{filename}",
+                Body=body,
+                ACL="public-read",
+            )
+
+
+def test_remote_mode_open_connection_streams_via_httpfs(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """End-to-end remote: list S3, build URLs, DuckDB reads parquet via HTTP."""
+    bucket, base = _unique_bucket("open-streams")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}},
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+    )
+    con = ds.open_connection()
+
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    assert rows[0] == 1
+
+    # Spot-check a column to confirm projection works through httpfs.
+    label = con.execute("SELECT ADDRESS_LABEL FROM gnaf LIMIT 1").fetchone()
+    assert label is not None
+    assert label[0] == "1 GEORGE STREET SYDNEY NSW 2000"
+
+
+def test_remote_mode_resolves_latest_from_s3_ignoring_local_cache(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Remote mode skips local cache and always lists S3 for ``latest``."""
+    bucket, base = _unique_bucket("resolves-latest")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202508": {"addresses.parquet": _gnaf_parquet_bytes()},
+            "202602": {"addresses.parquet": _gnaf_parquet_bytes()},
+        },
+    )
+
+    # Pre-populate local cache with an older release. Cache mode would
+    # prefer this; remote mode must ignore it.
+    rel_dir_old = tmp_path / "data" / "gnaf" / "202508"
+    rel_dir_old.mkdir(parents=True)
+    (rel_dir_old / "addresses.parquet").write_bytes(_gnaf_parquet_bytes())
+
+    ds = GnafDataSource(
+        release="latest",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+    )
+    assert ds.resolved_release == "202602"
+
+
+def test_remote_mode_raises_when_release_does_not_exist(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Asking for a release the bucket doesn't have produces a clear error."""
+    bucket, base = _unique_bucket("missing-release")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}},
+    )
+
+    ds = GnafDataSource(
+        release="999999",  # not on S3
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+    )
+    with pytest.raises(RuntimeError, match="No .parquet files found"):
+        ds.open_connection()
+
+
+def test_remote_mode_validates_schema(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Remote mode raises if the parquet schema is wrong."""
+    bucket, base = _unique_bucket("validates-schema")
+    # Build a parquet missing MB_CODE.
+    bad_table = pa.table(
+        {
+            "ADDRESS_DETAIL_PID": ["X1"],
+            "ADDRESS_LABEL": ["1 NOWHERE"],
+            "LATITUDE": [-33.0],
+            "LONGITUDE": [151.0],
+            "POSTCODE": ["2000"],
+            # MB_CODE deliberately absent
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(bad_table, buf)
+
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={"202602": {"bad.parquet": buf.getvalue()}},
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+    )
+    with pytest.raises(RuntimeError, match="missing required columns.*MB_CODE"):
+        ds.open_connection()
