@@ -314,6 +314,7 @@ class Pipeline:
                     s3_base_url=config.data_sources.gnaf_s3_base_url,
                     s3_https_endpoint=config.data_sources.gnaf_s3_https_endpoint,
                     parquet_filter=config.data_sources.gnaf_parquet_filter,
+                    census_year=config.census.year,
                     official_base_url=config.data_sources.gnaf_official_base_url,
                 )
                 geocoders.append(

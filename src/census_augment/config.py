@@ -109,13 +109,13 @@ class DataSourcesConfig(_StrictModel):
     #: Set this for S3-compatible mirrors (MinIO, R2, ...) or test
     #: servers — path-style addressing is forced when set.
     gnaf_s3_https_endpoint: str | None = None
-    #: Regex (matched against the parquet's path *relative* to
-    #: ``geoparquet/``) that decides which files in the bucket are
-    #: G-NAF Core. ``None`` (default) keeps only flat parquets directly
-    #: under ``geoparquet/`` — partitioned subdirectories like
-    #: ``abs_2016_gccsa/part-*.snappy.parquet`` are skipped, since the
-    #: gnaf-loader bucket co-locates G-NAF Core with ABS / OSM
-    #: boundary tables. Set this if your bucket layout differs.
+    #: Regex applied against the parquet's path *relative* to
+    #: ``geoparquet/`` when the legacy / bring-your-own layout is in
+    #: use (a single flat parquet at the release root). ``None`` (default)
+    #: accepts any flat parquet. ABS / OSM boundary subdirectories are
+    #: always skipped automatically. Ignored when the gnaf-loader layout
+    #: is detected (``address_principal_census_{year}_boundaries/``
+    #: subdirectory present) — the subdirectory itself does the scoping.
     gnaf_parquet_filter: str | None = None
     gnaf_official_base_url: str = DEFAULT_GNAF_OFFICIAL_BASE_URL
 
