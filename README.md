@@ -153,6 +153,8 @@ That's it. No prefetch step. Open a notebook, run `Pipeline.augment(df)`, DuckDB
 - *Offline use.* Doesn't work without network. If your laptop's spotty, prefer cache.
 - *No local schema validation up-front* — the `httpfs` extension itself has to be installable (DuckDB downloads it once on first use, then caches in `~/.duckdb/extensions/`).
 
+**Bucket layouts other than gnaf-loader's default:** the gnaf-loader bucket co-locates G-NAF Core (flat parquets) with ABS / OSM boundary tables (Spark-partitioned subdirectories). The default filter accepts only flat parquets directly under `geoparquet/`. Override via `data_sources.gnaf_parquet_filter` (a regex matched against the path relative to `geoparquet/`) if your bucket organises G-NAF differently. Combined with `data_sources.gnaf_s3_https_endpoint` for self-hosted mirrors (MinIO, R2, ...), you should be able to point this at any S3-compatible store.
+
 ### One-shot prefetch (recommended for cache mode)
 
 Pull the data ahead of your first run so it isn't on the critical path of your first augmentation:

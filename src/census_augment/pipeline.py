@@ -313,6 +313,7 @@ class Pipeline:
                     data_dir=data_dir,
                     s3_base_url=config.data_sources.gnaf_s3_base_url,
                     s3_https_endpoint=config.data_sources.gnaf_s3_https_endpoint,
+                    parquet_filter=config.data_sources.gnaf_parquet_filter,
                     official_base_url=config.data_sources.gnaf_official_base_url,
                 )
                 geocoders.append(
