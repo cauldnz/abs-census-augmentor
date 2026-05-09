@@ -11,6 +11,58 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [1.3.0] - 2026-05-09
 
+### Fixed — G-NAF remote/cache mode against the real ``minus34.com`` bucket (closes #17)
+
+The v1.2.2 (#9) and v1.2.3 (#14) fixes both targeted the wrong
+subdirectory inside the gnaf-loader bucket. Both releases worked
+against synthetic test fixtures but failed against the real bucket
+with a DuckDB BinderException — the previously-targeted
+``address_principal_census_<year>_boundaries/`` carries only
+boundary-ID columns (``mb_code_<year>``, ``sa1_code_<year>``, ...,
+``lga_code_<year>``, ``poa_code_<year>``, ...) and **no address column,
+no lat/lon**.
+
+The actual G-NAF Core data lives in ``address_principals/``, which
+carries one row per address with all the columns the geocoder needs
+(``gnaf_pid``, ``address``, ``latitude``, ``longitude``, ``postcode``,
+``mb_2016_code``, ``mb_2021_code``). v1.3 targets that directory
+correctly.
+
+While in the area, two related fixes shipped in the same change:
+
+- **Regional endpoint for dotted bucket names.** v1.2.2's fix for the
+  ``minus34.com`` TLS-cert mismatch used path-style on the *global*
+  endpoint (``https://s3.amazonaws.com/{bucket}/{key}``). That works
+  for boto3 (which follows the 301 redirect to the bucket's region)
+  but fails under DuckDB ``httpfs`` which doesn't follow redirects.
+  v1.3 resolves the bucket's region once via ``head_bucket`` and
+  uses ``https://s3.{region}.amazonaws.com/{bucket}/{key}`` directly
+  (path-style, regional, no redirect needed).
+
+- **Full ADDRESS_LABEL via component concatenation.** The
+  ``address_principals.address`` column carries only the street
+  portion (e.g. ``"115 LAWRENCE ROAD"``) — locality, state, and
+  postcode are separate columns. The view's SELECT clause now
+  ``CONCAT_WS(' ', address, locality_name, state, postcode)`` to
+  produce a normalised label that matches what
+  :func:`normalize_address` produces from user input. Without this,
+  Tier 1 exact-match would silently miss for almost every input.
+
+Two new regression tests use moto fixtures with the production
+bucket's full sibling layout (``address_principals/`` +
+``address_principal_admin_boundaries/`` +
+``address_principal_census_2016_boundaries/`` +
+``address_principal_census_2021_boundaries/``) and assert that the
+parser picks the right subdirectory. Plus an explicit-failure test
+that fails loudly when only boundary subdirectories are present
+(rather than letting DuckDB surface the BinderException).
+
+Verified end-to-end against the live ``minus34.com`` bucket
+(``geoscape-202602`` release): 15,015,573 rows in the ``gnaf`` view;
+sample query for "GEORGE STREET" addresses in postcode 2000 returns
+correctly-formatted ADDRESS_LABEL strings with MB_CODE / lat / lon
+all populated.
+
 ### Added — pluggable dataset framework (closes #15)
 
 The pipeline (geocode → SA2 resolve → enrich) keeps the same shape, but
