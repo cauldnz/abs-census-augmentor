@@ -237,6 +237,70 @@ def main() -> int:
         if not _check("Sample response shape", _check_nominatim):
             failures.append("nominatim")
 
+    # ------ v1.3 datasets (SEIFA, ERP, DSS, ATO) ------
+    print("=== v1.3 registered datasets ===")
+    from census_augment.datasets._ato import AtoDataSource
+    from census_augment.datasets._dss import DssDataSource
+    from census_augment.datasets._erp import ErpDataSource
+    from census_augment.datasets._seifa import SeifaDataSource
+
+    def _check_seifa() -> None:
+        ds = SeifaDataSource(root=data_dir / "seifa_2021")
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s (expected ~2,366)"
+        assert "irsd_score" in df.columns
+        assert "ieo_aus_decile" in df.columns
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
+            f"{len(df.columns)} columns"
+        )
+
+    def _check_erp() -> None:
+        ds = ErpDataSource(root=data_dir / "erp_by_sa2")
+        df = ds.load()
+        assert len(df) >= 2000
+        assert "population_total" in df.columns
+        assert "reference_year" in df.columns
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
+            f"reference year {df['reference_year'].iloc[0]}"
+        )
+
+    def _check_dss() -> None:
+        ds = DssDataSource(root=data_dir / "dss_payments")
+        df = ds.load()
+        assert len(df) >= 2000
+        assert "release_quarter" in df.columns
+        recipient_cols = [c for c in df.columns if c.endswith("_recipients")]
+        assert len(recipient_cols) >= 10, (
+            f"only {len(recipient_cols)} payment columns"
+        )
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
+            f"{len(recipient_cols)} payment-type columns"
+        )
+
+    def _check_ato() -> None:
+        ds = AtoDataSource(root=data_dir / "ato_personal_income")
+        df = ds.load()
+        assert len(df) >= 2000
+        assert "median_total_income" in df.columns
+        assert "income_earners_count" in df.columns
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {df.index[0]}: median "
+            f"${df['median_total_income'].iloc[0]:.0f}"
+        )
+
+    if not _check("SEIFA 2021 (~2,366 SA2s, 4 indexes)", _check_seifa):
+        failures.append("seifa_2021")
+    if not _check("ERP by SA2 (~2,454 SA2s, 25-year history)", _check_erp):
+        failures.append("erp_by_sa2")
+    if not _check("DSS payments (~2,454 SA2s, 22 payment types)", _check_dss):
+        failures.append("dss_payments")
+    if not _check("ATO personal income (~2,450 SA2s)", _check_ato):
+        failures.append("ato_personal_income")
+
     print()
     if not failures:
         print("All checks passed.")

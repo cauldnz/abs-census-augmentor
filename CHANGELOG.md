@@ -9,6 +9,128 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-09
+
+### Added — pluggable dataset framework (closes #15)
+
+The pipeline (geocode → SA2 resolve → enrich) keeps the same shape, but
+the *enrich* stage now dispatches across a registry of datasets rather
+than hard-coding the GCP DataPack. The 2021 GCP DataPack is now one
+entry in the registry alongside four new datasets:
+
+- **`seifa_2021`** *(closes #10)* — ABS Socio-Economic Indexes for
+  Areas. 4 indexes (IRSD, IRSAD, IER, IEO) × 7 flavours (score, Aus
+  rank/decile/percentile, State rank/decile/percentile) + URP +
+  state_abbreviation. ~2,366 SA2s, ~150 KB compressed source.
+- **`erp_by_sa2`** — ABS Estimated Resident Population by SA2 (annual,
+  long-history series 2001 onwards). Latest year's `population_total`
+  + per-year `population_history_<year>` columns.
+- **`dss_payments`** — DSS Payment Demographic Data (quarterly).
+  Recipients per payment type (Age Pension, JobSeeker, etc.) with a
+  `release_quarter` column carrying the YYYY-Qn snapshot identifier.
+- **`ato_personal_income`** — ABS Personal Income (Table 1 SA2
+  summary). Median / mean / sum total income + earners count + median
+  age of earners.
+
+Variable namespaces (`SEIFA.*`, `ERP.*`, `DSS.*`, `ATO.*`) route
+through the registry. The existing GCP convention (`G02.foo`,
+`G62.bar`, ...) is unchanged.
+
+Each dataset is described by a markdown spec at `datasets/<id>.md`
+with YAML front-matter declaring custodian / licence / cadence /
+schema (spec §20.1). The `census-augment discover --datasets`
+command lists registered datasets; `--dataset <id>` shows one's
+schema.
+
+### Added — derived features / PRESETs (closes #11)
+
+Curated catalog of ratios with the right denominator pre-baked. Six
+PRESETs ship in v1.3, each as a markdown spec at `features/<id>.md`:
+
+- `pct_drive_to_work`, `pct_renters`, `pct_aged_65_plus`,
+  `pct_employed_full_time`, `pct_one_parent_family`,
+  `motor_vehicles_per_dwelling`.
+
+The `FeatureEvaluator` (in `src/census_augment/features.py`) reads a
+spec and computes the ratio against a SA2-keyed DataFrame of source
+columns. Edge-case handling matches the spec's
+`zero_denominator: null|zero|error` and
+`out_of_bounds_behaviour: clip|warn|error` knobs. Default
+`out_of_bounds_behaviour: warn` rather than `clip` so
+denominator-mismatch bugs surface rather than being silently masked.
+
+`census-augment discover --features` lists the PRESET catalogue.
+
+### Changed
+
+- **`CensusEnricher.build_lookup()` dispatches across datasets.**
+  GCP refs (`G\d+.<col>`) keep the existing path through
+  `VariableCatalog` + `DataPacksDataSource`. Non-GCP refs route to
+  the registered dataset's fetcher. Mixed configs (GCP + SEIFA + ATO
+  in one `variables` dict) work transparently.
+- **`Pipeline.from_config()`** now pre-validates only GCP-shape
+  variables against the catalog. Non-GCP variables are validated
+  lazily when the enricher hits each dataset's fetcher.
+- **CLI `discover`** gained `--datasets`, `--dataset <id>`, and
+  `--features` flags.
+
+### Internals
+
+- New module: `src/census_augment/datasets/` with `_spec.py`,
+  `_registry.py`, `_protocol.py`, plus per-dataset fetchers
+  (`_seifa.py`, `_erp.py`, `_dss.py`, `_ato.py`).
+- New module: `src/census_augment/features.py` (FeatureSpec,
+  FeatureEvaluator, FeatureRegistry).
+- `CensusEnricher` constructor gained an optional `data_dir`
+  argument (required when non-GCP variables are present, since
+  per-dataset cache directories live under it).
+
+### Tests
+
+501 hermetic tests pass (was 422 in v1.2.3; +79 new tests for
+specs, registry, fetchers, evaluator, and dispatch). Real-network
+smoke verified during development against ABS / data.gov.au:
+
+- SEIFA real source: 2,366 SA2s, all 4 indexes parsed.
+- DSS real source: 2,454 SA2s, 22 payment-type columns, latest
+  release auto-resolved (2025-Q4 at time of testing).
+- ERP real source: 2,454 SA2s, 25-year history series, latest
+  reference year auto-detected.
+- ATO real source: 2,450 SA2s, FY 2022-23 release, summary stats
+  (sample SA2 "Braidwood" median income $49,963 — plausible).
+
+### Breaking changes
+
+v1.3 is **mostly non-breaking** for existing v1.2.x callers, but a few
+internal contracts shifted in service of the registry refactor:
+
+- `CensusEnricher.__init__()` gained an optional `data_dir` parameter.
+  Existing callers without it continue to work for **GCP-only**
+  variable configs. Non-GCP variables now require the parameter; an
+  explicit error is raised if it's missing. v1.2.x downstreams that
+  use only GCP keep working unchanged.
+- `enrich.py` no longer exports a public per-table loader API — the
+  registry is the public surface for variable resolution. v1.2.x
+  callers that imported internal helpers from `enrich.py` (none in
+  the public API) may need to migrate.
+
+### Deferred to v1.4
+
+- **PRESET integration into the pipeline.** v1.3 ships PRESETs as a
+  standalone API (`FeatureEvaluator`); using one in the pipeline
+  config requires the user to also request the underlying
+  numerator/denominator source columns in the same `variables` dict.
+  v1.4 will auto-load the source columns so users can write
+  `variables: {pct_renters: PRESET.pct_renters}` without thinking
+  about the underlying GCP fields.
+- **Cross-dataset features** (e.g. DSS recipients / ERP population).
+  The format supports `dataset:` as a list, but the evaluator's
+  multi-dataset handling needs the auto-load step to land first.
+- **Tables 2–9 of ATO Personal Income** (age/sex breakdowns, income
+  distribution, employee/investment/super/own-business income).
+- **`Pipeline.create(releases=...)`** for per-dataset release pinning
+  (spec §20.4) — defaults work for now (latest of each).
+
 ## [1.2.3] - 2026-05-07
 
 ### Fixed
