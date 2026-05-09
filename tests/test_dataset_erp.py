@@ -8,7 +8,6 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 import pytest
-import requests
 import responses
 
 from census_augment.datasets._erp import (

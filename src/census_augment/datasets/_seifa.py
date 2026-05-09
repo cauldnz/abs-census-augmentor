@@ -260,7 +260,7 @@ class SeifaDataSource:
         return merged
 
     @staticmethod
-    def _parse_index_sheet(sheet: object, prefix: str) -> pd.DataFrame:  # type: ignore[override]
+    def _parse_index_sheet(sheet: object, prefix: str) -> pd.DataFrame:
         """Parse a single index detail sheet (Table 2/3/4/5).
 
         Returns a DataFrame indexed by sa2_code_2021 with columns

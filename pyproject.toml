@@ -76,5 +76,7 @@ module = [
     "botocore.*",
     "tqdm",
     "tqdm.*",
+    "openpyxl",
+    "openpyxl.*",
 ]
 ignore_missing_imports = true
