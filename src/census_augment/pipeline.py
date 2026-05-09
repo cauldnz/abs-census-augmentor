@@ -80,6 +80,20 @@ _GEO_SOURCE_VALUES: tuple[str, ...] = (
 )
 
 
+def _is_gcp_variable_ref(ref: str) -> bool:
+    """True if ``ref`` is shaped like a GCP variable (``G\\d+.<column>``).
+
+    Used by :meth:`Pipeline.from_config` to split user-supplied variable
+    refs into GCP-vs-non-GCP for validation. Non-GCP refs (SEIFA, ERP,
+    DSS, ATO, PRESET, ...) are validated lazily by the enricher and
+    registry.
+    """
+    if "." not in ref:
+        return False
+    namespace, _, _ = ref.partition(".")
+    return bool(namespace) and namespace[0] == "G" and namespace[1:].isdigit()
+
+
 @dataclass(frozen=True)
 class RunSummary:
     """End-of-run statistics (spec §7.5).
@@ -284,12 +298,22 @@ class Pipeline:
             root=data_dir / "census",
         )
         catalog = VariableCatalog.from_data_source(datapacks_ds)
-        catalog.validate_variables(config.variables)
+        # Pre-validate only the GCP-shape variables against the
+        # catalog. Non-GCP variables (SEIFA / ERP / DSS / ATO /
+        # PRESET) are validated lazily when the enricher hits each
+        # dataset's fetcher; the registry surfaces clear errors then.
+        gcp_variables = {
+            friendly: ref
+            for friendly, ref in config.variables.items()
+            if _is_gcp_variable_ref(ref)
+        }
+        catalog.validate_variables(gcp_variables)
         enricher = CensusEnricher(
             datapacks=datapacks_ds,
             catalog=catalog,
             variables=config.variables,
             output_prefix=config.output.prefix,
+            data_dir=data_dir,
         )
 
         cache: GeocodeCache
