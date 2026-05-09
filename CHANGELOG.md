@@ -9,6 +9,70 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-05-07
+
+### Fixed
+
+- **G-NAF remote / cache mode now reads from the actual gnaf-loader
+  layout.** Follow-up to #8 / v1.2.2. The previous fix assumed G-NAF
+  Core lived as flat parquets at the root of `geoparquet/` with ABS
+  boundary tables in subdirectories. The real bucket layout is the
+  opposite: every dataset (including G-NAF) is in a subdirectory,
+  and the v1.2.2 "no subdirectories" filter rejected everything,
+  failing with `No .parquet files found at .../geoparquet/`. (Resolves
+  #12.)
+
+  v1.2.3 auto-detects two layouts:
+
+  * **gnaf-loader** *(default for the production bucket)*: data lives
+    at `geoparquet/address_principal_census_{year}_boundaries/` —
+    gnaf-loader's denormalised join of address principals with the
+    ABS census boundary IDs. Column names are PostgreSQL-lowercase
+    (`gnaf_pid`, `address`, `latitude`, `mb_{year}_code`, ...); the
+    `gnaf` view aliases them to the uppercase
+    `ADDRESS_DETAIL_PID` / `MB_CODE` etc. that the geocoder queries.
+  * **legacy / bring-your-own** *(fallback)*: a flat parquet at the
+    release root with already-uppercase columns. Used by the
+    existing test fixtures and by users who pre-build their own
+    G-NAF parquet from the official Geoscape PSV.
+
+  Detection runs on every `open_connection()` — listing the
+  appropriate paths in S3 or the local cache. If neither layout is
+  present, a clear `RuntimeError` lists what was tried.
+
+### Added
+
+- **`census_year` parameter on `GnafDataSource`** (default `2021`),
+  also wired through as `cfg.census.year` in YAML configs. Selects
+  which year's boundaries subdirectory to read under the gnaf-loader
+  layout — letting users targeting the 2016 census pull `mb_2016_code`
+  instead.
+- New tests covering the gnaf-loader path end-to-end against a moto
+  S3 server: layout auto-detection, year selection, mixed-layout
+  preference (gnaf-loader wins over legacy when both are present),
+  cache-mode download preserving subdirectory structure on disk so
+  the next run's detector finds it, legacy fallback for buckets
+  without the gnaf-loader subdir.
+
+### Changed
+
+- `_validate_schema_local` removed; schema validation now runs as a
+  `DESCRIBE gnaf` against the constructed view (cheap — parquet
+  footer metadata only). Catches column-mismatch errors after
+  aliasing has applied for the gnaf-loader layout, which is what
+  callers actually care about.
+- `_download_release_from_s3` preserves subdirectory structure when
+  it sees a gnaf-loader layout — files land at
+  `<release_dir>/address_principal_census_{year}_boundaries/{filename}`
+  rather than flat at the release root. Required for cache-mode
+  layout detection to find them.
+- `data_sources.gnaf_parquet_filter` semantics tightened: still a
+  regex against the relative key, but now only consulted under the
+  legacy code path. Under gnaf-loader the subdirectory itself does
+  the scoping. Setting the regex explicitly also re-enables
+  subdirectory parquets in the legacy path (the v1.2.2 default
+  flat-only behaviour applies only when no regex is set).
+
 ## [1.2.2] - 2026-05-07
 
 ### Fixed

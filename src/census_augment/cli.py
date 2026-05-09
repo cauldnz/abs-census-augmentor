@@ -213,6 +213,7 @@ def fetch(
             s3_base_url=cfg.data_sources.gnaf_s3_base_url,
             s3_https_endpoint=cfg.data_sources.gnaf_s3_https_endpoint,
             parquet_filter=cfg.data_sources.gnaf_parquet_filter,
+            census_year=cfg.census.year,
             official_base_url=cfg.data_sources.gnaf_official_base_url,
         )
         if cfg.geocoding.gnaf.mode == "remote":
@@ -269,6 +270,7 @@ def gnaf_info(
         s3_base_url=cfg.data_sources.gnaf_s3_base_url,
         s3_https_endpoint=cfg.data_sources.gnaf_s3_https_endpoint,
         parquet_filter=cfg.data_sources.gnaf_parquet_filter,
+        census_year=cfg.census.year,
         official_base_url=cfg.data_sources.gnaf_official_base_url,
     )
     typer.echo(f"Mode:           {gnaf_ds.mode}")

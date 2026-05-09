@@ -153,7 +153,12 @@ That's it. No prefetch step. Open a notebook, run `Pipeline.augment(df)`, DuckDB
 - *Offline use.* Doesn't work without network. If your laptop's spotty, prefer cache.
 - *No local schema validation up-front* — the `httpfs` extension itself has to be installable (DuckDB downloads it once on first use, then caches in `~/.duckdb/extensions/`).
 
-**Bucket layouts other than gnaf-loader's default:** the gnaf-loader bucket co-locates G-NAF Core (flat parquets) with ABS / OSM boundary tables (Spark-partitioned subdirectories). The default filter accepts only flat parquets directly under `geoparquet/`. Override via `data_sources.gnaf_parquet_filter` (a regex matched against the path relative to `geoparquet/`) if your bucket organises G-NAF differently. Combined with `data_sources.gnaf_s3_https_endpoint` for self-hosted mirrors (MinIO, R2, ...), you should be able to point this at any S3-compatible store.
+**Bucket layout auto-detection.** Two layouts are recognised:
+
+1. *gnaf-loader* (the production [gnaf-loader](https://github.com/minus34/gnaf-loader) bucket): G-NAF data lives in named subdirectories. The geocoder reads from `geoparquet/address_principal_census_{year}_boundaries/` — gnaf-loader's denormalised join of address principals with the ABS census boundary IDs. Source columns (`gnaf_pid`, `address`, `latitude`, `mb_{year}_code`, ...) are aliased to the uppercase schema the geocoder expects. Set `census.year` to pick `2016` vs `2021` boundaries (default `2021`).
+2. *Legacy / bring-your-own*: a flat parquet at the release root with already-uppercase columns. Used by users who pre-build G-NAF from the official Geoscape PSV.
+
+Detection runs on every `open_connection()`; gnaf-loader wins when both layouts coexist. For non-default layouts on self-hosted mirrors (MinIO, R2, ...), combine `data_sources.gnaf_s3_https_endpoint` with `data_sources.gnaf_parquet_filter` (regex against the relative key — only consulted under the legacy code path).
 
 ### One-shot prefetch (recommended for cache mode)
 
@@ -197,13 +202,12 @@ geocoding:
 
 ### Bringing your own G-NAF parquet
 
-If your organisation builds G-NAF from the official Geoscape PSVs (data.gov.au) instead of using gnaf-loader, drop your own `*.parquet` files into `<data_dir>/gnaf/{YYYYMM}/` — the auto-download is skipped when the cache is already populated. The parser requires these columns (it'll raise loudly if any are missing):
+If your organisation builds G-NAF from the official Geoscape PSVs (data.gov.au) instead of using gnaf-loader, drop your own `*.parquet` files into `<data_dir>/gnaf/{YYYYMM}/` — the auto-download is skipped when the cache is already populated.
 
-- `ADDRESS_DETAIL_PID` — G-NAF's stable address identifier
-- `ADDRESS_LABEL` — the pre-formatted "1 GEORGE STREET SYDNEY NSW 2000" string
-- `LATITUDE`, `LONGITUDE`
-- `MB_CODE` — 11-digit ABS Mesh Block (powers the §7.3 fast path)
-- `POSTCODE` — required for the Tier 2/3 pre-filter
+Two ways to lay out the file(s):
+
+- **Match the gnaf-loader convention** (preferred): place the parquet at `<data_dir>/gnaf/{YYYYMM}/address_principal_census_{year}_boundaries/your-file.parquet` with lowercase columns (`gnaf_pid`, `address`, `latitude`, `longitude`, `postcode`, `mb_{year}_code`). The view aliases them to the uppercase schema for you.
+- **Legacy flat layout**: place the parquet at `<data_dir>/gnaf/{YYYYMM}/your-file.parquet` with already-uppercase columns. Required columns: `ADDRESS_DETAIL_PID`, `ADDRESS_LABEL` (the pre-formatted "1 GEORGE STREET SYDNEY NSW 2000" string), `LATITUDE`, `LONGITUDE`, `MB_CODE` (11-digit ABS Mesh Block), `POSTCODE`. The parser raises loudly if any are missing.
 
 ### Opting out of G-NAF entirely
 

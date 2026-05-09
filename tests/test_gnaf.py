@@ -288,12 +288,13 @@ def test_schema_validation_fails_on_missing_required_column(
         ds.open_connection()
 
 
-def test_validate_schema_fails_on_empty_release_dir(tmp_path: Path) -> None:
-    """The schema validator fails noisily on a release dir with no Parquet."""
+def test_layout_detection_fails_on_empty_release_dir(tmp_path: Path) -> None:
+    """The local layout detector fails noisily on an empty release dir."""
     rel_dir = tmp_path / "data" / "gnaf" / "202602"
     rel_dir.mkdir(parents=True)
-    with pytest.raises(RuntimeError, match="No .parquet files"):
-        GnafDataSource._validate_schema(rel_dir)  # type: ignore[attr-defined]
+    ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
+    with pytest.raises(RuntimeError, match="No G-NAF parquet files found"):
+        ds._detect_local_layout(rel_dir)  # type: ignore[attr-defined]
 
 
 # ---- deferred modes raise NotImplementedError ----------------------------
@@ -719,7 +720,7 @@ def test_remote_mode_raises_when_release_does_not_exist(
         s3_base_url=base,
         s3_https_endpoint=moto_s3_server,
     )
-    with pytest.raises(RuntimeError, match="No .parquet files found"):
+    with pytest.raises(RuntimeError, match="No G-NAF parquet files found"):
         ds.open_connection()
 
 
@@ -892,3 +893,260 @@ def test_parquet_filter_param_compiles_lazily_on_construction(
             data_dir=tmp_path / "data",
             parquet_filter=r"[unclosed-class",  # invalid regex
         )
+
+
+def test_invalid_census_year_raises(tmp_path: Path) -> None:
+    """Implausible census_year produces a clear ValueError, not silent corruption."""
+    with pytest.raises(ValueError, match="census_year"):
+        GnafDataSource(
+            release="202602",
+            data_dir=tmp_path / "data",
+            census_year=42,
+        )
+
+
+# ---- gnaf-loader layout (issue #12: real bucket layout) -----------------
+
+
+def _gnaf_loader_parquet_bytes(census_year: int = 2021) -> bytes:
+    """Synthetic parquet matching gnaf-loader's denormalised
+    ``address_principal_census_{year}_boundaries`` schema.
+
+    Columns are PostgreSQL-lowercase, year-suffixed for the MB code.
+    The view's column-aliasing translates these to the uppercase
+    schema the geocoder queries.
+    """
+    table = pa.table(
+        {
+            "gnaf_pid": ["GANSW000000001", "GANSW000000002"],
+            "address": [
+                "1 GEORGE STREET SYDNEY NSW 2000",
+                "100 PITT STREET SYDNEY NSW 2000",
+            ],
+            "latitude": [-33.864, -33.866],
+            "longitude": [151.211, 151.211],
+            "postcode": ["2000", "2000"],
+            f"mb_{census_year}_code": ["11701132601", "11701132602"],
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    return buf.getvalue()
+
+
+def test_remote_mode_with_gnaf_loader_layout(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Issue #12 reproduction: bucket has the real gnaf-loader layout
+    (no flat parquets, only subdirectories). The
+    ``address_principal_census_2021_boundaries/`` subdirectory carries
+    the data we need; remote mode auto-detects and aliases lowercase
+    columns to our expected uppercase schema."""
+    bucket, base = _unique_bucket("issue-12-loader")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "address_principal_census_2021_boundaries/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes(2021)
+                ),
+                # Mix in non-G-NAF subdirectories (mirrors the real bucket).
+                "abs_2016_gccsa/part-00000.parquet": _gnaf_parquet_bytes(),
+            }
+        },
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        census_year=2021,
+    )
+    con = ds.open_connection()
+
+    # The view exposes the uppercase columns (aliased from lowercase).
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    assert rows[0] == 2
+
+    label, mb = con.execute(
+        "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE "
+        "ADDRESS_DETAIL_PID = 'GANSW000000001'"
+    ).fetchone()
+    assert label == "1 GEORGE STREET SYDNEY NSW 2000"
+    assert mb == "11701132601"
+
+
+def test_remote_mode_picks_correct_year_subdir(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """``census_year`` selects between 2016 / 2021 boundaries subdirs."""
+    bucket, base = _unique_bucket("issue-12-year")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "address_principal_census_2016_boundaries/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes(2016)
+                ),
+                "address_principal_census_2021_boundaries/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes(2021)
+                ),
+            }
+        },
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        census_year=2016,
+    )
+    con = ds.open_connection()
+    rows = con.execute(
+        "SELECT MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'"
+    ).fetchone()
+    # The mb code came from the 2016 parquet, which uses the same fake
+    # data — verify the join-by-year worked by checking the subdir was
+    # picked correctly.
+    assert rows is not None
+    assert rows[0] == "11701132601"
+
+
+def test_cache_mode_with_gnaf_loader_layout(tmp_path: Path) -> None:
+    """Cache mode auto-detects the gnaf-loader subdirectory layout."""
+    data_dir = tmp_path / "data"
+    rel_dir = data_dir / "gnaf" / "202602"
+    loader_dir = rel_dir / "address_principal_census_2021_boundaries"
+    loader_dir.mkdir(parents=True)
+    (loader_dir / "part-00000.parquet").write_bytes(
+        _gnaf_loader_parquet_bytes(2021)
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="cache",
+        data_dir=data_dir,
+        census_year=2021,
+    )
+    con = ds.open_connection()
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    assert rows[0] == 2
+
+    # Spot-check column aliasing: ADDRESS_LABEL came from the
+    # `address` source column.
+    labels = [
+        r[0] for r in con.execute("SELECT ADDRESS_LABEL FROM gnaf").fetchall()
+    ]
+    assert "1 GEORGE STREET SYDNEY NSW 2000" in labels
+
+
+def test_layout_detection_prefers_gnaf_loader_over_legacy(
+    tmp_path: Path,
+) -> None:
+    """If both layouts coexist in the cache, gnaf-loader wins.
+
+    This handles the migration case where a user might have
+    populated the cache for both layouts — the gnaf-loader one is
+    the canonical source.
+    """
+    data_dir = tmp_path / "data"
+    rel_dir = data_dir / "gnaf" / "202602"
+    rel_dir.mkdir(parents=True)
+    # Legacy flat parquet at the root.
+    (rel_dir / "addresses.parquet").write_bytes(_gnaf_parquet_bytes())
+    # gnaf-loader subdir with different content (only 2 rows vs 5).
+    loader_dir = rel_dir / "address_principal_census_2021_boundaries"
+    loader_dir.mkdir()
+    (loader_dir / "part-00000.parquet").write_bytes(
+        _gnaf_loader_parquet_bytes(2021)
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="cache",
+        data_dir=data_dir,
+        census_year=2021,
+    )
+    layout = ds._detect_local_layout(rel_dir)  # type: ignore[attr-defined]
+    assert layout.style == "gnaf-loader"
+    # Confirm the resulting view reads the gnaf-loader one (2 rows),
+    # not the legacy one (5 rows).
+    con = ds.open_connection()
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    assert rows[0] == 2
+
+
+def test_cache_mode_download_preserves_gnaf_loader_subdir_structure(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """When downloading a gnaf-loader layout, the subdirectory structure
+    is preserved on disk so the next run's local layout detection finds
+    it. (Without this, downloads would land flat in the release dir and
+    the gnaf-loader layout would silently downgrade to legacy.)"""
+    bucket, base = _unique_bucket("issue-12-download")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "address_principal_census_2021_boundaries/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes(2021)
+                ),
+                "address_principal_census_2021_boundaries/part-00001.parquet": (
+                    _gnaf_loader_parquet_bytes(2021)
+                ),
+            }
+        },
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="cache",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        census_year=2021,
+    )
+    rel_dir = ds.fetch()
+    boundaries = rel_dir / "address_principal_census_2021_boundaries"
+    assert boundaries.is_dir()
+    assert sorted(p.name for p in boundaries.glob("*.parquet")) == [
+        "part-00000.parquet",
+        "part-00001.parquet",
+    ]
+
+
+def test_remote_mode_falls_back_to_legacy_when_gnaf_loader_subdir_missing(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Buckets without the gnaf-loader subdir (e.g. user-built mirrors
+    with a single pre-joined parquet) still work via the legacy path."""
+    bucket, base = _unique_bucket("issue-12-fallback")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}},
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        census_year=2021,
+    )
+    con = ds.open_connection()
+    rows = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
+    assert rows is not None
+    # _gnaf_parquet_bytes() (legacy fixture) writes 1 row.
+    assert rows[0] == 1
