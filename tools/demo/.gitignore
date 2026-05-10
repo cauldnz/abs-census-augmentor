@@ -1,2 +1,4 @@
-# Generated each time the demo is rendered.
+# Generated each time the demos are rendered (host-side pre-warm + the
+# Docker tape's own run both write here).
 output.csv
+preset-output.csv
