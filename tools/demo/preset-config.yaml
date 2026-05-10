@@ -1,0 +1,24 @@
+# PRESET-features demo config — three PRESET ratios from one
+# pluggable-framework lookup. The pipeline auto-loads each PRESET's
+# numerator + denominator source columns (G37 tenure totals,
+# G62 method-of-travel sums, G01 65+ age bands) transparently and
+# drops them from the final output.
+
+input:
+  path: tools/demo/input.csv
+  latitude_column: lat
+  longitude_column: lon
+
+output:
+  path: tools/demo/preset-output.csv
+  prefix: sa2_
+
+geocoding:
+  providers: [nominatim]
+  nominatim:
+    user_agent: "census-augment-preset-demo/1.4 (demo@example.com)"
+
+variables:
+  pct_renters:    PRESET.pct_renters         # G37.R_Tot_Total / G37.Total_Total * 100
+  pct_drove:      PRESET.pct_drive_to_work   # G62 motor-vehicle modes / G62.Tot_P * 100
+  pct_aged_65:    PRESET.pct_aged_65_plus    # sum of G01 65+ age bands / G01.Tot_P_P * 100

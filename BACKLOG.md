@@ -14,7 +14,8 @@ one-command via `tools/demo/render.sh` (or `.ps1`).
 
 These have tape files committed. Render them via the dev container
 (see `.devcontainer/`) or any host with Docker reachable. Output
-lands at `docs/<slug>.gif`.
+lands at `docs/<slug>.gif`. Easiest:
+`./tools/demo/render.sh --all`.
 
 - **`docs/demo.gif`** — headline demo. Shows mixing GCP + SEIFA in one
   config. Replaces the v1.0-era headline demo.
@@ -22,16 +23,13 @@ lands at `docs/<slug>.gif`.
   --datasets` / `--dataset seifa_2021` / `--features` and shows the
   underlying markdown spec format. No augmentation run, so cache is
   unused.
+- **`docs/preset-features.gif`** — shows a PRESET spec, then a config
+  that uses three PRESETs (`pct_renters`, `pct_drive_to_work`,
+  `pct_aged_65_plus`), then the computed output. Was deferred when
+  PRESETs were broken (#23); unblocked by the v1.4.2 column-ref
+  fixes (PR #26).
 
 ### Deferred
-
-- **`docs/preset-features.gif`** — gated on
-  [#23](https://github.com/cauldnz/abs-census-augmentor/issues/23).
-  PRESETs reference column names that don't exist in the real GCP
-  DataPack, so the demo can't be rendered until those refs are
-  fixed. Tape design is sketched in #23's discussion; re-add the
-  `tools/demo/preset-features.tape` + `preset-config.yaml` files
-  once the underlying issue lands.
 
 - **`docs/seifa-augmentation.gif`** — superseded by `docs/demo.gif`
   (the headline) which already shows SEIFA in action; revisit if
@@ -46,8 +44,10 @@ lands at `docs/<slug>.gif`.
 
 - `tools/demo/render.ps1` (Windows) and `tools/demo/render.sh` (macOS
   / Linux / WSL / devcontainer) take an optional slug arg picking
-  the tape (default: `demo`). Each new demo needs a matching
-  `.tape` file alongside.
+  the tape (default: `demo`), or `--all` to render every tape in
+  one batch. Each new demo needs a matching `.tape` file alongside,
+  optionally with its own `*.yaml` config (the pre-warm loops over
+  every config in the directory).
 - Keep individual GIFs to 20–30 seconds and < 500 KB.
 - The cache pre-warm pattern in the render scripts handles
   registered datasets; the tape's own `Hide`/`Show` blocks handle
