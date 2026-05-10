@@ -16,6 +16,11 @@
 
 Output docs/demo.gif
 
+# Per-scene PNG snapshots get captured via `Screenshot` directives
+# below (one per scene, just before the screen clears). The PNGs
+# land in docs/frames/ alongside the animated GIF and are useful
+# for static embeds where GIF animation isn't reliable.
+
 Set Shell "bash"
 Set Theme "Dracula"
 Set FontSize 16
@@ -44,6 +49,7 @@ Sleep 700ms
 Type "cat tools/demo/input.csv"
 Enter
 Sleep 3500ms
+Screenshot docs/frames/demo-1-input.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -55,6 +61,7 @@ Sleep 800ms
 Type "cat tools/demo/config.yaml"
 Enter
 Sleep 6500ms
+Screenshot docs/frames/demo-2-config.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -63,6 +70,7 @@ Sleep 300ms
 Type "census-augment run --config tools/demo/config.yaml"
 Enter
 Sleep 7s
+Screenshot docs/frames/demo-3-run.png
 
 # ---- scene 4: the enriched output ---------------------------------------
 Type "# Each row carries Census + SEIFA columns for its SA2:"
@@ -71,3 +79,4 @@ Sleep 800ms
 Type "cut -d, -f1,9,11,12,13,14 tools/demo/output.csv | column -s, -t"
 Enter
 Sleep 7s
+Screenshot docs/frames/demo-4-output.png

@@ -14,6 +14,8 @@
 
 Output docs/preset-features.gif
 
+# Per-scene PNG snapshots — see comment in demo.tape.
+
 Set Shell "bash"
 Set Theme "Dracula"
 Set FontSize 16
@@ -45,6 +47,7 @@ Sleep 800ms
 Type "head -22 features/pct_renters.md"
 Enter
 Sleep 7s
+Screenshot docs/frames/preset-features-1-spec.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -56,6 +59,7 @@ Sleep 800ms
 Type "cat tools/demo/preset-config.yaml"
 Enter
 Sleep 5500ms
+Screenshot docs/frames/preset-features-2-config.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -64,6 +68,7 @@ Sleep 300ms
 Type "census-augment run --config tools/demo/preset-config.yaml"
 Enter
 Sleep 7s
+Screenshot docs/frames/preset-features-3-run.png
 
 # ---- scene 4: show the computed ratios ---------------------------------
 Type "# Each row carries the computed ratios; source columns hidden:"
@@ -72,3 +77,4 @@ Sleep 800ms
 Type "cut -d, -f1,9,11,12,13 tools/demo/preset-output.csv | column -s, -t"
 Enter
 Sleep 7s
+Screenshot docs/frames/preset-features-4-output.png

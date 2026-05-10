@@ -11,12 +11,19 @@ the rendering infrastructure (`Dockerfile`, `render.sh`,
 | `input.csv` | all tapes | Five famous Australian locations (Opera House, MCG, Bondi, Story Bridge, Adelaide Central Market) with lat/lon. |
 | `config.yaml` | `demo.tape` | Headline demo config — mixes Census GCP (`G02.*`) and SEIFA (`SEIFA.*`) variables to show v1.3 / v1.4 multi-namespace dispatch. |
 | `preset-config.yaml` | `preset-features.tape` | Three PRESET ratios (`pct_renters`, `pct_drive_to_work`, `pct_aged_65_plus`). |
-| `demo.tape` | renders -> `docs/demo.gif` | Headline README GIF. |
-| `discover-datasets.tape` | renders -> `docs/discover-datasets.gif` | Walks the `census-augment discover` CLI: list datasets, drill into one, list PRESETs. No augmentation run, so cache is unused. |
-| `preset-features.tape` | renders -> `docs/preset-features.gif` | Shows a PRESET spec, then a config that uses three PRESETs, then the computed output. Unblocked once #23 (PRESET column refs) landed in v1.4.2. |
+| `demo.tape` | renders -> `docs/demo.gif` + 4× `docs/frames/demo-*.png` | Headline README GIF. |
+| `discover-datasets.tape` | renders -> `docs/discover-datasets.gif` + 4× `docs/frames/discover-datasets-*.png` | Walks the `census-augment discover` CLI: list datasets, drill into one, list PRESETs. No augmentation run, so cache is unused. |
+| `preset-features.tape` | renders -> `docs/preset-features.gif` + 4× `docs/frames/preset-features-*.png` | Shows a PRESET spec, then a config that uses three PRESETs, then the computed output. Unblocked once #23 (PRESET column refs) landed in v1.4.2. |
 | `Dockerfile` | `--docker` mode only | Custom VHS image with `census-augment` + unix tools (`cut`, `column`) baked in. |
 | `render.sh` / `render.ps1` | all demos | One-command entry points. Optional slug arg (default: `demo`). Flags: `--all` (render every tape), `--local` / `--docker` (force a render mode; default auto-detects). |
 | `output.csv`, `preset-output.csv` *(generated, gitignored)* | host-side pre-warm + the tape's recorded run | Last-rendered outputs. |
+
+Each tape produces a GIF *and* per-scene PNG snapshots via VHS's
+`Screenshot` directive. The PNGs land in `docs/frames/` and are
+useful for embedding in static contexts (blog posts, Slack
+previews, places where GIF animation doesn't reliably autoplay).
+See [`docs/frames/README.md`](../../docs/frames/README.md) for the
+full mapping.
 
 ## Rendering
 
@@ -108,8 +115,8 @@ Both modes require **`uv`** on PATH (used by the host-side pre-warm).
 ### Commit the result
 
 ```bash
-git add docs/demo.gif docs/discover-datasets.gif docs/preset-features.gif
-git commit -m "Refresh README demo GIFs"
+git add docs/*.gif docs/frames/*.png
+git commit -m "Refresh demo GIFs + frames"
 git push
 ```
 
