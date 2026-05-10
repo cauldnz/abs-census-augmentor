@@ -8,23 +8,15 @@ the rendering infrastructure (`Dockerfile`, `render.sh`,
 
 | File | Used by | What |
 | --- | --- | --- |
-| `input.csv` | `demo.tape` | Five famous Australian locations (Opera House, MCG, Bondi, Story Bridge, Adelaide Central Market) with lat/lon. |
-| `config.yaml` | `demo.tape` | Headline demo — mixes Census GCP (`G02.*`) and SEIFA (`SEIFA.*`) variables to show v1.3 / v1.4 multi-namespace dispatch. |
-| `demo.tape` | renders → `docs/demo.gif` | Headline README GIF. |
-| `discover-datasets.tape` | renders → `docs/discover-datasets.gif` | Walks the `census-augment discover` CLI: list datasets, drill into one, list PRESETs. No augmentation run, so cache is unused. |
+| `input.csv` | all tapes | Five famous Australian locations (Opera House, MCG, Bondi, Story Bridge, Adelaide Central Market) with lat/lon. |
+| `config.yaml` | `demo.tape` | Headline demo config — mixes Census GCP (`G02.*`) and SEIFA (`SEIFA.*`) variables to show v1.3 / v1.4 multi-namespace dispatch. |
+| `preset-config.yaml` | `preset-features.tape` | Three PRESET ratios (`pct_renters`, `pct_drive_to_work`, `pct_aged_65_plus`). |
+| `demo.tape` | renders -> `docs/demo.gif` | Headline README GIF. |
+| `discover-datasets.tape` | renders -> `docs/discover-datasets.gif` | Walks the `census-augment discover` CLI: list datasets, drill into one, list PRESETs. No augmentation run, so cache is unused. |
+| `preset-features.tape` | renders -> `docs/preset-features.gif` | Shows a PRESET spec, then a config that uses three PRESETs, then the computed output. Unblocked once #23 (PRESET column refs) landed in v1.4.2. |
 | `Dockerfile` | all demos | Custom VHS image with `census-augment` + unix tools (`cut`, `column`) baked in. |
-| `render.sh` / `render.ps1` | all demos | One-command entry points. Take an optional slug arg picking the tape (default: `demo`). |
-| `output.csv` *(generated, gitignored)* | host-side pre-warm + the tape's recorded run | Last-rendered headline output. |
-
-### Deferred (blocked on issue #23)
-
-A third demo, `preset-features.gif`, is planned to show off PRESET
-features (the v1.4 first-class PRESET pipeline integration). It's
-gated on [#23](https://github.com/cauldnz/abs-census-augmentor/issues/23)
-— the v1.3 PRESET catalogue references column names that don't exist
-in the real GCP DataPack, so PRESETs can't be exercised end-to-end
-yet. Once #23 lands, the demo's tape + config will be added back to
-this directory and rendered.
+| `render.sh` / `render.ps1` | all demos | One-command entry points. Take an optional slug arg (default: `demo`); pass `--all` to render every tape in one batch. |
+| `output.csv`, `preset-output.csv` *(generated, gitignored)* | host-side pre-warm + the tape's recorded run | Last-rendered outputs. |
 
 ## Rendering
 
@@ -34,22 +26,33 @@ From the **repo root**:
 # macOS / Linux / WSL / devcontainer
 ./tools/demo/render.sh                        # docs/demo.gif (headline)
 ./tools/demo/render.sh discover-datasets      # docs/discover-datasets.gif
+./tools/demo/render.sh preset-features        # docs/preset-features.gif
+./tools/demo/render.sh --all                  # every tape in lexical order
 
 # Windows PowerShell
 .\tools\demo\render.ps1
 .\tools\demo\render.ps1 discover-datasets
+.\tools\demo\render.ps1 preset-features
+.\tools\demo\render.ps1 --all
 ```
+
+`--all` is the easiest path when you've added or edited a tape and
+want every GIF refreshed. Pre-warm and image build run once for the
+whole batch; only the actual vhs render repeats per tape (~30 s
+each on a warm cache).
 
 The script:
 
 1. Verifies Docker is reachable.
-2. Pre-warms the host's ABS cache (`census-augment fetch` for boundaries
-   + GCP, then a `census-augment run` against the demo's config so
-   any registered-dataset caches the tape touches — SEIFA, etc. — are
-   populated before VHS starts recording).
-3. Builds (or reuses, if cached) the `census-augment-vhs` Docker image.
-4. Runs vhs against the chosen tape with the repo and the host's ABS
-   cache mounted into the container.
+2. Pre-warms the host's ABS cache (`census-augment fetch` for
+   boundaries + GCP, then a `census-augment run` against every
+   `*.yaml` in `tools/demo/` so any registered-dataset caches the
+   tapes touch — SEIFA, etc. — are populated before VHS starts
+   recording).
+3. Builds (or reuses, if cached) the `census-augment-vhs` Docker
+   image.
+4. Runs vhs against the chosen tape (or every tape, with `--all`)
+   with the repo and the host's ABS cache mounted into the container.
 5. Drops the rendered GIF at `docs/<slug>.gif`.
 
 ### Why Docker?
@@ -82,7 +85,7 @@ The visible portion of each GIF is ~20–30 s regardless.
 ### Commit the result
 
 ```bash
-git add docs/demo.gif docs/discover-datasets.gif
+git add docs/demo.gif docs/discover-datasets.gif docs/preset-features.gif
 git commit -m "Refresh README demo GIFs"
 git push
 ```
@@ -107,11 +110,12 @@ so the tape's `cut` column indices stay aligned with the schema.
 
 ## Why lat/lon-only inputs?
 
-The headline demo deliberately avoids exercising any geocoder so it's
-reproducible without a populated G-NAF cache and without making live
-Nominatim calls (which are rate-limited at 1 req/sec). All five rows
-take the spatial-join path — fast, deterministic, and offline once
-the boundary file is cached.
+The headline demo and the preset-features demo both use lat/lon
+inputs to avoid exercising any geocoder, so they're reproducible
+without a populated G-NAF cache and without making live Nominatim
+calls (which are rate-limited at 1 req/sec). All five rows take the
+spatial-join path — fast, deterministic, and offline once the
+boundary file is cached.
 
 `discover-datasets.tape` doesn't run augmentation at all, so it's
 even simpler: it just calls `census-augment discover` against the
@@ -130,6 +134,7 @@ shell.
 brew install vhs ttyd
 vhs tools/demo/demo.tape
 vhs tools/demo/discover-datasets.tape
+vhs tools/demo/preset-features.tape
 
 # Linux
 go install github.com/charmbracelet/vhs@latest
