@@ -118,12 +118,18 @@ Override with `CENSUS_AUGMENT_DATA_DIR` / `CENSUS_AUGMENT_CACHE_DIR` env vars, t
 ## Development
 
 ```bash
-pytest                            # 400+ hermetic tests; no real network
-ruff check . && ruff format .     # Lint + format
-mypy src/ tools/                  # Strict type check
+uv run pytest                     # 500+ hermetic tests; no real network
+uv run ruff check . && uv run ruff format .     # Lint + format
+uv run mypy src/ tools/           # Strict type check
 ```
 
 The full suite is hermetic — every external interaction (Nominatim, ABS) is mocked. To validate against the live ABS endpoints, use the opt-in scripts in [`tools/`](tools/).
+
+### Dev Container (recommended)
+
+This repo ships a [VSCode Dev Container](.devcontainer/) that gives you a Linux Python 3.11 sandbox with `uv`, `gh`, the dev deps, and host-Docker access for VHS demo rendering. Open the repo in VSCode and run `Dev Containers: Reopen in Container` — first build takes ~3-5 minutes, subsequent attaches are seconds. See [`.devcontainer/README.md`](.devcontainer/README.md) for details.
+
+The dev container is what CI runs on, so `pytest` / `ruff` / `mypy` results inside the container match what gates PRs.
 
 ## Status
 
