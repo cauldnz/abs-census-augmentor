@@ -9,6 +9,25 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — `uv` hardlink warning on every operation inside the dev container
+
+Every `uv sync` / `uv run` inside the dev container printed:
+
+```
+warning: Failed to hardlink files; falling back to full copy.
+This may lead to degraded performance.
+```
+
+Cause: uv's cache (`~/.cache/uv/` on the container's overlayfs) and
+the project venv (`.venv/` under the bind-mounted workspace) are on
+different filesystems. Cross-filesystem hardlinks fail, so uv falls
+back to copy and warns every time.
+
+Fixed by setting `UV_LINK_MODE: "copy"` in `devcontainer.json`'s
+`containerEnv` — tells uv "we know, use copy mode quietly". The
+"performance degradation" is negligible for our dependency tree
+(the cache still avoids re-downloads; only the install hop changes).
+
 ### Added — Tool excludes for `.claude/` agent scratch space
 
 `pyproject.toml` now tells ruff, mypy, and pytest to skip
