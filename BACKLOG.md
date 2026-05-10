@@ -6,70 +6,52 @@ them up; they're not raw brainstorms.
 
 ## VHS terminal recordings (animated demos)
 
-The README currently embeds one VHS-rendered GIF (the v1.0 demo; see
-`tools/demo/`). Several v1.3+ surfaces would benefit from their own
-demo GIFs — backlogging here so we can render them in batches rather
-than one-by-one.
+The README embeds VHS-rendered GIFs to show what the tool actually
+does. Tape files live at `tools/demo/<slug>.tape`; rendering is
+one-command via `tools/demo/render.sh` (or `.ps1`).
 
-Each item below has the demo content sketched; rendering needs a
-~30-line `.tape` file (model from `tools/demo/demo.tape`) plus the
-Docker render path the existing demo uses. Output GIFs land in
-`docs/`.
+### Authored, ready to render
 
-### `discover-datasets.gif` — pluggable framework introduction
+These have tape files committed. Render them via the dev container
+(see `.devcontainer/`) or any host with Docker reachable. Output
+lands at `docs/<slug>.gif`.
 
-Short demo (~20 s) showing the new dataset registry:
+- **`docs/demo.gif`** — headline demo. Shows mixing GCP + SEIFA in one
+  config. Replaces the v1.0-era headline demo.
+- **`docs/discover-datasets.gif`** — walks `census-augment discover
+  --datasets` / `--dataset seifa_2021` / `--features` and shows the
+  underlying markdown spec format. No augmentation run, so cache is
+  unused.
 
-1. `census-augment discover --datasets` — lists the five registered
-   datasets with namespace / status / cadence.
-2. `census-augment discover --dataset seifa_2021` — shows the schema.
-3. `cat datasets/seifa_2021.md | head -30` — shows the markdown spec
-   format.
-4. `census-augment discover --features` — shows the PRESET catalogue.
+### Deferred
 
-Audience: someone evaluating whether the tool is right for them; this
-demo answers "what's actually available?" in 20 seconds.
+- **`docs/preset-features.gif`** — gated on
+  [#23](https://github.com/cauldnz/abs-census-augmentor/issues/23).
+  PRESETs reference column names that don't exist in the real GCP
+  DataPack, so the demo can't be rendered until those refs are
+  fixed. Tape design is sketched in #23's discussion; re-add the
+  `tools/demo/preset-features.tape` + `preset-config.yaml` files
+  once the underlying issue lands.
 
-### `seifa-augmentation.gif` — real SEIFA data
+- **`docs/seifa-augmentation.gif`** — superseded by `docs/demo.gif`
+  (the headline) which already shows SEIFA in action; revisit if
+  there's appetite for a SEIFA-specific deep-dive demo with
+  inner-Sydney-vs-regional contrast.
 
-Demo (~25 s) showing SEIFA augmentation end-to-end on a small input:
-
-1. Show a 5-row CSV of locations.
-2. `census-augment run --config seifa.yaml` (config has
-   `variables: {seifa_decile: SEIFA.irsd_aus_decile, ...}`).
-3. Show the enriched output with SA2 names + IRSD deciles.
-
-Worth picking 5 SA2s with visibly different SEIFA scores (e.g. inner
-Sydney high-SEIFA vs. outer-suburban low-SEIFA) so the demo's payoff
-is legible.
-
-### `preset-features.gif` — PRESET ratio computation
-
-Demo (~25 s) showing the FeatureEvaluator standalone:
-
-1. `import` + load a small DataFrame with G37 source columns.
-2. Apply `pct_renters` PRESET → renders the spec, computes the ratio.
-3. Show that out-of-bounds values produce a WARN log.
-
-This one is more Python-REPL flavoured than CLI — easier to record
-with a `>>> ` prompt in the tape than with a shell session.
-
-### `dss-payments-resolution.gif` — release resolution
-
-Demo (~15 s) showing DSS quarterly resolution via CKAN:
-
-1. `census-augment discover --dataset dss_payments`.
-2. `python -c "from census_augment.datasets._dss import DssDataSource; print(DssDataSource(release='latest', root='/tmp').resolved_release)"` — shows the auto-resolved quarter.
-
-Niche. Lower priority than the others.
+- **`docs/dss-payments-resolution.gif`** — niche. Shows DSS quarterly
+  release resolution via CKAN. Lower priority than the headline
+  demos.
 
 ### Notes for whoever renders these
 
-- `tools/demo/render.ps1` (Windows) and `tools/demo/render.sh` (macOS / Linux)
-  drive Docker. Each new demo needs a `.tape` file alongside.
+- `tools/demo/render.ps1` (Windows) and `tools/demo/render.sh` (macOS
+  / Linux / WSL / devcontainer) take an optional slug arg picking
+  the tape (default: `demo`). Each new demo needs a matching
+  `.tape` file alongside.
 - Keep individual GIFs to 20–30 seconds and < 500 KB.
-- The cache pre-warm pattern in the existing tape works — use `Hide`
-  / `Show` blocks around any download steps.
+- The cache pre-warm pattern in the render scripts handles
+  registered datasets; the tape's own `Hide`/`Show` blocks handle
+  any final cache touch-ups.
 
 ## Future datasets (deferred from #15)
 
