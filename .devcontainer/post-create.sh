@@ -43,36 +43,73 @@ git config --global --add safe.directory "$(pwd)"
 # can render demo GIFs natively from inside the devcontainer
 # (avoiding the docker-in-docker round-trip through the host's
 # Docker socket). Idempotent — skipped if vhs is already on PATH.
+#
+# Notes on what apt vs. GitHub-release installs:
+#
+# - ffmpeg + bsdmainutils ARE in Debian bookworm main, so apt.
+# - ttyd is NOT in Debian bookworm main. The previous version of
+#   this script tried `apt-get install ttyd` and failed with
+#   "no installation candidate". ttyd's upstream ships a static
+#   binary per arch on each GitHub release (verified against
+#   https://github.com/tsl0922/ttyd/releases — assets are
+#   `ttyd.x86_64`, `ttyd.aarch64`, etc.); we curl that.
+# - vhs is also not in Debian repos; same GitHub-release pattern.
 if ! command -v vhs >/dev/null 2>&1; then
     echo "==> Installing VHS for native demo rendering..."
+
+    # apt-installable deps first.
     sudo apt-get update >/dev/null
-    # ttyd: VHS uses it to host the recorded terminal session.
     # ffmpeg: VHS encodes captured frames into the output GIF.
     # bsdmainutils: provides `column`, used by demo tapes to align
     #               the projected output table.
     sudo apt-get install -y --no-install-recommends \
-        ttyd ffmpeg bsdmainutils >/dev/null
-    # VHS itself is a single Go binary; install from the official
-    # GitHub release rather than apt (not in Debian repos).
-    vhs_version="0.11.0"
-    tmp_vhs="$(mktemp -d)"
+        ffmpeg bsdmainutils >/dev/null
+
+    # Resolve the architecture once for both ttyd and vhs.
     arch="$(uname -m)"
     case "$arch" in
-        x86_64)  vhs_arch="x86_64" ;;
-        aarch64) vhs_arch="arm64" ;;
+        x86_64)
+            vhs_arch="x86_64"
+            ttyd_arch="x86_64"
+            ;;
+        aarch64)
+            vhs_arch="arm64"
+            ttyd_arch="aarch64"
+            ;;
         *)
-            echo "  WARNING: unknown arch $arch; skipping VHS install. " \
+            echo "  WARNING: unknown arch $arch; skipping VHS install." \
                  "render.sh will fall back to Docker." >&2
-            tmp_vhs=""
+            arch=""
             ;;
     esac
-    if [[ -n "$tmp_vhs" ]]; then
+
+    if [[ -n "$arch" ]]; then
+        # ttyd: VHS uses it to host the recorded terminal session.
+        # Single static binary per arch from the upstream GitHub
+        # release; no archive to extract.
+        ttyd_version="1.7.7"
+        echo "  Installing ttyd ${ttyd_version} (${ttyd_arch})..."
+        tmp_ttyd="$(mktemp)"
+        curl -fsSL \
+            "https://github.com/tsl0922/ttyd/releases/download/${ttyd_version}/ttyd.${ttyd_arch}" \
+            -o "$tmp_ttyd"
+        sudo install -m 0755 "$tmp_ttyd" /usr/local/bin/ttyd
+        rm -f "$tmp_ttyd"
+
+        # vhs: the renderer itself. Tarball with vhs binary inside.
+        vhs_version="0.11.0"
+        echo "  Installing vhs ${vhs_version} (${vhs_arch})..."
+        tmp_vhs="$(mktemp -d)"
         curl -fsSL \
             "https://github.com/charmbracelet/vhs/releases/download/v${vhs_version}/vhs_${vhs_version}_Linux_${vhs_arch}.tar.gz" \
             | tar xz -C "$tmp_vhs"
         sudo install -m 0755 "$tmp_vhs"/vhs_*/vhs /usr/local/bin/vhs
         rm -rf "$tmp_vhs"
-        echo "  $(vhs --version)"
+
+        # Smoke-test both binaries actually run.
+        ttyd --version >/dev/null
+        vhs --version >/dev/null
+        echo "  $(vhs --version) + ttyd $(ttyd --version 2>&1 | head -n 1)"
     fi
 fi
 

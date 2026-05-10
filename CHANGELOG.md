@@ -9,6 +9,32 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — Devcontainer post-create failed to install `ttyd` from apt
+
+PR #29 added a step to `post-create.sh` that ran:
+
+```
+apt-get install -y --no-install-recommends ttyd ffmpeg bsdmainutils
+```
+
+ttyd is **not** in Debian bookworm's main repo, so apt aborted with
+`E: Package 'ttyd' has no installation candidate` and the
+post-create halted with exit 100 — leaving the dev container
+half-configured (uv installed but no native vhs).
+
+Fixed by following the same pattern we already use for vhs itself:
+download the upstream static binary from the ttyd GitHub release
+(verified against the live release listing —
+`https://github.com/tsl0922/ttyd/releases/tag/1.7.7` ships
+`ttyd.x86_64` and `ttyd.aarch64` as standalone binaries; no
+archive to extract). `ffmpeg` and `bsdmainutils` continue to come
+from apt, which does have them.
+
+Author note: this was a Real Data First miss — I assumed ttyd was
+available via apt without checking. CLAUDE.md's rule applies to
+package availability the same way it applies to schema columns:
+verify against the real source, don't guess. Lesson learned.
+
 ### Fixed — Demo Dockerfile missing `features/` and `datasets/` (regression from v1.4.1)
 
 `tools/demo/Dockerfile` only copied `pyproject.toml`, `README.md`,
