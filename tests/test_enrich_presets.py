@@ -69,12 +69,16 @@ def _gcp_datapacks_with(table_data: dict[str, dict[str, list[float]]]) -> MagicM
 
 
 def test_preset_only_config_loads_sources_and_evaluates() -> None:
-    """A pure-PRESET config triggers source loading + evaluator + cleanup."""
+    """A pure-PRESET config triggers source loading + evaluator + cleanup.
+
+    Column names mirror the real G37 schema
+    (``tests/fixtures/gcp-schemas/G37.txt``).
+    """
     datapacks = _gcp_datapacks_with(
         {
             "G37": {
-                "R_Tot": [4500, 250, 1200],
-                "OPDs_Total": [9000, 1000, 8000],
+                "R_Tot_Total": [4500, 250, 1200],
+                "Total_Total": [9000, 1000, 8000],
             },
         }
     )
@@ -95,7 +99,8 @@ def test_preset_only_config_loads_sources_and_evaluates() -> None:
         f"unexpected synthetic columns in result: {list(lookup.columns)}"
     )
 
-    # The values match the formula the spec encodes (R_Tot / OPDs_Total * 100).
+    # The values match the formula the spec encodes
+    # (R_Tot_Total / Total_Total * 100).
     expected = pd.Series([50.0, 25.0, 15.0], name="sa2_renters_pct")
     pd.testing.assert_series_equal(
         lookup["sa2_renters_pct"].reset_index(drop=True),
@@ -105,14 +110,18 @@ def test_preset_only_config_loads_sources_and_evaluates() -> None:
 
 
 def test_preset_with_sum_numerator_evaluates_correctly() -> None:
-    """pct_drive_to_work uses a multi-field sum numerator; sources still auto-load."""
+    """pct_drive_to_work uses a multi-field sum numerator; sources still auto-load.
+
+    Column names mirror the real G62 schema
+    (``tests/fixtures/gcp-schemas/G62.txt``).
+    """
     datapacks = _gcp_datapacks_with(
         {
             "G62": {
-                "OneMethod_CarAsDriver_P": [400, 50, 100],
-                "OneMethod_CarAsPassenger_P": [50, 10, 20],
-                "OneMethod_Truck_P": [40, 5, 5],
-                "OneMethod_MotorbikeOrScooter_P": [10, 0, 0],
+                "One_method_Car_as_driver_P": [400, 50, 100],
+                "One_method_Car_as_passenger_P": [50, 10, 20],
+                "One_method_Truck_P": [40, 5, 5],
+                "One_method_Motorbike_scootr_P": [10, 0, 0],
                 "Tot_P": [1000, 200, 500],
             }
         }
@@ -140,12 +149,16 @@ def test_preset_with_sum_numerator_evaluates_correctly() -> None:
 
 
 def test_preset_mixed_with_plain_gcp_variable() -> None:
-    """A config with both PRESET and plain GCP refs returns both columns."""
+    """A config with both PRESET and plain GCP refs returns both columns.
+
+    Column names mirror the real G01 / G37 schemas
+    (``tests/fixtures/gcp-schemas/``).
+    """
     datapacks = _gcp_datapacks_with(
         {
             "G37": {
-                "R_Tot": [4500, 250, 1200],
-                "OPDs_Total": [9000, 1000, 8000],
+                "R_Tot_Total": [4500, 250, 1200],
+                "Total_Total": [9000, 1000, 8000],
             },
             "G01": {
                 "Tot_P_P": [12000, 2000, 9500],
@@ -178,14 +191,25 @@ def test_preset_mixed_with_plain_gcp_variable() -> None:
 
 
 def test_multiple_real_presets_load_only_required_tables() -> None:
-    """Two real PRESETs covering several GCP tables produce all outputs."""
+    """Two real PRESETs covering several GCP tables produce all outputs.
+
+    Column names mirror the real G01 / G29 schemas
+    (``tests/fixtures/gcp-schemas/``). Note that ``pct_aged_65_plus``
+    sums the three 65+ age bands within G01 — there is no separate
+    G04 in the real DataPack (that table is split into G04A / G04B
+    and neither has a 65+ total).
+    """
     datapacks = _gcp_datapacks_with(
         {
-            "G01": {"Tot_P_P": [10000, 5000, 2000]},
-            "G04": {"Age_65_yr_above_P": [1500, 1000, 600]},
+            "G01": {
+                "Tot_P_P": [10000, 5000, 2000],
+                "Age_65_74_yr_P": [1000, 700, 400],
+                "Age_75_84_yr_P": [400, 200, 150],
+                "Age_85ov_P": [100, 100, 50],
+            },
             "G29": {
-                "OneP_F_C_Tot": [200, 100, 50],
-                "Tot_F_C_Tot": [1000, 500, 250],
+                "OPF_ChU15_a_Total_F": [200, 100, 50],
+                "CF_ChU15_a_Total_F": [800, 400, 200],
             },
         }
     )
@@ -204,13 +228,13 @@ def test_multiple_real_presets_load_only_required_tables() -> None:
     assert "sa2_p65" in lookup.columns
     assert "sa2_ofp" in lookup.columns
 
-    # 1500/10000*100 = 15.0, 200/1000*100 = 20.0
+    # (1000+400+100)/10000*100 = 15.0; 200/(200+800)*100 = 20.0
     assert lookup.loc["117011326", "sa2_p65"] == 15.0
     assert lookup.loc["117011326", "sa2_ofp"] == 20.0
 
     # Per-table grouping in _build_gcp_lookup ensures one load per table.
     loaded_tables = [call.args[0] for call in datapacks.load_table.call_args_list]
-    assert sorted(loaded_tables) == ["G01", "G04", "G29"]
+    assert sorted(loaded_tables) == ["G01", "G29"]
     # Each loaded once, not duplicated by synthetic source aliasing.
     assert len(loaded_tables) == len(set(loaded_tables))
 

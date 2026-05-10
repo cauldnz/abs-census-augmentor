@@ -9,10 +9,10 @@ tags: [transport, employment, fuel-demand]
 numerator:
   expression: sum
   fields:
-    - G62.OneMethod_CarAsDriver_P
-    - G62.OneMethod_CarAsPassenger_P
-    - G62.OneMethod_Truck_P
-    - G62.OneMethod_MotorbikeOrScooter_P
+    - G62.One_method_Car_as_driver_P
+    - G62.One_method_Car_as_passenger_P
+    - G62.One_method_Truck_P
+    - G62.One_method_Motorbike_scootr_P
 denominator:
   expression: field
   field: G62.Tot_P
@@ -68,7 +68,7 @@ commutes are more common, so it correlates with the wrong things.
 
 If "drive" is intended to mean *driving themselves only* (excluding car
 passengers, truck and motorbike), narrow the numerator to
-`G62.OneMethod_CarAsDriver_P` only. Worth surfacing as a PRESET parameter
+`G62.One_method_Car_as_driver_P` only. Worth surfacing as a PRESET parameter
 (`drive_definition: "all_private_motor" | "self_driver_only"`).
 
 ## Bounds (typical, not theoretical)
@@ -83,3 +83,4 @@ respondents (small-area noise, treat with caution).
   https://www.abs.gov.au/census/guide-census-data/census-dictionary/2021/variables-topic/transport/method-travel-work-mtwp
 - 2021 Census product release guide (table inventory):
   https://www.abs.gov.au/census/guide-census-data/2021-census-product-release-guide
+- Real-data schema check: `tests/fixtures/gcp-schemas/G62.txt`

@@ -1,0 +1,9 @@
+Table G34: Number of Motor Vehicles by Dwellings
+  Num_MVs_per_dweling_0_MVs	Dwellings
+  Num_MVs_per_dweling_1_MVs	Dwellings
+  Num_MVs_per_dweling_2_MVs	Dwellings
+  Num_MVs_per_dweling_3_MVs	Dwellings
+  Num_MVs_per_dweling_4mo_MVs	Dwellings
+  Num_MVs_per_dweling_Tot	Dwellings
+  Num_MVs_NS	Dwellings
+  Total_dwelings	Dwellings

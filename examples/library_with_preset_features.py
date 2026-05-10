@@ -46,8 +46,9 @@ def main() -> None:
 
     # Mix GCP, SEIFA, and PRESET variables in one config — the pipeline
     # dispatches each through the right loader. The PRESETs' source
-    # columns (G37.R_Tot, G37.OPDs_Total, G62.* for drive-to-work, etc.)
-    # are loaded transparently from GCP and dropped from the output.
+    # columns (G37 tenure totals for renters, G62 method-of-travel for
+    # drive-to-work, G01 65+ age bands for the ageing measure) are
+    # loaded transparently from GCP and dropped from the output.
     pipeline = Pipeline.create(
         latitude_column="lat",
         longitude_column="lon",

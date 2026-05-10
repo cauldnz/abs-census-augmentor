@@ -1,0 +1,9 @@
+Table G02: Selected Medians and Averages
+  Median_age_persons	Median age of persons
+  Median_mortgage_repay_monthly	Median mortgage repayment ($/monthly)
+  Median_tot_prsnl_inc_weekly	Median total personal income ($/weekly)
+  Median_rent_weekly	Median rent ($/weekly)
+  Median_tot_fam_inc_weekly	Median total family income ($/weekly)
+  Average_num_psns_per_bedroom	Average number of persons per bedroom
+  Median_tot_hhd_inc_weekly	Median total household income ($/weekly)
+  Average_household_size	Average household size
