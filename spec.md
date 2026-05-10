@@ -1,16 +1,15 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v1.3
+> **Status:** Implemented through v1.4.1 (current).
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 >
-> v1.0 shipped the SA2-keyed Census GCP enrichment pipeline.
-> v1.1–v1.2.x shipped G-NAF integration and bug fixes.
-> v1.3 generalises the pipeline into a pluggable framework: datasets and
-> derived features are now first-class registry entries described by
-> markdown spec files. The 2021 GCP DataPack stops being special and
-> becomes one entry in the registry alongside SEIFA, ERP, DSS, ATO
-> Personal Income, and any future SA2-keyed dataset. See §20 (Pluggable
-> Datasets) and §21 (Derived Features) for the v1.3 design.
+> Release history at a glance:
+>
+> - **v1.0** — SA2-keyed Census GCP enrichment pipeline (the baseline).
+> - **v1.1 / v1.2.x** — G-NAF Core integration as the primary geocoder; tiered matching (`gnaf_exact` → `gnaf_component` → `gnaf_fuzzy` → `nominatim_*`); MB-fast-path SA2 resolution; misc. bug fixes for the dotted-bucket TLS path and the `gnaf-loader` subdirectory.
+> - **v1.3** — Generalises the pipeline into a pluggable framework. Datasets and derived features become first-class registry entries described by markdown spec files. The 2021 GCP DataPack stops being special and becomes one entry alongside SEIFA, ERP, DSS, ATO Personal Income, plus six curated PRESET features. See §20 (Pluggable Datasets) and §21 (Derived Features).
+> - **v1.4** — `PRESET.<id>` is now a first-class variable namespace alongside `G\d+.<col>`, `SEIFA.*`, `ERP.*`, `DSS.*`, `ATO.*`. The pipeline auto-loads PRESET source columns transparently and runs `FeatureEvaluator` on them. See §21.2.
+> - **v1.4.1** — Build-config fix: the wheel now ships the dataset / feature spec markdown so registries populate on a real `pip install` (not just source checkouts). See decision #32 in §14.
 
 ---
 
@@ -138,51 +137,98 @@ The full G-NAF (~5 GB unpacked, multiple tables) is **not** used; G-NAF Core is 
 ## 5. Project Structure
 
 ```
-census-augment/
-├── README.md                      # User-facing intro (CLI + library)
-├── CLAUDE.md                      # Contributor / agent guidance
-├── pyproject.toml
-├── config.example.yaml            # Sample config for the CLI
+abs-census-augmentor/
+├── README.md                       # User-facing intro (CLI + library)
+├── CLAUDE.md                       # Contributor / agent guidance
+├── CHANGELOG.md                    # Per-release change log
+├── BACKLOG.md                      # Deferred items + future demos / datasets
+├── spec.md                         # This document
+├── pyproject.toml                  # hatchling build; force-include for spec md (§14 #32)
+├── config.example.yaml             # Sample config for the CLI
 ├── LICENSE
 ├── .gitignore
-├── examples/                      # Runnable usage scripts (CLI + library)
-├── data/                          # Optional project-local cache; gitignored
-│   ├── README.md                  # Defaults to platform user cache (§9)
-│   └── .gitignore                 # Ignores all but README.md
-├── cache/                         # Optional project-local geocoding cache
+├── .gitattributes                  # LF endings on *.sh / *.tape
+├── .devcontainer/                  # VSCode + WSL one-command dev setup
+│   ├── devcontainer.json
+│   ├── post-create.sh              # uv install + sync + smoke test
+│   └── README.md
+├── .github/workflows/              # CI: tests + ruff + mypy + wheel-install regression
+├── datasets/                       # Markdown specs for registered datasets (§20.1)
+│   ├── _template.md
+│   ├── gcp_2021.md
+│   ├── seifa_2021.md
+│   ├── erp_by_sa2.md
+│   ├── dss_payments.md
+│   └── ato_personal_income.md
+├── features/                       # Markdown specs for PRESET features (§21.1)
+│   ├── _template.md
+│   ├── pct_drive_to_work.md
+│   ├── motor_vehicles_per_dwelling.md
+│   ├── pct_renters.md
+│   ├── pct_employed_full_time.md
+│   ├── pct_aged_65_plus.md
+│   └── pct_one_parent_family.md
+├── docs/                           # Embedded README assets (demo GIFs)
+├── examples/                       # Runnable usage scripts (CLI + library)
+├── data/                           # Optional project-local cache; gitignored
+│   ├── README.md                   # Defaults to platform user cache (§9)
+│   └── .gitignore                  # Ignores all but README.md
+├── cache/                          # Optional project-local geocoding cache
 │   ├── README.md
 │   └── .gitignore
 ├── src/
 │   └── census_augment/
-│       ├── __init__.py            # Public API exports (spec §18.4)
-│       ├── py.typed               # Inline type marker for downstream users
-│       ├── cli.py                 # Typer entry point
-│       ├── config.py              # Pydantic schema + YAML loader
-│       ├── paths.py               # User-cache directory resolution (§9)
-│       ├── catalog.py             # Variable resolution + search + suggestions
-│       ├── spatial.py             # Point-in-polygon → SA2 (fallback path)
-│       ├── mb_correspondence.py   # MB_CODE → SA2_CODE lookup (fast path)
-│       ├── enrich.py              # SA2 + variables → enriched DataFrame
-│       ├── pipeline.py            # Orchestration; multi-provider, MB/spatial split
+│       ├── __init__.py             # Public API exports (spec §18.4)
+│       ├── py.typed                # Inline type marker for downstream users
+│       ├── cli.py                  # Typer entry point (run / discover / fetch / gnaf-info / validate)
+│       ├── config.py               # Pydantic schema + YAML loader
+│       ├── paths.py                # User-cache directory resolution (§9)
+│       ├── catalog.py              # GCP variable resolution + search + suggestions
+│       ├── spatial.py              # Point-in-polygon → SA2 (fallback path)
+│       ├── mb_correspondence.py    # MB_CODE → SA2_CODE lookup (fast path)
+│       ├── enrich.py               # CensusEnricher: dispatch + PRESET integration (§7.4, §21.2)
+│       ├── pipeline.py             # Orchestration; multi-provider, MB/spatial split
+│       ├── features.py             # FeatureSpec + FeatureRegistry + FeatureEvaluator (§21)
 │       ├── data_sources/
-│       │   ├── _base.py           # Shared download/extract base
-│       │   ├── boundaries.py      # Shapefile download + load
-│       │   ├── datapacks.py       # CSV + Excel-metadata parser
-│       │   └── gnaf.py            # G-NAF Core fetch + DuckDB indexing
+│       │   ├── _base.py            # Shared download/extract base
+│       │   ├── boundaries.py       # Shapefile download + load
+│       │   ├── datapacks.py        # CSV + Excel-metadata parser
+│       │   └── gnaf.py             # G-NAF Core fetch + DuckDB indexing
+│       ├── datasets/               # Pluggable-dataset framework (§20)
+│       │   ├── __init__.py         # `registry` singleton (re-export)
+│       │   ├── _spec.py            # DatasetSpec parser
+│       │   ├── _protocol.py        # DatasetFetcher Protocol
+│       │   ├── _registry.py        # Registry + namespace resolution
+│       │   ├── _seifa.py           # SeifaDataSource
+│       │   ├── _erp.py             # ErpDataSource
+│       │   ├── _dss.py             # DssDataSource
+│       │   └── _ato.py             # AtoDataSource
 │       └── geocoding/
-│           ├── base.py            # Geocoder Protocol + GeocodeResult dataclass
-│           ├── cache.py           # Hash-keyed JSON cache (sharded)
-│           ├── normalize.py       # AU-specific address normaliser (rules-based)
-│           ├── gnaf.py            # GnafGeocoder (Tiers 1–3); DuckDB-backed
-│           └── nominatim.py       # NominatimGeocoder (Tier 4); fallback
-├── tools/                         # Real-data verification (see §17)
+│           ├── base.py             # Geocoder Protocol + GeocodeResult dataclass
+│           ├── cache.py            # Hash-keyed JSON cache (sharded)
+│           ├── normalize.py        # AU-specific address normaliser (rules-based)
+│           ├── gnaf.py             # GnafGeocoder (Tiers 1–3); DuckDB-backed
+│           └── nominatim.py        # NominatimGeocoder (Tier 4); fallback
+├── tools/                          # Real-data verification (see §17) + demo rendering
 │   ├── README.md
 │   ├── fetch_real_data.py
-│   └── verify_real_parsers.py
-└── tests/                         # Hermetic test suite (no real network)
-    ├── conftest.py                # Shared fixtures (synthetic SA2 + DataPack + G-NAF)
-    └── test_*.py
+│   ├── verify_real_parsers.py
+│   └── demo/                       # VHS scripts + Dockerfile for README GIFs
+│       ├── Dockerfile
+│       ├── demo.tape
+│       ├── render.sh / render.ps1
+│       ├── config.yaml
+│       └── input.csv
+└── tests/                          # Hermetic test suite (no real network)
+    ├── conftest.py                 # Shared fixtures (synthetic SA2 + DataPack + G-NAF)
+    └── test_*.py                   # 24 files, ~515 tests as of v1.4.1
 ```
+
+Wheel installs additionally see (force-included from `datasets/` and `features/`
+at build time, per §14 #32):
+
+- `census_augment/datasets/_specs/*.md`
+- `census_augment/_features/*.md`
 
 ### `.gitignore` pattern for data and cache folders
 
@@ -556,6 +602,10 @@ These were open questions in earlier drafts, resolved through discussion:
 
 30. **PRESET integration into `CensusEnricher`, not a separate pipeline stage.** *Decision: handle `PRESET.<id>` refs inside `CensusEnricher.build_lookup()` by expanding them into synthetic source-column entries that the existing GCP / registered-dataset dispatch already knows how to fetch.* The alternative — a separate post-enrichment "feature stage" — would have duplicated dataset-loading logic and made dedupe across PRESETs harder. Putting it inside the enricher means: one source-fetch path for everyone, one `_build_gcp_lookup`-level grouping that already de-dupes per-table loads, and PRESETs evaluate against the same DataFrame the rest of the dispatch produces. Synthetic source columns use the reserved prefix `__preset_src__` and are dropped from the final lookup. Documented in §21.2.
 31. **Auto-load source columns rather than require users to request them.** *Decision: when a config asks for `pct_renters: PRESET.pct_renters`, the enricher walks `spec.source_fields()` and adds the underlying refs (`G37.R_Tot`, `G37.OPDs_Total`) to the load set transparently.* Forcing users to also list source columns would have been redundant — the spec already encodes them — and brittle (renaming a PRESET's denominator would silently break configs). v1.3 required users to do this manually because integration was not yet in scope; v1.4 closes that gap.
+
+**v1.4.1 additions (wheel packaging):**
+
+32. **Bundle dataset / feature spec markdown into the wheel via hatchling `force-include`.** *Decision: copy `datasets/*.md` and `features/*.md` into the built wheel under `census_augment/datasets/_specs/` and `census_augment/_features/` respectively at build time.* The pluggable framework's content lives in markdown spec files at the repo root, outside the package directory; with the default hatchling `packages = ["src/census_augment"]` config, those files never made it into the wheel — so a real `pip install abs-census-augmentor @ git+...` produced a working framework with empty registries. The runtime resolver in `_default_spec_dir()` / `_default_features_dir()` already looked in the right wheel-internal locations; the build just needed to put the files there. Verified end-to-end with a fresh isolated venv install. Closes #19. Documented in `CHANGELOG.md` under v1.4.1.
 
 ## 15. Open Questions
 
@@ -1000,24 +1050,47 @@ would land as `features/2026/pct_drive_to_work.md` referencing
 
 ---
 
-## 22. Migration notes for v1.0 → v1.3
+## 22. Migration notes for v1.0 → current (v1.4.1)
 
-v1.3 is a **mostly non-breaking** addition for the common path: existing
+The releases since v1.0 are **all additive** for the common path: existing
 `Pipeline.augment(df, variables={"median_age": "G02.Median_age_persons"})`
 configurations continue to work. The variable string `<TABLE>.<column>`
 still resolves through the `gcp_2021` registered dataset, which exposes
-the same fetcher and parser as before.
+the same fetcher and parser as before. The output schema also stays
+stable from v1.0 onwards (the breaking change was the v0.9 → v1.0 step
+documented in §14 #28).
 
-### 22.1 What's new (additive)
+### 22.1 What's new (additive across v1.1 – v1.4.1)
 
-- New variable namespaces: `SEIFA.*`, `ERP.*`, `DSS.*`, `ATO.*`, `PRESET.*`.
-- New CLI flags on `census-augment discover`: `--datasets`, `--features`, etc.
-- New constructor kwargs on `Pipeline.create`: `releases={...}` for pinning.
+- **v1.1 / v1.2.x.** G-NAF Core as the primary geocoder; tiered match
+  surface (`gnaf_exact` → `gnaf_component` → `gnaf_fuzzy` →
+  `nominatim_*`); MB-fast-path SA2 resolution; output gains
+  `geo_match_score` and `sa2_resolution` columns.
+- **v1.3.** Pluggable dataset registry. New variable namespaces:
+  `SEIFA.*`, `ERP.*`, `DSS.*`, `ATO.*`, `PRESET.*`. New CLI flags on
+  `census-augment discover`: `--datasets` (list registered datasets),
+  `--dataset <id>` (show one dataset's schema), `--features` (list
+  PRESET catalogue). New constructor kwargs on `Pipeline.create`:
+  `releases={...}` for pinning. Standalone `FeatureEvaluator` for
+  analysis code that has its own SA2-keyed DataFrame.
+- **v1.4.** `PRESET.<id>` is now first-class in any config — the
+  pipeline auto-loads each PRESET's source columns and runs
+  `FeatureEvaluator` transparently. New helper:
+  `FeatureSpec.source_fields()` for downstream tooling that wants to
+  inspect a PRESET's source dependencies.
+- **v1.4.1.** Wheel-install fix only. No API surface change. The
+  `pyproject.toml` build config now bundles `datasets/*.md` and
+  `features/*.md` into the wheel under
+  `census_augment/datasets/_specs/` and `census_augment/_features/` so
+  registries populate on `pip install ...@git+...` (not just source
+  checkouts). See §14 #32.
 
 ### 22.2 Breaking changes
 
-Mostly internal refactors that should be invisible to library and CLI
-callers. Anything that surfaces is documented in `CHANGELOG.md`.
+None since v1.0. Internal refactors during v1.3 (the dispatch in
+`CensusEnricher`) and v1.4 (PRESET expansion in `build_lookup`) are
+invisible to library and CLI callers. Anything that ever surfaces is
+documented in `CHANGELOG.md`.
 
 ### 22.3 Removed
 
