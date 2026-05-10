@@ -18,7 +18,7 @@ subsequent attaches are seconds.
 
 | | |
 |---|---|
-| Base image | `mcr.microsoft.com/devcontainers/python:1-3.11-bookworm` |
+| Base image | `mcr.microsoft.com/devcontainers/python:1-3.11-bookworm` (via local `Dockerfile` — see workaround note below) |
 | Package manager | `uv` (installed by `post-create.sh`) |
 | Dev deps | `pytest`, `pytest-mock`, `responses`, `moto`, `ruff`, `mypy`, `types-*` (synced via `uv sync --all-extras`) |
 | Extras | GitHub CLI, build-essentials, zsh + oh-my-zsh |
@@ -79,3 +79,20 @@ mounts the repo into it. Renders take ~30 s of wall-clock per demo.
   from a host run is still mounted. Delete it on the host and rebuild.
 - **Demo render hangs**: Docker Desktop probably isn't running on the host.
   Start it and rerun.
+- **Build fails with `NO_PUBKEY 62D54FD4003F6525`**: this is the upstream
+  yarn apt-source GPG key rotation. The `Dockerfile` in this directory
+  removes the broken yarn source as the first step of the build, so the
+  failure should not be reachable. If it ever resurfaces, check the
+  Dockerfile is still being picked up (i.e. devcontainer.json's
+  `build.dockerfile` field still points at `Dockerfile`).
+
+## Why the local Dockerfile?
+
+`devcontainer.json` builds from `Dockerfile` (in this directory) rather
+than referencing the Microsoft Python image directly. The Dockerfile is
+two lines: it bases on `mcr.microsoft.com/devcontainers/python:1-3.11-
+bookworm` and removes `/etc/apt/sources.list.d/yarn.list` before any
+`apt-get update` runs. Yarn's apt repo signing key was rotated upstream
+and the cached key in Microsoft's image no longer validates — feature
+installs (which run `apt-get update`) fail without this workaround. See
+the comment at the top of `Dockerfile` for the full rationale.
