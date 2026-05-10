@@ -39,7 +39,45 @@ print(f'  features: {len(features.list_features())} PRESETs')
 #   trigger 'dubious ownership' warnings).
 git config --global --add safe.directory "$(pwd)"
 
+# Install VHS + its runtime deps so `tools/demo/render.sh --local`
+# can render demo GIFs natively from inside the devcontainer
+# (avoiding the docker-in-docker round-trip through the host's
+# Docker socket). Idempotent — skipped if vhs is already on PATH.
+if ! command -v vhs >/dev/null 2>&1; then
+    echo "==> Installing VHS for native demo rendering..."
+    sudo apt-get update >/dev/null
+    # ttyd: VHS uses it to host the recorded terminal session.
+    # ffmpeg: VHS encodes captured frames into the output GIF.
+    # bsdmainutils: provides `column`, used by demo tapes to align
+    #               the projected output table.
+    sudo apt-get install -y --no-install-recommends \
+        ttyd ffmpeg bsdmainutils >/dev/null
+    # VHS itself is a single Go binary; install from the official
+    # GitHub release rather than apt (not in Debian repos).
+    vhs_version="0.11.0"
+    tmp_vhs="$(mktemp -d)"
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)  vhs_arch="x86_64" ;;
+        aarch64) vhs_arch="arm64" ;;
+        *)
+            echo "  WARNING: unknown arch $arch; skipping VHS install. " \
+                 "render.sh will fall back to Docker." >&2
+            tmp_vhs=""
+            ;;
+    esac
+    if [[ -n "$tmp_vhs" ]]; then
+        curl -fsSL \
+            "https://github.com/charmbracelet/vhs/releases/download/v${vhs_version}/vhs_${vhs_version}_Linux_${vhs_arch}.tar.gz" \
+            | tar xz -C "$tmp_vhs"
+        sudo install -m 0755 "$tmp_vhs"/vhs_*/vhs /usr/local/bin/vhs
+        rm -rf "$tmp_vhs"
+        echo "  $(vhs --version)"
+    fi
+fi
+
 echo
 echo "==> Devcontainer ready."
 echo "   Run 'uv run pytest' to verify the full suite."
-echo "   Run 'tools/demo/render.sh' to re-render the README demo (uses host Docker)."
+echo "   Run 'tools/demo/render.sh' to render a demo GIF (uses local vhs"
+echo "        if available, else falls back to host Docker)."

@@ -14,8 +14,8 @@ the rendering infrastructure (`Dockerfile`, `render.sh`,
 | `demo.tape` | renders -> `docs/demo.gif` | Headline README GIF. |
 | `discover-datasets.tape` | renders -> `docs/discover-datasets.gif` | Walks the `census-augment discover` CLI: list datasets, drill into one, list PRESETs. No augmentation run, so cache is unused. |
 | `preset-features.tape` | renders -> `docs/preset-features.gif` | Shows a PRESET spec, then a config that uses three PRESETs, then the computed output. Unblocked once #23 (PRESET column refs) landed in v1.4.2. |
-| `Dockerfile` | all demos | Custom VHS image with `census-augment` + unix tools (`cut`, `column`) baked in. |
-| `render.sh` / `render.ps1` | all demos | One-command entry points. Take an optional slug arg (default: `demo`); pass `--all` to render every tape in one batch. |
+| `Dockerfile` | `--docker` mode only | Custom VHS image with `census-augment` + unix tools (`cut`, `column`) baked in. |
+| `render.sh` / `render.ps1` | all demos | One-command entry points. Optional slug arg (default: `demo`). Flags: `--all` (render every tape), `--local` / `--docker` (force a render mode; default auto-detects). |
 | `output.csv`, `preset-output.csv` *(generated, gitignored)* | host-side pre-warm + the tape's recorded run | Last-rendered outputs. |
 
 ## Rendering
@@ -37,50 +37,73 @@ From the **repo root**:
 ```
 
 `--all` is the easiest path when you've added or edited a tape and
-want every GIF refreshed. Pre-warm and image build run once for the
-whole batch; only the actual vhs render repeats per tape (~30 s
-each on a warm cache).
+want every GIF refreshed. Pre-warm and (Docker-mode) image build run
+once for the whole batch; only the actual vhs render repeats per
+tape (~30 s each on a warm cache).
 
-The script:
+### Render modes
 
-1. Verifies Docker is reachable.
+Two ways to run vhs:
+
+| Mode | Means | When |
+| --- | --- | --- |
+| `--local` | Run the host's `vhs` binary directly. Requires `vhs`, `ttyd`, `ffmpeg`, `column` on PATH. | Inside the dev container (post-create installs all four), or on a Linux / macOS dev machine that has them. Fastest. |
+| `--docker` | Build a custom VHS Docker image and render through it. | Windows / macOS hosts where vhs isn't installed natively. Standalone — no project deps on the host. |
+
+Default is **auto**: if `vhs` is on PATH, use it; else fall back to
+Docker. Pass an explicit flag to override (e.g. `--docker` on a
+machine with vhs available but where you want to test the
+Dockerfile path).
+
+### What the script does
+
+1. Resolves render mode (above).
 2. Pre-warms the host's ABS cache (`census-augment fetch` for
    boundaries + GCP, then a `census-augment run` against every
    `*.yaml` in `tools/demo/` so any registered-dataset caches the
    tapes touch — SEIFA, etc. — are populated before VHS starts
    recording).
-3. Builds (or reuses, if cached) the `census-augment-vhs` Docker
-   image.
-4. Runs vhs against the chosen tape (or every tape, with `--all`)
-   with the repo and the host's ABS cache mounted into the container.
+3. (Docker mode only) Builds the `census-augment-vhs` image; cached
+   layers reused if source unchanged.
+4. Runs vhs against the chosen tape (or every tape, with `--all`).
 5. Drops the rendered GIF at `docs/<slug>.gif`.
 
-### Why Docker?
+### Why both modes?
 
-Native VHS on Windows is fragile — it relies on `bash.exe` and
-`ttyd.exe` being discoverable, which often hangs in initialisation.
-Going through Docker bypasses every Windows-toolchain issue: the vhs
-image is Linux, all unix tooling Just Works, and the same `Dockerfile`
-reproduces identically on macOS / Linux / Windows / WSL /
-devcontainer. One workflow for all maintainers.
+`--local` is faster and avoids any container layering. It's the
+right default inside the dev container, where `post-create.sh`
+installs vhs + its deps already.
+
+`--docker` is the cross-platform fallback. Native VHS on Windows
+is fragile — it relies on `bash.exe` and `ttyd.exe` being
+discoverable, which often hangs in initialisation. The Docker path
+bypasses every Windows-toolchain issue: the vhs image is Linux,
+all unix tooling Just Works, and the same `Dockerfile` reproduces
+identically on macOS / Linux / Windows / WSL / devcontainer. One
+workflow for whoever doesn't want vhs on their host.
 
 ### Timing
 
-| Run | Wallclock | Why |
+| Mode + run | Wallclock | Why |
 | --- | --- | --- |
-| First ever | ~3–5 min | Pull base vhs image (~150 MB) + apt-install Python + pip-install census-augment deps |
-| Subsequent (no source change) | ~30 s | All Docker layers cached; only the recording actually runs |
-| After source change | ~1–2 min | The `COPY` layers re-run, so `pip install` repeats; downstream layers stay cached |
+| `--local`, any | ~30 s per tape | Just vhs running natively |
+| `--docker`, first ever | ~3–5 min | Pull base vhs image (~150 MB) + apt-install Python + pip-install census-augment deps |
+| `--docker`, subsequent (no source change) | ~30 s per tape | All Docker layers cached |
+| `--docker`, after source change | ~1–2 min | `COPY` layers re-run; pip install repeats |
 
 The visible portion of each GIF is ~20–30 s regardless.
 
 ### Prerequisites
 
-- **Docker Desktop** running (Windows / macOS) or `dockerd` reachable
-  (Linux). The dev container in `.devcontainer/` mounts the host's
-  Docker socket so renders work from inside the container too.
-- **`uv`** on PATH (the script uses `uv run census-augment fetch` and
-  `uv run census-augment run` for the host-side pre-warm steps).
+For `--local`: `vhs`, `ttyd`, `ffmpeg`, `column` (from `bsdmainutils`)
+on PATH. The dev container's `post-create.sh` installs all four; on
+a host install them however your distro packages them (apt /
+homebrew / GitHub release).
+
+For `--docker`: Docker Desktop running (Windows / macOS) or
+`dockerd` reachable (Linux).
+
+Both modes require **`uv`** on PATH (used by the host-side pre-warm).
 
 ### Commit the result
 
