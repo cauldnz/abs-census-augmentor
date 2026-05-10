@@ -15,6 +15,56 @@ Python CLI tool that augments Australian location datasets with ABS Census data 
 
 ---
 
+## Real Data First
+
+**Hard rule.** If the tool reads, parses, or otherwise depends on the
+shape of an external artifact at runtime — ABS XLSX columns, GCP
+DataPack column codes, S3 bucket layout, CKAN response shape, ATO
+release filename, anything fetched at runtime — fetch a real sample
+first. Build production code AND test fixtures off that sample.
+
+**Never invent the schema** from documentation, naming conventions,
+intuition, or what "obviously must" be there.
+
+**Why this section exists.** We've shipped #10, #12, #17, #19, and
+#23 — five issues that are all the same bug. Synthetic fixtures
+encoded the schema we *thought* was there. Tests passed. Real users
+hit "column not found" / "file not in bucket" / "wrong field name"
+the moment they ran against actual data. Stop the pattern.
+
+**Operationally:**
+
+1. Before adding a fetcher, parser, dataset spec (`datasets/<id>.md`),
+   PRESET (`features/<id>.md`), or anything else that names columns /
+   paths / fields from an external source, **run one real fetch**.
+   Save a representative slice somewhere reviewable — `tools/`,
+   `tests/fixtures/`, or `data/` for larger artifacts (gitignored,
+   but the script that re-fetches it lives in `tools/`).
+2. Build the synthetic fixtures in `tests/conftest.py` (and anywhere
+   else) to mirror that real sample's **exact** column names and
+   structure. Synthetic *values* are fine; synthetic *schema* is not.
+3. Extend `tools/verify_real_parsers.py` so the new artifact is
+   exercised against the live source. This catches drift the day it
+   lands and gives the next round of work a known-good probe to run.
+4. **If you can't run the fetch right now** — offline session,
+   paywalled API, credentials you don't have, the live endpoint is
+   down — say so explicitly and ask the user. Don't guess. Don't
+   ship code referencing schemas you haven't seen. The cost of
+   getting this wrong is large (tests pass, real runs fail later);
+   the cost of asking is one chat turn.
+
+**The acid test.** For any external column, field, path, or filename
+your code or spec mentions, you should be able to point at one of:
+
+- a fixture / sample file checked in to the repo,
+- a `tools/` script that re-fetches the live artifact reproducibly,
+  or
+- a `verify_real_parsers.py` step that exercises the live source.
+
+If you can't, you're guessing. Stop and fetch — or stop and ask.
+
+---
+
 ## Tech Stack
 
 - Python 3.11+
@@ -78,6 +128,7 @@ census-augment discover --search "income"
 - Do **not** hit live ABS or Nominatim endpoints in unit tests. Use fixtures and mocks.
 - Do **not** bypass the variable resolver in `catalog.py` to access DataPack files directly from other modules.
 - Do **not** parse the ABS download HTML pages. Filenames are constructed deterministically from config (see `spec.md` §4).
+- Do **not** invent column names, file paths, bucket layouts, or any other external schema detail from documentation, intuition, or naming conventions. Fetch a real sample first; see "Real Data First" above. This is the rule that closes #10 / #12 / #17 / #19 / #23 — don't add #N+1 by guessing again.
 
 ---
 
@@ -107,4 +158,4 @@ Both share the same Pipeline implementation; the file-I/O is only at the edges o
 
 1. Re-read the relevant section of `spec.md`.
 2. Check the "Resolved Decisions" log (§14) — your question may already be answered.
-3. Ask the user before guessing about ABS data formats, file structures, or census variable semantics.
+3. **For anything involving an external schema** (ABS column names, file structures, bucket layouts, response shapes), follow the "Real Data First" rule above — fetch a real sample, or ask. Never guess.
