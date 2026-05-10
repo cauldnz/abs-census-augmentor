@@ -68,10 +68,28 @@ packages = ["src/census_augment"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Don't descend into Claude Code's agent scratch space. Each
+# `.claude/worktrees/<slug>/` is an independent checkout of this
+# repo on a different branch (parallel-PR worktree). Letting ruff
+# walk them duplicates findings AND lets each worktree's own
+# pyproject.toml override on-main rules via nested-config
+# discovery. See cauldnz/aus-fuel-forecaster#17.
+extend-exclude = [".claude/"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
+# Same reason as the ruff extend-exclude above. `mypy src/ tools/`
+# in the Makefile already scopes the walk to safe roots, but adding
+# the regex exclude makes ad-hoc invocations (`mypy .`) safe too.
+exclude = ['^\.claude/']
+
+[tool.pytest.ini_options]
+# Anchor test discovery to ./tests so pytest doesn't walk into
+# `.claude/worktrees/<slug>/tests/` when invoked from the repo
+# root. Same agent-scratch-space concern as the ruff and mypy
+# excludes above.
+testpaths = ["tests"]
 
 [[tool.mypy.overrides]]
 module = [

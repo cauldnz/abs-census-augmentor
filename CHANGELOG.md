@@ -9,6 +9,72 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — Tool excludes for `.claude/` agent scratch space
+
+`pyproject.toml` now tells ruff, mypy, and pytest to skip
+`.claude/worktrees/<slug>/`. Without these, each tool re-scans
+every source file once per active worktree AND honours each
+worktree's own `pyproject.toml` via nested-config discovery — so a
+rule disabled on `main` keeps firing inside in-flight branch
+worktrees, producing a wave of phantom findings.
+
+| Tool | Block | Setting |
+| --- | --- | --- |
+| ruff | `[tool.ruff]` | `extend-exclude = [".claude/"]` |
+| mypy | `[tool.mypy]` | `exclude = ['^\.claude/']` |
+| pytest | `[tool.pytest.ini_options]` | `testpaths = ["tests"]` |
+
+`CLAUDE.md` documents this as a project convention and lists the
+current exclusion set, so future agents adding a new tool that
+auto-walks the tree (coverage, black, pre-commit, etc.) extend the
+list rather than re-discover the bug.
+
+Pattern documented in
+[cauldnz/aus-fuel-forecaster#17](https://github.com/cauldnz/aus-fuel-forecaster/issues/17).
+
+### Added — `Makefile` for common workflows
+
+A `Makefile` at the repo root wraps the everyday dev commands:
+
+```
+$ make
+Usage: make <target>
+  help            Show this help
+
+Setup:
+  install         Install project + dev deps into .venv/
+  clean           Remove caches and build artefacts (keeps .venv/)
+  clean-all       clean + remove .venv/ (full reset)
+
+Test & quality:
+  test            Run hermetic pytest suite
+  test-fast       pytest -x --ff (fail fast, failed-first)
+  lint            ruff check .
+  format          ruff format . (writes files)
+  typecheck       mypy src/ tools/
+  check           lint + typecheck + test (CI-equivalent)
+
+Smoke & real-data:
+  smoke           Quick wire-up check (CLI, registries, PRESET specs)
+  verify-real     Real-data parser check (hits live ABS endpoints)
+
+Demos:
+  demo            Render docs/demo.gif (headline)
+  demos           Render every tape in tools/demo/
+
+Build:
+  build           Build the wheel
+  build-test      Build wheel + run wheel-install regression test
+```
+
+`make` with no args lists targets. Help text is parsed from `## ...`
+doc comments after each target — add a new target with an inline
+doc comment and it shows up automatically.
+
+POSIX/bash assumptions throughout; Windows users run inside the
+dev container or WSL. Underlying `uv run` commands still work
+directly for anyone who'd rather skip Make.
+
 ### Fixed — Chromium sandbox blocked by Docker's default seccomp profile
 
 PR #32 installed `chromium-sandbox` so chromium had its setuid

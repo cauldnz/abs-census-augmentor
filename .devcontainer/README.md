@@ -45,7 +45,16 @@ Even-Better-TOML + GitHub PR + GitLens.
    ```
    This persists across rebuilds.
 
-Once the container is up, everything works the way CI runs:
+Once the container is up, everything works the way CI runs. There's a `Makefile` at the repo root that wraps the common workflows:
+
+```bash
+make              # list all targets
+make smoke        # quick wire-up check
+make check        # lint + typecheck + test (CI-equivalent)
+make demos        # render every README demo GIF
+```
+
+Or use `uv run` directly:
 
 ```bash
 uv run pytest                  # full test suite

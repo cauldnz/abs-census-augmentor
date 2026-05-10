@@ -117,19 +117,36 @@ Override with `CENSUS_AUGMENT_DATA_DIR` / `CENSUS_AUGMENT_CACHE_DIR` env vars, t
 
 ## Development
 
+A `Makefile` wraps the common workflows. From the repo root:
+
+```bash
+make              # list all targets
+make install      # uv sync --all-extras
+make smoke        # quick wire-up check (CLI + registries + PRESET specs)
+make check        # lint + typecheck + test (CI-equivalent)
+make test         # hermetic pytest suite
+make verify-real  # opt-in real-data check (hits live ABS endpoints)
+make demos        # render every README demo GIF
+make build        # build the wheel
+```
+
+If you'd rather skip Make, the underlying commands work too:
+
 ```bash
 uv run pytest                     # 500+ hermetic tests; no real network
 uv run ruff check . && uv run ruff format .     # Lint + format
 uv run mypy src/ tools/           # Strict type check
 ```
 
-The full suite is hermetic — every external interaction (Nominatim, ABS) is mocked. To validate against the live ABS endpoints, use the opt-in scripts in [`tools/`](tools/).
+The full suite is hermetic — every external interaction (Nominatim, ABS) is mocked. To validate against the live ABS endpoints, use the opt-in scripts in [`tools/`](tools/) (or `make verify-real`).
 
 ### Dev Container (recommended)
 
-This repo ships a [VSCode Dev Container](.devcontainer/) that gives you a Linux Python 3.11 sandbox with `uv`, `gh`, the dev deps, and host-Docker access for VHS demo rendering. Open the repo in VSCode and run `Dev Containers: Reopen in Container` — first build takes ~3-5 minutes, subsequent attaches are seconds. See [`.devcontainer/README.md`](.devcontainer/README.md) for details.
+This repo ships a [VSCode Dev Container](.devcontainer/) that gives you a Linux Python 3.11 sandbox with `uv`, `gh`, `make`, the dev deps, and a native VHS install for demo rendering. Open the repo in VSCode and run `Dev Containers: Reopen in Container` — first build takes ~3-5 minutes, subsequent attaches are seconds. See [`.devcontainer/README.md`](.devcontainer/README.md) for details.
 
 The dev container is what CI runs on, so `pytest` / `ruff` / `mypy` results inside the container match what gates PRs.
+
+> **Windows users**: `make` doesn't ship with Windows by default and the Makefile uses POSIX/bash conventions. Open the dev container (or WSL) for the `make` targets, or fall back to `uv run ...` directly from PowerShell.
 
 ## Status
 

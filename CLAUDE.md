@@ -132,6 +132,40 @@ census-augment discover --search "income"
 
 ---
 
+## Tooling and `.claude/`
+
+`.claude/worktrees/<slug>/` is where the Claude Code agent hosts
+parallel git checkouts while working on multiple PRs at once. Each
+subdirectory is an independent clone of this repo on a different
+branch, with its own `pyproject.toml`.
+
+**Hard rule.** Any tool that walks the file tree from the repo
+root must be configured to skip `.claude/`. Without that, the tool
+will:
+
+1. Re-scan every source file once per active worktree (duplicate
+   findings).
+2. Honour each worktree's own `pyproject.toml` via nested-config
+   discovery — so rules disabled on `main` keep firing inside
+   in-flight branch worktrees.
+
+Current exclusions:
+
+| Tool | Where | How |
+| --- | --- | --- |
+| git | `.gitignore` | `.claude/` |
+| ruff | `pyproject.toml` `[tool.ruff]` | `extend-exclude = [".claude/"]` |
+| mypy | `pyproject.toml` `[tool.mypy]` | `exclude = ['^\.claude/']` |
+| pytest | `pyproject.toml` `[tool.pytest.ini_options]` | `testpaths = ["tests"]` |
+
+When adding a new tool that auto-walks the tree from the project
+root (coverage, black, pre-commit, anything that does nested-config
+discovery), give it an equivalent exclude in the same commit.
+Pattern is documented in
+[cauldnz/aus-fuel-forecaster#17](https://github.com/cauldnz/aus-fuel-forecaster/issues/17).
+
+---
+
 ## Project Layout
 
 See `spec.md` §5 for the full tree. Key entry points:
