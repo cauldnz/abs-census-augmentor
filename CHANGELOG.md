@@ -9,6 +9,33 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — Native VHS render in devcontainer failed for missing chromium libs
+
+After the dev container's post-create finished installing vhs +
+ttyd + ffmpeg, `tools/demo/render.sh --all` failed at the first
+render with:
+
+```
+could not launch browser: ... /home/vscode/.cache/rod/browser/
+chromium-1321438/chrome: error while loading shared libraries:
+libatk-1.0.so.0: cannot open shared object file: No such file or
+directory
+```
+
+VHS uses `go-rod` under the hood, which downloads its own headless
+chromium build to `~/.cache/rod/`. That binary needs the same
+shared libraries any chromium build needs (`libatk`, `libnss`,
+`libgbm`, `libgtk`, ...) — but the base devcontainer Python image
+doesn't ship them.
+
+Fixed by adding `chromium` to the apt-install list in
+`post-create.sh`. We don't actually use the apt-installed chromium
+binary (vhs has its own); we install it for its dependency closure,
+which pulls in every shared library go-rod's chromium needs at
+runtime. Verified `chromium` is in Debian bookworm main and depends
+on `libatk1.0-0 (>= 2.32.0)` against
+[packages.debian.org/bookworm/chromium](https://packages.debian.org/bookworm/chromium).
+
 ### Fixed — Devcontainer post-create failed to install `ttyd` from apt
 
 PR #29 added a step to `post-create.sh` that ran:
