@@ -17,6 +17,7 @@ the rendering infrastructure (`Dockerfile`, `render.sh`,
 | `Dockerfile` | `--docker` mode only | Custom VHS image with `census-augment` + unix tools (`cut`, `column`) baked in. |
 | `render.sh` / `render.ps1` | all demos | One-command entry points. Optional slug arg (default: `demo`). Flags: `--all` (render every tape), `--local` / `--docker` (force a render mode; default auto-detects). |
 | `output.csv`, `preset-output.csv` *(generated, gitignored)* | host-side pre-warm + the tape's recorded run | Last-rendered outputs. |
+| `.last-render.log` *(generated, gitignored)* | render.sh / render.ps1 | Per-tape vhs stdout/stderr captured during the most recent render. Useful for diagnosing tapes that render with exit 0 but produced a broken-looking GIF (the classic case: a `command not found` inside the recorded subshell). |
 
 Each tape produces a GIF *and* per-scene PNG snapshots via VHS's
 `Screenshot` directive. The PNGs land in `docs/frames/` and are

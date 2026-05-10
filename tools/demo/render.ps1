@@ -139,6 +139,16 @@ if ($resolvedMode -eq "docker") {
 New-Item -ItemType Directory -Force -Path docs | Out-Null
 New-Item -ItemType Directory -Force -Path docs/frames | Out-Null
 
+# Per-batch log file. Truncated at the start of every invocation,
+# then per-tape vhs output is appended. Useful for diagnosing
+# tapes that ran cleanly but produced a wrong-looking GIF
+# (`bash: <cmd>: command not found` inside the recorded subshell
+# is the classic symptom and won't surface as a non-zero exit
+# from vhs itself).
+$logPath = "tools/demo/.last-render.log"
+Set-Content -Path $logPath -Value $null
+Write-Host "Render log: $logPath" -ForegroundColor Cyan
+
 # ---- per-tape render ---------------------------------------------------
 
 function Render-Tape {
@@ -155,15 +165,25 @@ function Render-Tape {
     }
 
     Write-Host "Rendering ${tapePath} -> ${outputPath} ..." -ForegroundColor Cyan
+    $stamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
+    Add-Content -Path $logPath -Value ""
+    Add-Content -Path $logPath -Value "=== ${tapePath} -> ${outputPath} @ ${stamp} ==="
 
     if ($resolvedMode -eq "local") {
-        vhs $tapePath
+        # `uv run` is critical here, not cosmetic. `vhs` spawns its
+        # own bash subshell to record the tape; that subshell
+        # inherits this process's PATH. Without uv, `.venv/bin/`
+        # isn't on PATH, and any tape line invoking `census-augment`
+        # fails with `bash: census-augment: command not found` -
+        # silent in the GIF (just shows the error). `uv run vhs`
+        # prepends `.venv/bin/` to PATH for the entire process tree.
+        uv run vhs $tapePath 2>&1 | Tee-Object -FilePath $logPath -Append
     } else {
         docker run --rm `
             -v "${PWD}:/vhs" `
             -v "${hostCache}:/root/.cache/census-augment" `
             census-augment-vhs `
-            $tapePath
+            $tapePath 2>&1 | Tee-Object -FilePath $logPath -Append
     }
 
     if ($LASTEXITCODE -ne 0) { Write-Error "vhs render failed for $Slug." }
