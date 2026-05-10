@@ -47,6 +47,14 @@ git config --global --add safe.directory "$(pwd)"
 # Notes on what apt vs. GitHub-release installs:
 #
 # - ffmpeg + bsdmainutils ARE in Debian bookworm main, so apt.
+# - chromium is in bookworm main too. We install it not because vhs
+#   *uses* the apt-installed binary (vhs's go-rod downloads its own
+#   chromium build to ~/.cache/rod/) but because that downloaded
+#   chromium needs the runtime shared libraries (libatk, libnss,
+#   libgbm, libgtk, ...) which apt brings in as chromium's deps.
+#   Verified against
+#   https://packages.debian.org/bookworm/chromium — depends on
+#   libatk1.0-0 (>= 2.32.0) etc.
 # - ttyd is NOT in Debian bookworm main. The previous version of
 #   this script tried `apt-get install ttyd` and failed with
 #   "no installation candidate". ttyd's upstream ships a static
@@ -62,8 +70,12 @@ if ! command -v vhs >/dev/null 2>&1; then
     # ffmpeg: VHS encodes captured frames into the output GIF.
     # bsdmainutils: provides `column`, used by demo tapes to align
     #               the projected output table.
+    # chromium: pulls libatk + libnss + libgbm + libgtk etc. as
+    #           deps; vhs's downloaded headless chromium needs
+    #           those at runtime even though it doesn't use the
+    #           apt-installed chromium binary itself.
     sudo apt-get install -y --no-install-recommends \
-        ffmpeg bsdmainutils >/dev/null
+        ffmpeg bsdmainutils chromium >/dev/null
 
     # Resolve the architecture once for both ttyd and vhs.
     arch="$(uname -m)"
