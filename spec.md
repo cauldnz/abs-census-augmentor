@@ -1,7 +1,16 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Draft v1.0
+> **Status:** Draft v1.3
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
+>
+> v1.0 shipped the SA2-keyed Census GCP enrichment pipeline.
+> v1.1–v1.2.x shipped G-NAF integration and bug fixes.
+> v1.3 generalises the pipeline into a pluggable framework: datasets and
+> derived features are now first-class registry entries described by
+> markdown spec files. The 2021 GCP DataPack stops being special and
+> becomes one entry in the registry alongside SEIFA, ERP, DSS, ATO
+> Personal Income, and any future SA2-keyed dataset. See §20 (Pluggable
+> Datasets) and §21 (Derived Features) for the v1.3 design.
 
 ---
 
@@ -15,17 +24,23 @@ The output is a CSV with the original records plus appended columns drawn from t
 
 ## 2. Scope
 
-### v1 — in scope
+### v1 — in scope (v1.0 baseline + v1.3 additions)
 
 - Input: CSV containing addresses and/or `(lat, lon)` coordinates (or a mix per row).
 - Geocoding via a tiered strategy: G-NAF (Geoscape's Geocoded National Address File) as the primary "gold-standard" source, with Nominatim (public OpenStreetMap API) as a fallback.
 - SA2-level statistical area assignment via either G-NAF's mesh-block code (when available, no spatial join needed) or point-in-polygon spatial join (fallback path).
-- 2021 Census DataPack — General Community Profile (GCP).
+- **Registered SA2-keyed datasets** (v1.3 §20). The 2021 GCP DataPack is one entry. Initial registry:
+    - `gcp_2021` — 2021 Census GCP DataPack (existing).
+    - `seifa_2021` — Socio-Economic Indexes for Areas (4 indexes × 10 fields).
+    - `erp_by_sa2` — ABS Estimated Resident Population (annual).
+    - `dss_payments` — DSS Payment Demographic Data (quarterly).
+    - `ato_personal_income` — ABS Personal Income (administrative; ATO-derived).
+- **Derived features / PRESETs** (v1.3 §21). Curated ratios — `pct_drive_to_work`, `pct_renters`, `pct_aged_65_plus`, etc. — with the right denominator pre-baked. Single source of truth for "what's the right denominator for X" across downstream consumers.
 - Output: enriched CSV.
-- Configuration-driven variable selection using human-readable names.
+- Configuration-driven variable selection using human-readable names. Variable strings dispatch to the right dataset by namespace (e.g. `G02.foo` → GCP, `SEIFA.irsd_decile` → SEIFA, `PRESET.pct_drive_to_work` → derived feature).
 - Local caching of geocoded addresses, G-NAF data, and ABS data.
 - Runtime download of ABS data and G-NAF data; nothing checked into git.
-- A `discover` command to help users find census variables by keyword.
+- A `discover` command that surfaces registered variables, datasets, and PRESET features.
 
 ### Future / out of scope for v1
 
@@ -33,10 +48,11 @@ The output is a CSV with the original records plus appended columns drawn from t
 - SA1 and SA3 levels (architecture should not preclude them).
 - Other DataPack profiles (Indigenous, Working Population, Time Series).
 - 2026 Census data when released (architecture should not preclude it).
-- Computed/derived variables (ratios, percentages combining multiple columns) — these are an explicit downstream concern of the data science feature engineering pipeline that consumes this tool's output, not a responsibility of this tool.
 - Output formats other than CSV (Parquet, GeoPackage).
 - Explicit input deduplication. Duplicate input rows are processed independently; efficiency on duplicate addresses comes from the geocoding cache.
 - Heavy NLP-based address parsers (`address-net`, `libpostal`) are deferred entirely to extensibility hooks (§13). v1 ships a lightweight rules-based normaliser sufficient for well-formed AU addresses, with no opt-in extras — the heavy NLP options carry system-level prerequisites (TensorFlow, libpostal C library) that we want v1 to stay clear of.
+- Datasets with native granularity finer than annual (e.g. monthly economic indicators) — this tool is fundamentally about static / slow-moving SA2 features. DSS quarterly is the borderline case; v1.3 takes the latest snapshot per Pipeline run (see §20.4).
+- Datasets that aren't natively SA2-keyed (BoM weather is the canonical example — station-keyed, requires interpolation). Scope-creeping into point-to-area interpolation belongs in a sibling tool. See §20.7 for the deferred backlog.
 
 ### Usage assumptions
 
@@ -713,3 +729,274 @@ For the target scale (a few hundred rows per run):
 - Subsequent runs: G-NAF lookup latency is essentially zero. Total run time dominated by Nominatim fallback for un-matched addresses (1 req/sec).
 - On a few-thousand-row run with mostly well-formed inputs: expect Tier 1 to handle ~80%+ instantly, with the residual 20% spread across Tiers 2–4. Total runtime is bounded by the Tier 4 fall-through size × 1 second.
 - **For runs configured `providers: [gnaf]` (no Nominatim fallback) — or where every row matches G-NAF — there is no per-row network cost at all.** Tens of thousands of rows complete in seconds. This is the v1.0 unlock over v0.9, where Nominatim's 1 req/sec policy capped practical throughput at a few hundred rows.
+
+---
+
+## 20. Pluggable Datasets (v1.3)
+
+The pipeline keeps the same shape — geocode → SA2 resolve → enrich — but the
+*enrich* stage now dispatches across a registry of datasets rather than
+hard-coding the GCP DataPack.
+
+```
+Input CSV
+   │
+   ▼
+Geocoding (G-NAF tiered → Nominatim)
+   │
+   ▼
+SA2 Resolution (MB fast path → spatial fallback)
+   │
+   ▼
+Dataset Enrichment ─── for each requested variable, look up which
+                       registered dataset provides it; fetch (cached);
+                       join on sa2_code_2021; attach.
+   │                   ┌── gcp_2021       (G01..G62)
+   │                   ├── seifa_2021     (SEIFA.*)
+   │                   ├── erp_by_sa2     (ERP.*)
+   │                   ├── dss_payments   (DSS.*)
+   │                   └── ato_personal_income (ATO.*)
+   ▼
+Feature Derivation ─── for each PRESET feature, compute the curated
+                       ratio with the right denominator (§21).
+   │
+   ▼
+Output CSV
+```
+
+### 20.1 Dataset spec format
+
+One file per dataset, lives at `datasets/<id>.md`. YAML front-matter holds
+machine-parseable metadata; markdown body holds rationale, schema, and
+fetch notes.
+
+```markdown
+---
+id: <stable_snake_case_id>
+name: <human-readable name>
+status: proposed | active | deprecated
+custodian: <organisation>
+licence: <SPDX-style id>
+update_cadence: annual | quarterly | monthly | adhoc | one-shot
+geography_level: SA2
+geography_edition: 2021_ASGS_Edition_3
+geography_native: true | false
+join_key: sa2_code_2021
+landing_page: <URL>
+fetch_size_compressed: <approximate, for cache budgeting>
+tags: [<freeform tags>]
+namespace: <prefix used in Pipeline.variables, e.g. SEIFA>
+---
+
+# <name>
+
+<one-paragraph description>
+
+## Source / Update cadence / Granularity / Schema / Fetch notes / etc.
+```
+
+The full template is at `datasets/_template.md`.
+
+### 20.2 Registry
+
+`src/census_augment/datasets/_registry.py` parses every `datasets/*.md` file
+on import and indexes by `namespace` and by `id`. Variable resolution checks
+the registry first (e.g. `SEIFA.irsd_decile` → `seifa_2021` dataset →
+field `irsd_decile`); falls back to the existing GCP catalog for anything
+matching the `<TABLE_ID>.<column>` shape.
+
+Programmatic API:
+
+```python
+from census_augment.datasets import registry
+
+registry.list_datasets()           # all registered datasets
+registry.get("seifa_2021")         # single dataset by id
+registry.resolve_variable("SEIFA.irsd_decile")
+                                   # -> (dataset, field) tuple
+```
+
+### 20.3 Per-dataset fetcher
+
+Each registered dataset implements a small fetcher class with the same
+shape as `BoundariesDataSource` / `DataPacksDataSource`:
+
+```python
+class DatasetFetcher(Protocol):
+    def fetch(self, refresh: bool = False) -> Path: ...
+    def load(self) -> pd.DataFrame: ...   # SA2-keyed
+```
+
+The fetcher's `load()` returns a DataFrame indexed by `sa2_code_2021`
+exposing the columns the spec declares. The pipeline only needs the
+DataFrame to do the join — no per-dataset code touches the enrichment path.
+
+### 20.4 Release pinning
+
+Each dataset has a release identifier (year, quarter, monthly, ...).
+`Pipeline.create(...)` accepts a `releases` dict for reproducibility:
+
+```python
+pipeline = Pipeline.create(
+    releases={
+        "dss_payments": "2024-Q4",
+        "erp_by_sa2": 2024,
+    },
+)
+```
+
+Default behaviour: fetch the latest available release per dataset. Cache
+keys include the resolved release identifier so a re-run after a new
+release drops doesn't silently keep returning stale data.
+
+### 20.5 Discovery
+
+`census-augment discover` extends with dataset and feature flags:
+
+```bash
+census-augment discover --datasets                # list all registered datasets
+census-augment discover --dataset seifa_2021      # show schema of one
+census-augment discover --search income           # search across all variables
+```
+
+### 20.6 Initial registry (v1.3)
+
+| id | namespace | source | cadence | size | status |
+|---|---|---|---|---|---|
+| `gcp_2021` | `G01..G62` | ABS GCP DataPack | one-shot | ~40 MB | active (migrated from v1.0) |
+| `seifa_2021` | `SEIFA` | ABS SEIFA 2021 XLSX | one-shot | ~150 KB | active (v1.3) |
+| `erp_by_sa2` | `ERP` | ABS Regional Population XLSX | annual | ~3 MB | active (v1.3) |
+| `dss_payments` | `DSS` | DSS data.gov.au CKAN | quarterly | ~5 MB / quarter | active (v1.3) |
+| `ato_personal_income` | `ATO` | ABS Personal Income XLSX | annual | ~4 MB | active (v1.3) |
+
+### 20.7 Deferred backlog
+
+Tracked but not in v1.3 scope:
+
+- **Non-SA2-native (sub-SA2 or cross-SA2 aggregation):** AIHW Health Atlases (SA3-native), ABS Building Approvals (LGA-native), Geoscape Buildings (point-level), ABS National Health Survey (state/capital city level only).
+- **Single-state datasets:** NSW BOCSAR, VIC Crime Statistics, NSW Education NAPLAN, state land-titles. State-by-state stitching is a separate engineering problem.
+- **Licensing / effort:** CommBank Spending Insights (proprietary), AEC polling-place data (booth-to-SA2 aggregation methodology choice non-trivial).
+- **Scope (different tool):** BoM weather / climate (station-keyed; sibling tool `abs-weather-augmentor`).
+
+---
+
+## 21. Derived Features (PRESETs) (v1.3)
+
+Curated ratios that combine variables into a single output, with the right
+denominator pre-baked. The motivating problem: every downstream consumer
+re-derives `pct_drive_to_work` etc., and the denominator choice is the
+silent failure mode (e.g. dividing employed-driving-to-work by total
+population instead of total-employed-15+ under-states by 30+ percentage
+points).
+
+### 21.1 Feature spec format
+
+One file per feature, lives at `features/<id>.md`. Same YAML-front-matter
++ markdown-body shape as datasets (§20.1):
+
+```markdown
+---
+id: pct_drive_to_work
+status: proposed | active | deprecated
+output_kind: percentage | ratio | rate | scalar | index
+bounds: [0, 100]
+dataset: gcp_2021
+default: false
+tags: [transport, employment]
+numerator:
+  expression: field | sum | weighted_sum
+  fields:
+    - <namespace>.<field>
+    - <namespace>.<field>
+denominator:
+  expression: field | sum
+  field: <namespace>.<field>
+edge_cases:
+  zero_denominator: null | zero | error
+  perturbation_tolerance: warn_only | strict
+  out_of_bounds_behaviour: clip | warn | error
+sources:
+  - url: <URL>
+    note: <citation context>
+---
+
+# <feature_id>
+
+<one-paragraph description>
+
+## Why this denominator / Why not <obvious-but-wrong> / Edge cases / Bounds / Sources
+```
+
+### 21.2 Variable reference
+
+Features are referenced via the `PRESET.<id>` namespace:
+
+```yaml
+variables:
+  pct_drive_to_work: PRESET.pct_drive_to_work
+  pct_renters: PRESET.pct_renters
+```
+
+Feature evaluation runs after dataset enrichment: numerator and denominator
+are computed from the (already-attached) dataset variables, then the ratio
+applied with the spec's edge-case handling.
+
+### 21.3 Edge case rules
+
+- `zero_denominator: null` (default) → output column is null when the denominator
+  is zero. `zero` and `error` modes are available for callers who want
+  different semantics.
+- **Suppressed source counts** (ABS perturbation, DSS small-cell
+  suppression) → propagate as null. Don't substitute a midpoint; surface a
+  WARNING once per feature per release.
+- **Bounds:** `clip` clamps to the declared bounds, `warn` (default) logs a
+  WARNING when out of bounds, `error` raises. `bounds: warn` is the right
+  default because clipping silently masks denominator-mismatch bugs.
+
+### 21.4 Initial PRESET catalogue
+
+The six features that motivated this design (all sourced from `gcp_2021`):
+
+- `pct_drive_to_work` — sum of G62 motor-vehicle modes / G62.Tot_P
+- `motor_vehicles_per_dwelling` — G34.Total_motor_vehicles / G34.Total_dwellings
+- `pct_renters` — G37.R_Tot / G37.OPDs_Total
+- `pct_employed_full_time` — G43 employed-FT / G43 labour-force-15+
+- `pct_aged_65_plus` — G04 aged-65+ / G01.Tot_P_P
+- `pct_one_parent_family` — G29 one-parent-with-kids / G29 total-families-with-kids
+
+Cross-dataset features (e.g. DSS / ERP) are supported by the format
+(`dataset:` accepts a list) but deferred to follow-up PRs once the
+registered datasets settle.
+
+### 21.5 Versioning to GCP release
+
+Field codes change between Census releases (2016 vs 2021 differ). Feature
+specs declare the dataset they're sourced from via the `dataset:` front-matter
+field; that pins them to a specific GCP release. A future 2026 PRESET catalogue
+would land as `features/2026/pct_drive_to_work.md` referencing
+`dataset: gcp_2026`.
+
+---
+
+## 22. Migration notes for v1.0 → v1.3
+
+v1.3 is a **mostly non-breaking** addition for the common path: existing
+`Pipeline.augment(df, variables={"median_age": "G02.Median_age_persons"})`
+configurations continue to work. The variable string `<TABLE>.<column>`
+still resolves through the `gcp_2021` registered dataset, which exposes
+the same fetcher and parser as before.
+
+### 22.1 What's new (additive)
+
+- New variable namespaces: `SEIFA.*`, `ERP.*`, `DSS.*`, `ATO.*`, `PRESET.*`.
+- New CLI flags on `census-augment discover`: `--datasets`, `--features`, etc.
+- New constructor kwargs on `Pipeline.create`: `releases={...}` for pinning.
+
+### 22.2 Breaking changes
+
+Mostly internal refactors that should be invisible to library and CLI
+callers. Anything that surfaces is documented in `CHANGELOG.md`.
+
+### 22.3 Removed
+
+Nothing.

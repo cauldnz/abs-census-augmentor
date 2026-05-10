@@ -32,19 +32,36 @@ from pathlib import Path
 
 import requests
 
-from census_augment.config import (
-    DEFAULT_BOUNDARIES_URL,
-    DEFAULT_DATAPACKS_URL,
-    CensusConfig,
-)
-from census_augment.data_sources.boundaries import BoundariesDataSource
-from census_augment.data_sources.datapacks import DataPacksDataSource
-from census_augment.data_sources.gnaf import (
-    DEFAULT_GNAF_S3_BASE_URL,
-    GnafDataSource,
-)
-from census_augment.mb_correspondence import MbCorrespondenceDataSource
-from census_augment.paths import default_data_dir
+try:
+    from census_augment.config import (
+        DEFAULT_BOUNDARIES_URL,
+        DEFAULT_DATAPACKS_URL,
+        CensusConfig,
+    )
+    from census_augment.data_sources.boundaries import BoundariesDataSource
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.data_sources.gnaf import (
+        DEFAULT_GNAF_S3_BASE_URL,
+        GnafDataSource,
+    )
+    from census_augment.mb_correspondence import MbCorrespondenceDataSource
+    from census_augment.paths import default_data_dir
+except ModuleNotFoundError as e:
+    sys.stderr.write(
+        "ERROR: census_augment is not importable from the active Python "
+        f"({sys.executable}).\n\n"
+        f"Underlying error: {e}\n\n"
+        "Most likely cause: you ran `python tools/...` instead of\n"
+        "`uv run python tools/...`. Plain `python` uses your system\n"
+        "PATH, not the project's .venv where the package lives.\n\n"
+        "Fix:\n"
+        "    uv run python tools/fetch_real_data.py\n\n"
+        "Or activate the venv first:\n"
+        "    Windows : .venv\\Scripts\\activate\n"
+        "    macOS/Linux: source .venv/bin/activate\n"
+        "    Then    : python tools/fetch_real_data.py\n"
+    )
+    sys.exit(2)
 
 NOMINATIM_USER_AGENT = (
     "census-augment-fetch/0.1 (real-data-verification; https://example.com)"

@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 # import name and CLI command both stay `census_augment` /
 # `census-augment` — those are independent of the distribution name.
 name = "abs-census-augmentor"
-version = "1.2.3"
+version = "1.3.0"
 description = "Augment Australian location datasets with ABS Census data at the SA2 statistical area level."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -76,5 +76,7 @@ module = [
     "botocore.*",
     "tqdm",
     "tqdm.*",
+    "openpyxl",
+    "openpyxl.*",
 ]
 ignore_missing_imports = true

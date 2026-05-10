@@ -10,7 +10,9 @@ Augment Australian location datasets with ABS Census data at the SA2 statistical
 Input → Geocoding (G-NAF tiered → Nominatim) → SA2 (MB fast path → spatial fallback) → Census Enrichment → Output
 ```
 
-For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in (via mesh-block lookup for G-NAF rows, point-in-polygon for the rest), and merges in your chosen Census variables. G-NAF Core, ASGS boundary files, Census DataPacks, and Nominatim responses all cache locally so re-runs are fast.
+For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in (via mesh-block lookup for G-NAF rows, point-in-polygon for the rest), and merges in your chosen variables from any registered dataset. G-NAF Core, ASGS boundary files, Census DataPacks, SEIFA / ERP / DSS / ATO sources, and Nominatim responses all cache locally so re-runs are fast.
+
+> **v1.3 — pluggable framework.** The pipeline now dispatches across a registry of SA2-keyed datasets rather than hard-coding the GCP DataPack. The 2021 GCP DataPack (`G\d+.<col>` variables) is one entry alongside SEIFA (`SEIFA.*`), ABS Estimated Resident Population (`ERP.*`), DSS Payments (`DSS.*`), and ATO Personal Income (`ATO.*`). Plus six curated PRESET features (`pct_renters`, `pct_drive_to_work`, ...) that compute the right ratios with the right denominators. See [`spec.md` §20](spec.md) and [`spec.md` §21](spec.md), the registered specs at [`datasets/`](datasets/) and [`features/`](features/), and the new examples at [`examples/library_with_seifa.py`](examples/library_with_seifa.py) / [`examples/standalone_dataset_fetchers.py`](examples/standalone_dataset_fetchers.py).
 
 ## Requirements
 

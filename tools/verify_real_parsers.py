@@ -3,6 +3,15 @@
 Prints a tick/cross summary; exits non-zero if any check fails.
 
 Not part of the pytest suite (see ``tools/README.md`` for rationale).
+
+Run with::
+
+    uv run python tools/verify_real_parsers.py
+
+Plain ``python tools/verify_real_parsers.py`` invokes whatever Python
+is on ``PATH`` — usually the system Python without ``census-augment``
+installed, producing a ``ModuleNotFoundError``. ``uv run`` picks up
+the project's ``.venv`` automatically.
 """
 
 from __future__ import annotations
@@ -12,17 +21,34 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from census_augment.config import (
-    DEFAULT_BOUNDARIES_URL,
-    DEFAULT_DATAPACKS_URL,
-    CensusConfig,
-)
-from census_augment.data_sources.boundaries import BoundariesDataSource
-from census_augment.data_sources.datapacks import DataPacksDataSource
-from census_augment.data_sources.gnaf import GnafDataSource
-from census_augment.geocoding.gnaf import GnafGeocoder
-from census_augment.mb_correspondence import MbCorrespondenceDataSource
-from census_augment.paths import default_data_dir
+try:
+    from census_augment.config import (
+        DEFAULT_BOUNDARIES_URL,
+        DEFAULT_DATAPACKS_URL,
+        CensusConfig,
+    )
+    from census_augment.data_sources.boundaries import BoundariesDataSource
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.data_sources.gnaf import GnafDataSource
+    from census_augment.geocoding.gnaf import GnafGeocoder
+    from census_augment.mb_correspondence import MbCorrespondenceDataSource
+    from census_augment.paths import default_data_dir
+except ModuleNotFoundError as e:
+    sys.stderr.write(
+        "ERROR: census_augment is not importable from the active Python "
+        f"({sys.executable}).\n\n"
+        f"Underlying error: {e}\n\n"
+        "Most likely cause: you ran `python tools/...` instead of\n"
+        "`uv run python tools/...`. Plain `python` uses your system\n"
+        "PATH, not the project's .venv where the package lives.\n\n"
+        "Fix:\n"
+        "    uv run python tools/verify_real_parsers.py\n\n"
+        "Or activate the venv first:\n"
+        "    Windows : .venv\\Scripts\\activate\n"
+        "    macOS/Linux: source .venv/bin/activate\n"
+        "    Then    : python tools/verify_real_parsers.py\n"
+    )
+    sys.exit(2)
 
 
 def _project_root() -> Path:
@@ -236,6 +262,70 @@ def main() -> int:
 
         if not _check("Sample response shape", _check_nominatim):
             failures.append("nominatim")
+
+    # ------ v1.3 datasets (SEIFA, ERP, DSS, ATO) ------
+    print("=== v1.3 registered datasets ===")
+    from census_augment.datasets._ato import AtoDataSource
+    from census_augment.datasets._dss import DssDataSource
+    from census_augment.datasets._erp import ErpDataSource
+    from census_augment.datasets._seifa import SeifaDataSource
+
+    def _check_seifa() -> None:
+        ds = SeifaDataSource(root=data_dir / "seifa_2021")
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s (expected ~2,366)"
+        assert "irsd_score" in df.columns
+        assert "ieo_aus_decile" in df.columns
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
+            f"{len(df.columns)} columns"
+        )
+
+    def _check_erp() -> None:
+        ds = ErpDataSource(root=data_dir / "erp_by_sa2")
+        df = ds.load()
+        assert len(df) >= 2000
+        assert "population_total" in df.columns
+        assert "reference_year" in df.columns
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
+            f"reference year {df['reference_year'].iloc[0]}"
+        )
+
+    def _check_dss() -> None:
+        ds = DssDataSource(root=data_dir / "dss_payments")
+        df = ds.load()
+        assert len(df) >= 2000
+        assert "release_quarter" in df.columns
+        recipient_cols = [c for c in df.columns if c.endswith("_recipients")]
+        assert len(recipient_cols) >= 10, (
+            f"only {len(recipient_cols)} payment columns"
+        )
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
+            f"{len(recipient_cols)} payment-type columns"
+        )
+
+    def _check_ato() -> None:
+        ds = AtoDataSource(root=data_dir / "ato_personal_income")
+        df = ds.load()
+        assert len(df) >= 2000
+        assert "median_total_income" in df.columns
+        assert "income_earners_count" in df.columns
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {df.index[0]}: median "
+            f"${df['median_total_income'].iloc[0]:.0f}"
+        )
+
+    if not _check("SEIFA 2021 (~2,366 SA2s, 4 indexes)", _check_seifa):
+        failures.append("seifa_2021")
+    if not _check("ERP by SA2 (~2,454 SA2s, 25-year history)", _check_erp):
+        failures.append("erp_by_sa2")
+    if not _check("DSS payments (~2,454 SA2s, 22 payment types)", _check_dss):
+        failures.append("dss_payments")
+    if not _check("ATO personal income (~2,450 SA2s)", _check_ato):
+        failures.append("ato_personal_income")
 
     print()
     if not failures:

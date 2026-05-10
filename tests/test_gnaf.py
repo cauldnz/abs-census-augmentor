@@ -325,15 +325,22 @@ def test_build_object_url_default_aws_virtual_hosted(tmp_path: Path) -> None:
     ) == "https://my-gnaf.s3.amazonaws.com/opendata/x.parquet"
 
 
-def test_build_object_url_dotted_bucket_uses_path_style(tmp_path: Path) -> None:
-    """Bucket names with dots can't use virtual-hosted (TLS cert mismatch)
-    against ``*.s3.amazonaws.com``. Auto-switch to path-style on the global
-    endpoint, which redirects to the bucket's region.
+def test_build_object_url_dotted_bucket_uses_regional_path_style(
+    tmp_path: Path,
+) -> None:
+    """Bucket names with dots can't use virtual-hosted (TLS cert mismatch
+    against ``*.s3.amazonaws.com``). Per #17, they also can't use the
+    *global* path-style endpoint because that returns 301 to the
+    regional one and DuckDB httpfs doesn't follow redirects. We
+    resolve the bucket's region via boto3 and use the regional
+    endpoint directly.
     """
     ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
+    # Skip the boto3 round-trip: pre-cache the region.
+    ds._resolved_bucket_region = "ap-southeast-2"  # type: ignore[attr-defined]
     assert ds._build_object_url(  # type: ignore[attr-defined]
         "minus34.com", "opendata/x.parquet"
-    ) == "https://s3.amazonaws.com/minus34.com/opendata/x.parquet"
+    ) == "https://s3.ap-southeast-2.amazonaws.com/minus34.com/opendata/x.parquet"
 
 
 def test_build_object_url_with_endpoint_override(tmp_path: Path) -> None:
@@ -905,28 +912,82 @@ def test_invalid_census_year_raises(tmp_path: Path) -> None:
         )
 
 
-# ---- gnaf-loader layout (issue #12: real bucket layout) -----------------
+# ---- gnaf-loader layout (issues #12 + #17: real bucket layout) ----------
 
 
-def _gnaf_loader_parquet_bytes(census_year: int = 2021) -> bytes:
-    """Synthetic parquet matching gnaf-loader's denormalised
-    ``address_principal_census_{year}_boundaries`` schema.
+def _gnaf_loader_parquet_bytes(_census_year: int = 2021) -> bytes:
+    """Synthetic parquet matching gnaf-loader's ``address_principals/`` schema.
 
-    Columns are PostgreSQL-lowercase, year-suffixed for the MB code.
-    The view's column-aliasing translates these to the uppercase
-    schema the geocoder queries.
+    Mirrors the production columns (verified against the live
+    ``minus34.com`` bucket, May 2026): one row per address with the
+    full set of components the view-builder needs, including the
+    address split (street portion only) and locality / state separately
+    so the ``CONCAT_WS`` in :meth:`_gnaf_loader_view_select` produces
+    a normalised ADDRESS_LABEL.
+
+    The boundary subdirectories (``address_principal_admin_boundaries/``,
+    ``address_principal_census_<year>_boundaries/``) carry only
+    boundary-ID columns — see :func:`_admin_boundaries_parquet_bytes` /
+    :func:`_census_boundaries_parquet_bytes` for the regression test in
+    issue #17.
     """
     table = pa.table(
         {
             "gnaf_pid": ["GANSW000000001", "GANSW000000002"],
-            "address": [
-                "1 GEORGE STREET SYDNEY NSW 2000",
-                "100 PITT STREET SYDNEY NSW 2000",
-            ],
+            # The address column in production is just the street portion;
+            # locality / state / postcode are separate, and the view
+            # concatenates them.
+            "address": ["1 GEORGE STREET", "100 PITT STREET"],
+            "locality_name": ["SYDNEY", "SYDNEY"],
+            "state": ["NSW", "NSW"],
             "latitude": [-33.864, -33.866],
             "longitude": [151.211, 151.211],
             "postcode": ["2000", "2000"],
-            f"mb_{census_year}_code": ["11701132601", "11701132602"],
+            "mb_2016_code": ["11701132601", "11701132602"],
+            "mb_2021_code": ["11701132601", "11701132602"],
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    return buf.getvalue()
+
+
+def _admin_boundaries_parquet_bytes() -> bytes:
+    """Synthetic parquet matching gnaf-loader's
+    ``address_principal_admin_boundaries/`` schema — gnaf_pid + admin
+    boundary IDs only. **No address / lat / lon.** Used by the issue #17
+    regression test to ensure the parser doesn't pick this subdirectory
+    as the geocoder source.
+    """
+    table = pa.table(
+        {
+            "gnaf_pid": ["GANSW000000001"],
+            "lga_code_2021": ["LGA-NSW-001"],
+            "lga_name_2021": ["Sydney"],
+            "poa_code_2021": ["2000"],
+            "ra_code_2021": ["1"],
+            "state_code_2021": ["1"],
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    return buf.getvalue()
+
+
+def _census_boundaries_parquet_bytes(year: int = 2021) -> bytes:
+    """Synthetic parquet matching gnaf-loader's
+    ``address_principal_census_<year>_boundaries/`` schema — gnaf_pid +
+    census boundary IDs only (MB / SA1-4 / GCCSA / etc.). **No
+    address / lat / lon.** Used by issue #17 regression test.
+    """
+    table = pa.table(
+        {
+            "gnaf_pid": ["GANSW000000001"],
+            f"mb_code_{year}": ["11701132601"],
+            f"sa1_code_{year}": ["117011326010"],
+            f"sa2_code_{year}": ["117011326"],
+            f"sa3_code_{year}": ["11701"],
+            f"sa4_code_{year}": ["117"],
         }
     )
     buf = io.BytesIO()
@@ -937,19 +998,22 @@ def _gnaf_loader_parquet_bytes(census_year: int = 2021) -> bytes:
 def test_remote_mode_with_gnaf_loader_layout(
     tmp_path: Path, moto_s3_server: str
 ) -> None:
-    """Issue #12 reproduction: bucket has the real gnaf-loader layout
-    (no flat parquets, only subdirectories). The
-    ``address_principal_census_2021_boundaries/`` subdirectory carries
-    the data we need; remote mode auto-detects and aliases lowercase
-    columns to our expected uppercase schema."""
+    """Issue #12 / #17 reproduction: bucket has the real gnaf-loader
+    layout (multiple subdirectories under ``geoparquet/``). The
+    ``address_principals/`` subdirectory carries the columns we need;
+    the parser must auto-detect that one and ignore the boundary-only
+    siblings.
+    """
     bucket, base = _unique_bucket("issue-12-loader")
     _populate_moto_server(
         moto_s3_server,
         bucket,
         releases={
             "202602": {
-                "address_principal_census_2021_boundaries/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes(2021)
+                # The right source — has gnaf_pid, address, lat/lon,
+                # postcode, mb_*_code.
+                "address_principals/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes()
                 ),
                 # Mix in non-G-NAF subdirectories (mirrors the real bucket).
                 "abs_2016_gccsa/part-00000.parquet": _gnaf_parquet_bytes(),
@@ -972,29 +1036,102 @@ def test_remote_mode_with_gnaf_loader_layout(
     assert rows is not None
     assert rows[0] == 2
 
-    label, mb = con.execute(
+    row = con.execute(
         "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE "
         "ADDRESS_DETAIL_PID = 'GANSW000000001'"
     ).fetchone()
+    assert row is not None
+    label, mb = row
     assert label == "1 GEORGE STREET SYDNEY NSW 2000"
     assert mb == "11701132601"
 
 
-def test_remote_mode_picks_correct_year_subdir(
+def test_remote_mode_picks_correct_mb_year_column(
     tmp_path: Path, moto_s3_server: str
 ) -> None:
-    """``census_year`` selects between 2016 / 2021 boundaries subdirs."""
+    """``census_year`` selects which ``mb_<year>_code`` column to alias
+    as ``MB_CODE``. The ``address_principals`` table carries both
+    2016 and 2021 MB codes; the SELECT clause picks one based on
+    ``census_year``.
+    """
     bucket, base = _unique_bucket("issue-12-year")
+    table = pa.table(
+        {
+            "gnaf_pid": ["GANSW000000001"],
+            "address": ["1 GEORGE STREET"],
+            "locality_name": ["SYDNEY"],
+            "state": ["NSW"],
+            "latitude": [-33.864],
+            "longitude": [151.211],
+            "postcode": ["2000"],
+            "mb_2016_code": ["MB16"],
+            "mb_2021_code": ["MB21"],
+        }
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf)
+    parquet_bytes = buf.getvalue()
+
     _populate_moto_server(
         moto_s3_server,
         bucket,
         releases={
             "202602": {
+                "address_principals/part-00000.parquet": parquet_bytes,
+            }
+        },
+    )
+
+    # census_year=2016 → mb_2016_code → MB_CODE = "MB16"
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        census_year=2016,
+    )
+    row = ds.open_connection().execute(
+        "SELECT MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "MB16"
+
+
+def test_remote_mode_ignores_boundaries_siblings_issue_17(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """Issue #17 regression: the production bucket has *multiple*
+    sibling subdirectories under ``geoparquet/`` whose names start
+    with ``address_principal_*_boundaries/`` (admin / census 2016 /
+    census 2021). None of those carry the ``address`` column or
+    lat/lon — they're boundary-ID join tables only. The geocoder
+    source is ``address_principals/``.
+
+    The parser must pick ``address_principals/`` even though the
+    boundary siblings sort lexicographically before / between it.
+    """
+    bucket, base = _unique_bucket("issue-17-boundaries")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                # Primary source — what we expect to be picked up.
+                "address_principals/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes()
+                ),
+                # Sibling boundary tables — no address column;
+                # picking one of these would produce the
+                # BinderException reported in #17.
+                "address_principal_admin_boundaries/part-00000.parquet": (
+                    _admin_boundaries_parquet_bytes()
+                ),
                 "address_principal_census_2016_boundaries/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes(2016)
+                    _census_boundaries_parquet_bytes(2016)
                 ),
                 "address_principal_census_2021_boundaries/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes(2021)
+                    _census_boundaries_parquet_bytes(2021)
                 ),
             }
         },
@@ -1006,27 +1143,69 @@ def test_remote_mode_picks_correct_year_subdir(
         data_dir=tmp_path / "data",
         s3_base_url=base,
         s3_https_endpoint=moto_s3_server,
-        census_year=2016,
+        census_year=2021,
     )
+    # Should pick address_principals/ and resolve cleanly. Before #17
+    # this failed with: BinderException 'address' not found in FROM
+    # clause; candidates: lga_code_2021, poa_code_2021, ra_code_2021,
+    # state_code_2021.
     con = ds.open_connection()
-    rows = con.execute(
-        "SELECT MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'"
+    row = con.execute(
+        "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE "
+        "ADDRESS_DETAIL_PID = 'GANSW000000001'"
     ).fetchone()
-    # The mb code came from the 2016 parquet, which uses the same fake
-    # data — verify the join-by-year worked by checking the subdir was
-    # picked correctly.
-    assert rows is not None
-    assert rows[0] == "11701132601"
+    assert row is not None
+    label, mb = row
+    assert label == "1 GEORGE STREET SYDNEY NSW 2000"
+    assert mb == "11701132601"
+
+
+def test_remote_mode_explicit_failure_when_only_boundaries_present(
+    tmp_path: Path, moto_s3_server: str
+) -> None:
+    """If the bucket genuinely has only boundary subdirectories (no
+    ``address_principals/``), fail loudly rather than try to use the
+    boundary table as a G-NAF source. The user should get a clear
+    "no G-NAF parquet files" error pointing at the layout we couldn't
+    find, not a buried DuckDB BinderException.
+    """
+    bucket, base = _unique_bucket("issue-17-only-boundaries")
+    _populate_moto_server(
+        moto_s3_server,
+        bucket,
+        releases={
+            "202602": {
+                "address_principal_admin_boundaries/part-00000.parquet": (
+                    _admin_boundaries_parquet_bytes()
+                ),
+                "address_principal_census_2021_boundaries/part-00000.parquet": (
+                    _census_boundaries_parquet_bytes(2021)
+                ),
+                # No address_principals/.
+            }
+        },
+    )
+
+    ds = GnafDataSource(
+        release="202602",
+        mode="remote",
+        data_dir=tmp_path / "data",
+        s3_base_url=base,
+        s3_https_endpoint=moto_s3_server,
+        census_year=2021,
+    )
+    with pytest.raises(RuntimeError, match="No G-NAF parquet files"):
+        ds.open_connection()
 
 
 def test_cache_mode_with_gnaf_loader_layout(tmp_path: Path) -> None:
     """Cache mode auto-detects the gnaf-loader subdirectory layout."""
     data_dir = tmp_path / "data"
     rel_dir = data_dir / "gnaf" / "202602"
-    loader_dir = rel_dir / "address_principal_census_2021_boundaries"
+    loader_dir = rel_dir / "address_principals"
     loader_dir.mkdir(parents=True)
     (loader_dir / "part-00000.parquet").write_bytes(
-        _gnaf_loader_parquet_bytes(2021)
+        _gnaf_loader_parquet_bytes()
     )
 
     ds = GnafDataSource(
@@ -1063,10 +1242,10 @@ def test_layout_detection_prefers_gnaf_loader_over_legacy(
     # Legacy flat parquet at the root.
     (rel_dir / "addresses.parquet").write_bytes(_gnaf_parquet_bytes())
     # gnaf-loader subdir with different content (only 2 rows vs 5).
-    loader_dir = rel_dir / "address_principal_census_2021_boundaries"
+    loader_dir = rel_dir / "address_principals"
     loader_dir.mkdir()
     (loader_dir / "part-00000.parquet").write_bytes(
-        _gnaf_loader_parquet_bytes(2021)
+        _gnaf_loader_parquet_bytes()
     )
 
     ds = GnafDataSource(
@@ -1098,11 +1277,11 @@ def test_cache_mode_download_preserves_gnaf_loader_subdir_structure(
         bucket,
         releases={
             "202602": {
-                "address_principal_census_2021_boundaries/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes(2021)
+                "address_principals/part-00000.parquet": (
+                    _gnaf_loader_parquet_bytes()
                 ),
-                "address_principal_census_2021_boundaries/part-00001.parquet": (
-                    _gnaf_loader_parquet_bytes(2021)
+                "address_principals/part-00001.parquet": (
+                    _gnaf_loader_parquet_bytes()
                 ),
             }
         },
@@ -1117,9 +1296,9 @@ def test_cache_mode_download_preserves_gnaf_loader_subdir_structure(
         census_year=2021,
     )
     rel_dir = ds.fetch()
-    boundaries = rel_dir / "address_principal_census_2021_boundaries"
-    assert boundaries.is_dir()
-    assert sorted(p.name for p in boundaries.glob("*.parquet")) == [
+    principals = rel_dir / "address_principals"
+    assert principals.is_dir()
+    assert sorted(p.name for p in principals.glob("*.parquet")) == [
         "part-00000.parquet",
         "part-00001.parquet",
     ]

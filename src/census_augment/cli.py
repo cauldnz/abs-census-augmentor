@@ -109,10 +109,83 @@ def discover(
     table: str | None = typer.Option(
         None, "--table", help="Table ID (e.g. G02) to list all columns of."
     ),
+    datasets: bool = typer.Option(
+        False, "--datasets", help="List all registered datasets (spec §20)."
+    ),
+    dataset: str | None = typer.Option(
+        None, "--dataset", help="Show schema of one registered dataset by id."
+    ),
+    features_only: bool = typer.Option(
+        False, "--features", help="List PRESET features (spec §21)."
+    ),
 ) -> None:
-    """Search census variables or list all columns in a table."""
+    """Search census variables, list datasets, or show feature catalogue."""
+    # ---- v1.3: dataset listing (spec §20) ----
+    if datasets:
+        from .datasets import registry as dataset_registry  # noqa: PLC0415
+
+        specs = dataset_registry.list_datasets()
+        if not specs:
+            typer.echo("No datasets registered.")
+            return
+        for spec in specs:
+            typer.echo(
+                f"{spec.id}\tnamespace={spec.namespace}\t"
+                f"status={spec.status}\tcadence={spec.update_cadence}\t"
+                f"licence={spec.licence}"
+            )
+        return
+
+    if dataset is not None:
+        from .datasets import registry as dataset_registry  # noqa: PLC0415
+        from .datasets._registry import RegistryError  # noqa: PLC0415
+
+        try:
+            spec = dataset_registry.get(dataset)
+        except RegistryError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(code=1) from e
+        typer.echo(f"{spec.id}: {spec.name}")
+        typer.echo(f"  Status: {spec.status}")
+        typer.echo(f"  Custodian: {spec.custodian}")
+        typer.echo(f"  Licence: {spec.licence}")
+        typer.echo(f"  Update cadence: {spec.update_cadence}")
+        typer.echo(f"  Geography: {spec.geography_level} ({spec.geography_edition})")
+        typer.echo(f"  Namespace: {spec.namespace}")
+        if spec.variables:
+            typer.echo(f"  Variables ({len(spec.variables)}):")
+            for v in spec.variables:
+                typer.echo(
+                    f"    {spec.namespace}.{v.field}\t{v.type}\t{v.description}"
+                )
+        return
+
+    # ---- v1.3: feature listing (spec §21) ----
+    if features_only:
+        from .features import features as feature_registry  # noqa: PLC0415
+
+        feature_specs = feature_registry.list_features()
+        if not feature_specs:
+            typer.echo("No features registered.")
+            return
+        for fspec in feature_specs:
+            datasets_used = (
+                fspec.dataset
+                if isinstance(fspec.dataset, str)
+                else "+".join(fspec.dataset)
+            )
+            typer.echo(
+                f"PRESET.{fspec.id}\tkind={fspec.output_kind}\t"
+                f"dataset={datasets_used}\ttags={fspec.tags}"
+            )
+        return
+
     if search is None and table is None:
-        typer.echo("Error: provide either --search or --table.", err=True)
+        typer.echo(
+            "Error: provide --search, --table, --datasets, --dataset, "
+            "or --features.",
+            err=True,
+        )
         raise typer.Exit(code=2)
     if search is not None and table is not None:
         typer.echo("Error: --search and --table are mutually exclusive.", err=True)

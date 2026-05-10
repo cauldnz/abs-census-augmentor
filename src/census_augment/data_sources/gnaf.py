@@ -73,13 +73,24 @@ GnafLayoutStyle = Literal["gnaf-loader", "legacy"]
 _RELEASE_DIR_RE = re.compile(r"geoscape-(\d{6})/")
 _RELEASE_PARQUET_SUBDIR = "geoparquet"
 
-# gnaf-loader names its denormalised "address principals + ABS census
-# boundaries" table by census-year. We use this table as the single
-# source for the geocoder: it carries lat/lon, the address label, the
-# postcode, and (year-suffixed) MB code in one row per address.
-_GNAF_LOADER_BOUNDARIES_SUBDIR_TEMPLATE = (
-    "address_principal_census_{year}_boundaries"
-)
+# gnaf-loader publishes G-NAF Core's address principals (one row per
+# address) at this subdirectory of geoparquet/. The table has all the
+# columns the geocoder needs in one place: gnaf_pid (→ ADDRESS_DETAIL_PID),
+# address (→ ADDRESS_LABEL), latitude / longitude, postcode, and
+# year-suffixed MB code (mb_2021_code, mb_2016_code).
+#
+# Sibling subdirectories include:
+#   - address_aliases/ — alternative names for the same address.
+#   - address_principal_admin_boundaries/ — gnaf_pid → LGA / POA / RA / state.
+#   - address_principal_census_2021_boundaries/ — gnaf_pid → MB / SA1-4 / GCCSA / ... codes.
+#   - address_principal_census_2016_boundaries/ — same for 2016 ASGS.
+# **None of those siblings carry the address column or lat/lon.** The
+# join-with-boundaries tables are pure ID-mapping tables; the address
+# data lives in `address_principals/` only. Issue #17 was caused by
+# v1.2.2/v1.2.3 mistakenly targeting `*_census_<year>_boundaries/` as
+# the denormalised source — DuckDB then couldn't bind `address` because
+# that column simply isn't there.
+_GNAF_LOADER_PRIMARY_SUBDIR = "address_principals"
 
 
 class _GnafLayout(NamedTuple):
@@ -200,44 +211,59 @@ class GnafDataSource:
         self._census_year = census_year
         self._official_base_url = official_base_url.rstrip("/")
         self._resolved_release: str | None = None
+        self._resolved_bucket_region: str | None = None
         self._connection: duckdb.DuckDBPyConnection | None = None
 
     # ---- gnaf-loader layout helpers --------------------------------------
 
     @property
     def _gnaf_loader_subdir(self) -> str:
-        """Subdirectory under ``geoparquet/`` that gnaf-loader publishes
-        the denormalised address+census-boundaries table to."""
-        return _GNAF_LOADER_BOUNDARIES_SUBDIR_TEMPLATE.format(
-            year=self._census_year
-        )
+        """Subdirectory under ``geoparquet/`` containing the G-NAF Core
+        address-principals table (the single source for the geocoder)."""
+        return _GNAF_LOADER_PRIMARY_SUBDIR
 
     def _gnaf_loader_view_select(self) -> str:
         """SELECT clause aliasing gnaf-loader's lowercase columns to our
         expected uppercase schema.
 
-        gnaf-loader's ``address_principal_census_{year}_boundaries`` is
-        a denormalised join of address principals with the ABS census
-        boundary IDs. Column conventions:
+        gnaf-loader's ``address_principals`` table carries one row per
+        address with all the components the geocoder needs:
 
         - ``gnaf_pid``           → ADDRESS_DETAIL_PID
-        - ``address``            → ADDRESS_LABEL
+        - ``address``            → just the street portion of ADDRESS_LABEL
+                                   (e.g. "115 LAWRENCE ROAD" — no locality
+                                   / state / postcode). The view
+                                   concatenates address + locality_name +
+                                   state + postcode to build the full
+                                   normalised label that
+                                   :func:`normalize_address` produces from
+                                   user input, so Tier 1 exact-match works.
+        - ``locality_name``      → suburb / town name
+        - ``state``              → 2-3 letter abbreviation (NSW, VIC, ...)
         - ``latitude``           → LATITUDE
         - ``longitude``          → LONGITUDE
         - ``postcode``           → POSTCODE
-        - ``mb_{year}_code``     → MB_CODE  (year-suffixed because the
-                                              same parquet can in theory
-                                              carry multiple census
-                                              vintages)
+        - ``mb_{year}_code``     → MB_CODE  (the table carries both
+                                              ``mb_2016_code`` and
+                                              ``mb_2021_code``; we pick
+                                              one based on the
+                                              ``census_year`` constructor
+                                              argument)
 
         ``CAST`` to a deterministic type lets DuckDB unify schemas across
-        partitioned parquet files even when individual files declare
-        slightly different inferred types.
+        partitioned parquet files; it also normalises gnaf-loader's
+        ``decimal128`` lat/lon and ``int64`` MB codes into the types
+        the geocoder expects.
+
+        ``CONCAT_WS`` skips NULL components silently (we don't want a
+        spurious double-space if locality_name happens to be NULL on
+        a particular row).
         """
         year = self._census_year
         return (
             'CAST(gnaf_pid AS VARCHAR) AS "ADDRESS_DETAIL_PID", '
-            'CAST(address AS VARCHAR) AS "ADDRESS_LABEL", '
+            "CAST(CONCAT_WS(' ', address, locality_name, state, postcode) "
+            'AS VARCHAR) AS "ADDRESS_LABEL", '
             'CAST(latitude AS DOUBLE) AS "LATITUDE", '
             'CAST(longitude AS DOUBLE) AS "LONGITUDE", '
             'CAST(postcode AS VARCHAR) AS "POSTCODE", '
@@ -610,22 +636,81 @@ class GnafDataSource:
           configured endpoint, ``{endpoint}/{bucket}/{key}``. For
           S3-compatible mirrors or test servers (moto, MinIO, R2, ...).
         - Bucket name contains a dot (e.g. ``minus34.com``): forced
-          path-style on the global endpoint
-          ``https://s3.amazonaws.com/{bucket}/{key}``. AWS's wildcard
-          cert ``*.s3.amazonaws.com`` only matches a single subdomain
-          level, so the virtual-hosted ``minus34.com.s3.amazonaws.com``
-          fails TLS hostname verification (libcurl errors with
-          ``SEC_E_WRONG_PRINCIPAL`` / ``hostname mismatch``). The
-          global endpoint redirects to the bucket's region.
+          path-style on the bucket's *regional* endpoint
+          ``https://s3.{region}.amazonaws.com/{bucket}/{key}``.
+          Two reasons:
+
+          - Virtual-hosted style ``minus34.com.s3.amazonaws.com``
+            fails TLS hostname verification because AWS's wildcard
+            cert ``*.s3.amazonaws.com`` only covers a single
+            subdomain level. (Issue #8 / v1.2.2.)
+          - Path-style on the *global* endpoint
+            ``https://s3.amazonaws.com/{bucket}/{key}`` returns
+            HTTP 301 with ``x-amz-bucket-region`` for any bucket
+            outside ``us-east-1``. Boto3 follows that redirect; the
+            DuckDB ``httpfs`` extension does **not** — queries error
+            out with "HTTP 301 Moved Permanently". (Issue #17.)
+
+          The bucket's region is discovered once via boto3's
+          ``head_bucket`` and cached on the instance.
+
         - Otherwise: virtual-hosted style on AWS,
           ``https://{bucket}.s3.amazonaws.com/{key}``.
         """
         if self._s3_https_endpoint:
             return f"{self._s3_https_endpoint}/{bucket}/{key}"
         if "." in bucket:
-            # Dotted bucket names break virtual-hosted TLS; use path-style.
-            return f"https://s3.amazonaws.com/{bucket}/{key}"
+            region = self._resolve_bucket_region(bucket)
+            return f"https://s3.{region}.amazonaws.com/{bucket}/{key}"
         return f"https://{bucket}.s3.amazonaws.com/{key}"
+
+    def _resolve_bucket_region(self, bucket: str) -> str:
+        """Return the AWS region the bucket lives in, cached on the instance.
+
+        Used by :meth:`_build_object_url` to construct path-style URLs
+        for dotted bucket names (which can't go via the wildcard cert
+        and can't follow 301 redirects under DuckDB httpfs).
+
+        Strategy: ``head_bucket`` is the cheapest way to discover the
+        region. Even when the request hits the wrong endpoint and
+        comes back as 301 / 400, the response carries
+        ``x-amz-bucket-region`` in its headers, so we extract it from
+        the ``ClientError``.
+        """
+        if self._resolved_bucket_region is not None:
+            return self._resolved_bucket_region
+
+        client = self._make_s3_client()
+        try:
+            response = client.head_bucket(Bucket=bucket)
+            region = response.get("BucketRegion")
+            if not region:
+                region = response.get("ResponseMetadata", {}).get(
+                    "HTTPHeaders", {}
+                ).get("x-amz-bucket-region")
+        except Exception as exc:  # noqa: BLE001 — we extract from the exception
+            # ClientError stashes response headers on the exception.
+            response_attr = getattr(exc, "response", {}) or {}
+            region = (
+                response_attr.get("ResponseMetadata", {})
+                .get("HTTPHeaders", {})
+                .get("x-amz-bucket-region")
+            )
+            if not region:
+                raise
+
+        if not region:
+            # Last-ditch fallback so we don't blow up on a partial
+            # response. ``us-east-1`` accepts any bucket via the
+            # global endpoint (with a 301 redirect for non-us-east-1
+            # buckets, which we just absorbed above).
+            region = "us-east-1"
+
+        # ``region`` came from a dict.get() — narrow to str for mypy.
+        region_str = str(region)
+        self._resolved_bucket_region = region_str
+        _log.debug("Resolved S3 region for %s: %s", bucket, region_str)
+        return region_str
 
     def _list_releases_on_s3(self) -> list[str]:
         """List all ``geoscape-{YYYYMM}/`` prefixes in the bucket (sorted ASC).
