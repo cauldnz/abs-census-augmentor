@@ -1,0 +1,100 @@
+// Dev Container for abs-census-augmentor.
+//
+// What this gives you:
+//   * Debian/Linux Python 3.11 sandbox (so Windows path / venv / shell
+//     friction goes away — same env as CI).
+//   * `uv`, `gh`, `git`, `make` pre-installed.
+//   * Host Docker available inside the container (via the
+//     docker-outside-of-docker feature) so `tools/demo/render.sh`
+//     works without extra setup. The host's Docker socket is mounted;
+//     `docker build` / `docker run` reach out to Docker Desktop.
+//   * VSCode extensions: Python, Pylance, Ruff, GitHub PR, GitLens.
+//   * `postCreateCommand` syncs the project's dev deps so `pytest`,
+//     `ruff`, `mypy`, `census-augment` all work the moment the
+//     container is ready.
+//
+// First run takes ~3-5 minutes (image build + uv sync + dep install).
+// Subsequent attaches are seconds.
+{
+    "name": "abs-census-augmentor",
+    "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+
+    "features": {
+        // Docker access for VHS demo rendering. "outside-of-docker"
+        // mounts the host's docker.sock and installs the docker CLI
+        // inside the container — `docker build` / `docker run` from
+        // inside the devcontainer talk to the host's Docker Desktop.
+        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+            "moby": false
+        },
+        // GitHub CLI — used heavily for PR / issue workflows in this
+        // repo's dev loop.
+        "ghcr.io/devcontainers/features/github-cli:1": {},
+        // Common tooling: zsh, oh-my-zsh, build-essentials. Cheap and
+        // makes the shell experience feel like a real workstation.
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "configureZshAsDefaultShell": true,
+            "upgradePackages": false
+        }
+    },
+
+    "containerEnv": {
+        // Tell uv to use a project-local venv at .venv/ (matches
+        // `uv sync` defaults; documented for clarity).
+        "UV_PROJECT_ENVIRONMENT": "${containerWorkspaceFolder}/.venv",
+        // Force colour output in tools that respect this — the GIF
+        // demo renders look better when ruff / pytest stay coloured.
+        "FORCE_COLOR": "1"
+    },
+
+    // Note on auth: VSCode's Dev Containers extension automatically
+    // forwards git credentials, SSH agents, and GPG keys into the
+    // container — `git push` etc. just work. For GitHub CLI, run
+    // `gh auth login --web` once on first attach (the token persists
+    // in the container's filesystem across rebuilds via volume).
+
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+    // Run as the non-root `vscode` user (provided by the python image)
+    // so file permissions on bind-mounted host paths stay sane.
+    "remoteUser": "vscode",
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "charliermarsh.ruff",
+                "ms-python.mypy-type-checker",
+                "tamasfe.even-better-toml",
+                "redhat.vscode-yaml",
+                "github.vscode-pull-request-github",
+                "eamodio.gitlens",
+                "anthropic.claude-code"
+            ],
+            "settings": {
+                // Use uv's venv at .venv/ for the Python interpreter.
+                "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python",
+                "python.terminal.activateEnvironment": false,
+                // Ruff is the formatter + linter.
+                "[python]": {
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.formatOnSave": true,
+                    "editor.codeActionsOnSave": {
+                        "source.fixAll.ruff": "explicit",
+                        "source.organizeImports.ruff": "explicit"
+                    }
+                },
+                // Mypy uses the project config in pyproject.toml.
+                "mypy-type-checker.args": [
+                    "--config-file=${containerWorkspaceFolder}/pyproject.toml"
+                ],
+                "mypy-type-checker.importStrategy": "fromEnvironment",
+                // Pytest discovery from the tests/ directory.
+                "python.testing.pytestEnabled": true,
+                "python.testing.pytestArgs": ["tests"],
+                "python.testing.unittestEnabled": false
+            }
+        }
+    }
+}

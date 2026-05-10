@@ -1,0 +1,14 @@
+# Force LF line endings for shell scripts so they run correctly under
+# bash on Linux even when checked out on a Windows host (CRLF endings
+# in a `.sh` script cause bash to fail with cryptic '\r: command not
+# found' errors).
+*.sh text eol=lf
+
+# Same logic for the VSCode Dev Containers post-create script.
+.devcontainer/post-create.sh text eol=lf
+
+# Tape files are read by VHS on Linux too.
+*.tape text eol=lf
+
+# YAML / TOML / Markdown can stay platform-default; nothing breaks if
+# they're CRLF.

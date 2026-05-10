@@ -9,6 +9,20 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — VSCode Dev Container
+
+`.devcontainer/` configures a Linux Python 3.11 sandbox (matching the CI
+environment) with `uv`, `gh`, build tooling, and host-Docker access for
+VHS demo rendering. VSCode users can open the repo and `Reopen in
+Container` for a one-command development setup that bypasses Windows /
+Python / venv friction. See [`.devcontainer/README.md`](.devcontainer/README.md).
+
+### Added — `.gitattributes` to enforce LF line endings on shell scripts
+
+Prevents `\r: command not found` errors when shell scripts are checked
+out on Windows hosts and then run from Linux (devcontainer / CI).
+Affects `*.sh` and `*.tape` files only.
+
 ## [1.4.1] - 2026-05-10
 
 ### Fixed — wheel install ships dataset/feature spec markdown (closes #19)
