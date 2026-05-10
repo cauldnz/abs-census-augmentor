@@ -14,6 +14,8 @@ For each location row, the pipeline resolves coordinates (using your input lat/l
 
 > **v1.3 — pluggable framework.** The pipeline now dispatches across a registry of SA2-keyed datasets rather than hard-coding the GCP DataPack. The 2021 GCP DataPack (`G\d+.<col>` variables) is one entry alongside SEIFA (`SEIFA.*`), ABS Estimated Resident Population (`ERP.*`), DSS Payments (`DSS.*`), and ATO Personal Income (`ATO.*`). Plus six curated PRESET features (`pct_renters`, `pct_drive_to_work`, ...) that compute the right ratios with the right denominators. See [`spec.md` §20](spec.md) and [`spec.md` §21](spec.md), the registered specs at [`datasets/`](datasets/) and [`features/`](features/), and the new examples at [`examples/library_with_seifa.py`](examples/library_with_seifa.py) / [`examples/standalone_dataset_fetchers.py`](examples/standalone_dataset_fetchers.py).
 
+> **v1.4 — PRESETs as first-class variables.** `variables: {pct_renters: PRESET.pct_renters}` now works directly in any config — `Pipeline.run()`, `Pipeline.augment(df)`, `census-augment run`, the lot. The pipeline auto-loads each PRESET's underlying numerator + denominator source columns (deduplicated across PRESETs) and surfaces the derived ratio under the configured output prefix. The standalone `FeatureEvaluator` API remains for analysis code that prefers the manual recipe. See [`examples/library_with_preset_features.py`](examples/library_with_preset_features.py).
+
 ## Requirements
 
 - Python 3.11+

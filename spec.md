@@ -552,6 +552,11 @@ These were open questions in earlier drafts, resolved through discussion:
 28. **v1.0 is a breaking change from v0.9 in the output schema.** *Decision: bump major version; document in CHANGELOG; provide upgrade note.* `geo_source` enum has changed values; two new columns (`geo_match_score`, `sa2_resolution`) appear. The internal Python API (`Pipeline.augment(df)` etc.) stays mostly compatible; the breakage is in the *file format*. Documented in §8 and `CHANGELOG.md`.
 29. **MB → SA2 correspondence is the .dbf attribute table of the Mesh Block shapefile.** *Decision: build the MB→SA2 lookup dict by reading the `.dbf` of `MB_{year}_AUST_SHP_{datum}.zip` (downloaded from the same Digital Boundary Files endpoint as SA2 boundaries), not from the ABS *correspondences* page.* HEAD-checks confirmed that the correspondences page hosts only **change files** between ASGS editions (e.g. 2016→2021 transitions) — it has no within-edition hierarchy lookups. The Mesh Block shapefile carries `MB_CODE21`, `SA2_CODE21`, `SA2_NAME21` columns, which is exactly what we need; reading attributes only (via `pyogrio.read_dataframe(read_geometry=False)`) keeps the cost cheap. Resolves former §15.1. Documented in §4.2, §15.1, §17, §19.4.
 
+**v1.4 additions (PRESET pipeline integration):**
+
+30. **PRESET integration into `CensusEnricher`, not a separate pipeline stage.** *Decision: handle `PRESET.<id>` refs inside `CensusEnricher.build_lookup()` by expanding them into synthetic source-column entries that the existing GCP / registered-dataset dispatch already knows how to fetch.* The alternative — a separate post-enrichment "feature stage" — would have duplicated dataset-loading logic and made dedupe across PRESETs harder. Putting it inside the enricher means: one source-fetch path for everyone, one `_build_gcp_lookup`-level grouping that already de-dupes per-table loads, and PRESETs evaluate against the same DataFrame the rest of the dispatch produces. Synthetic source columns use the reserved prefix `__preset_src__` and are dropped from the final lookup. Documented in §21.2.
+31. **Auto-load source columns rather than require users to request them.** *Decision: when a config asks for `pct_renters: PRESET.pct_renters`, the enricher walks `spec.source_fields()` and adds the underlying refs (`G37.R_Tot`, `G37.OPDs_Total`) to the load set transparently.* Forcing users to also list source columns would have been redundant — the spec already encodes them — and brittle (renaming a PRESET's denominator would silently break configs). v1.3 required users to do this manually because integration was not yet in scope; v1.4 closes that gap.
+
 ## 15. Open Questions
 
 1. *(Resolved — see §14 decision #29.)* **MB → SA2 correspondence file source.** Originally listed as open: ABS's correspondence page only hosts *change files* (e.g. 2016→2021 transitions), not within-edition hierarchy lookups. The MB→SA2 mapping lives in the **`.dbf` attribute table of the Mesh Block shapefile** (`MB_2021_AUST_SHP_GDA2020.zip`), downloaded from the same Digital Boundary Files endpoint as SA2 boundaries (§4.1). Implementation reads only the .dbf columns (no geometry) for cheap O(1) lookup table construction.
@@ -880,7 +885,7 @@ Tracked but not in v1.3 scope:
 
 ---
 
-## 21. Derived Features (PRESETs) (v1.3)
+## 21. Derived Features (PRESETs) (v1.3, pipeline-integrated in v1.4)
 
 Curated ratios that combine variables into a single output, with the right
 denominator pre-baked. The motivating problem: every downstream consumer
@@ -929,17 +934,34 @@ sources:
 
 ### 21.2 Variable reference
 
-Features are referenced via the `PRESET.<id>` namespace:
+Features are referenced via the `PRESET.<id>` namespace alongside any
+other variable namespace:
 
 ```yaml
 variables:
-  pct_drive_to_work: PRESET.pct_drive_to_work
-  pct_renters: PRESET.pct_renters
+  pop_total:           G01.Tot_P_P
+  pct_drive_to_work:   PRESET.pct_drive_to_work
+  pct_renters:         PRESET.pct_renters
+  irsd_decile:         SEIFA.irsd_aus_decile
 ```
 
-Feature evaluation runs after dataset enrichment: numerator and denominator
-are computed from the (already-attached) dataset variables, then the ratio
-applied with the spec's edge-case handling.
+**v1.4 pipeline integration.** `CensusEnricher.build_lookup()` recognises
+`PRESET.<id>` directly. For each PRESET it:
+
+1. Looks the id up in the `FeatureRegistry`.
+2. Walks numerator + denominator to collect every underlying source
+   ref (`spec.source_fields()`).
+3. Auto-loads those sources through the existing GCP / registered-dataset
+   dispatch — deduplicated across PRESETs, so two PRESETs sharing
+   `G01.Tot_P_P` only fetch G01 once.
+4. Runs `FeatureEvaluator` against a workspace DataFrame that has the
+   source columns under their bare `<NAMESPACE>.<field>` names.
+5. Surfaces the result as `<output_prefix><friendly>` and drops the
+   synthetic source columns from the final lookup.
+
+The standalone `FeatureEvaluator` API (v1.3) is unchanged and still
+available for analysis code that has its own SA2-keyed DataFrame and
+doesn't need geocoding.
 
 ### 21.3 Edge case rules
 

@@ -82,9 +82,7 @@ class FeatureSpec(BaseModel):
 
     id: str
     status: Literal["proposed", "active", "deprecated"]
-    output_kind: Literal[
-        "percentage", "ratio", "rate", "scalar", "index"
-    ]
+    output_kind: Literal["percentage", "ratio", "rate", "scalar", "index"]
     bounds: tuple[float, float] | None = None
     dataset: str | list[str]
     default: bool = False
@@ -95,6 +93,23 @@ class FeatureSpec(BaseModel):
     sources: list[_SourceCitation] = Field(default_factory=list)
     body: str = ""
     source_path: Path | None = None
+
+    def source_fields(self) -> set[str]:
+        """All ``<NAMESPACE>.<field>`` refs this spec needs as inputs.
+
+        Walks both ``numerator`` and ``denominator`` expressions, returning
+        the union of every source column the evaluator will look up. Used
+        by :class:`~census_augment.enrich.CensusEnricher` to auto-load the
+        underlying GCP / registered-dataset columns when a config asks for
+        ``PRESET.<id>`` directly.
+        """
+        refs: set[str] = set()
+        for expr in (self.numerator, self.denominator):
+            if expr.expression == "field" and expr.field:
+                refs.add(expr.field)
+            elif expr.expression in ("sum", "weighted_sum"):
+                refs.update(expr.fields)
+        return refs
 
 
 _FRONT_MATTER_RE = re.compile(
@@ -108,23 +123,15 @@ def parse_feature_spec(path: Path) -> FeatureSpec:
     text = path.read_text(encoding="utf-8")
     m = _FRONT_MATTER_RE.match(text)
     if not m:
-        raise ValueError(
-            f"{path} is not a valid feature spec: missing YAML front-matter"
-        )
+        raise ValueError(f"{path} is not a valid feature spec: missing YAML front-matter")
     try:
         front = yaml.safe_load(m.group("front"))
     except yaml.YAMLError as e:
-        raise ValueError(
-            f"{path}: front-matter is not valid YAML: {e}"
-        ) from e
+        raise ValueError(f"{path}: front-matter is not valid YAML: {e}") from e
     if not isinstance(front, dict):
-        raise ValueError(
-            f"{path}: front-matter must be a YAML mapping"
-        )
+        raise ValueError(f"{path}: front-matter must be a YAML mapping")
     try:
-        return FeatureSpec(
-            **front, body=m.group("body").strip(), source_path=path
-        )
+        return FeatureSpec(**front, body=m.group("body").strip(), source_path=path)
     except Exception as e:
         raise ValueError(f"{path}: invalid feature spec — {e}") from e
 
@@ -163,9 +170,7 @@ class FeatureRegistry:
                 try:
                     spec = parse_feature_spec(spec_path)
                 except ValueError:
-                    _log.exception(
-                        "Skipping invalid feature spec at %s", spec_path
-                    )
+                    _log.exception("Skipping invalid feature spec at %s", spec_path)
                     continue
                 registry._by_id[spec.id] = spec
         return registry
@@ -178,8 +183,7 @@ class FeatureRegistry:
             return self._by_id[feature_id]
         except KeyError as e:
             raise KeyError(
-                f"No feature registered with id {feature_id!r}. "
-                f"Known: {sorted(self._by_id)}"
+                f"No feature registered with id {feature_id!r}. Known: {sorted(self._by_id)}"
             ) from e
 
     def __contains__(self, feature_id: str) -> bool:
@@ -263,8 +267,7 @@ class FeatureEvaluator:
         if expr.expression == "sum":
             if not expr.fields:
                 raise ValueError(
-                    f"Feature {self._spec.id!r}: {which}.expression='sum' "
-                    "but no `fields:` provided"
+                    f"Feature {self._spec.id!r}: {which}.expression='sum' but no `fields:` provided"
                 )
             cols = [self._field_series(df, f) for f in expr.fields]
             return sum(c.astype(float) for c in cols)  # type: ignore[return-value]
@@ -327,7 +330,6 @@ class FeatureEvaluator:
             return series
         if behaviour == "error":
             raise ValueError(
-                f"Feature {self._spec.id!r}: {n_out} values outside "
-                f"bounds [{lo}, {hi}]"
+                f"Feature {self._spec.id!r}: {n_out} values outside bounds [{lo}, {hi}]"
             )
         return series  # pragma: no cover
