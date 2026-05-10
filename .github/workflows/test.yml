@@ -40,3 +40,15 @@ jobs:
 
       - name: Run pytest
         run: uv run pytest tests/ -q
+
+      # Wheel-install regression check (issue #19). Builds a wheel,
+      # installs it into a fresh subprocess venv, and asserts both
+      # registries populate from the bundled markdown alone. Gated on
+      # WHEEL_E2E=1 because it's slow (~10s) and only meaningful when
+      # the build toolchain is available — local `pytest` skips it.
+      - name: Verify wheel ships dataset/feature specs (issue #19 regression)
+        env:
+          WHEEL_E2E: "1"
+        run: |
+          uv pip install build
+          uv run pytest tests/test_wheel_bundles_specs.py -v

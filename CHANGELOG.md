@@ -9,6 +9,58 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-05-10
+
+### Fixed — wheel install ships dataset/feature spec markdown (closes #19)
+
+v1.3 / v1.4 wheels were built with `[tool.hatch.build.targets.wheel]
+packages = ["src/census_augment"]`, which copies only the `*.py` files
+under the package. The 13 markdown spec files at `datasets/*.md` and
+`features/*.md` (the actual content of the pluggable framework) sat at
+the repo root and never made it into the wheel — so anyone installing
+via `pip install abs-census-augmentor @ git+...` ended up with empty
+registries:
+
+```python
+>>> from census_augment.datasets import registry
+>>> list(registry.list_datasets())
+[]   # should be 5: gcp_2021, seifa_2021, erp_by_sa2, dss_payments, ato_personal_income
+>>> from census_augment.features import features
+>>> list(features.list_features())
+[]   # should be 6 PRESETs
+```
+
+Source checkouts and `pip install -e .` worked because the runtime
+resolver's primary path looks at the repo-root `datasets/` /
+`features/` directories. The wheel-install fallback path (private
+mirrors at `<package>/datasets/_specs/` and `<package>/_features/`)
+existed in the resolver code but the build didn't put any files there.
+
+Fixed by adding `force-include` to `pyproject.toml`:
+
+```toml
+[tool.hatch.build.targets.wheel.force-include]
+"datasets" = "census_augment/datasets/_specs"
+"features" = "census_augment/_features"
+```
+
+The new wheel ships all 13 markdown files at the paths the resolver
+already expects. No code changes needed — only the build config.
+
+Verified end-to-end against a fresh isolated venv: `pip install
+abs-census-augmentor==1.4.1` (wheel-only, no source checkout) produces
+all 5 registered datasets and all 6 PRESET features.
+
+### Added — Wheel-install regression test + CI step
+
+`tests/test_wheel_bundles_specs.py` adds two `pyproject.toml`
+lock-down checks (force-include destinations match what the runtime
+resolver expects) plus one end-to-end test that builds a wheel,
+installs it in a subprocess venv, and confirms both registries
+populate. The E2E test is gated on `WHEEL_E2E=1` because it's slow
+(~10s) — local `pytest` runs skip it, but CI sets the flag and runs
+it on every push.
+
 ## [1.4.0] - 2026-05-10
 
 ### Added — PRESET features as first-class pipeline variables

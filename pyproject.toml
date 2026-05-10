@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 # import name and CLI command both stay `census_augment` /
 # `census-augment` — those are independent of the distribution name.
 name = "abs-census-augmentor"
-version = "1.4.0"
+version = "1.4.1"
 description = "Augment Australian location datasets with ABS Census data at the SA2 statistical area level."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -51,6 +51,19 @@ census-augment = "census_augment.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/census_augment"]
+
+# Bundle the dataset / feature spec markdown into the wheel under the
+# private mirror paths the runtime fallback code in
+# `datasets/_registry.py::_default_spec_dir()` and
+# `features.py::_default_features_dir()` expects to find for wheel
+# installs (no `datasets/` / `features/` dir at the source root).
+# Without these, both registries return empty lists on a real wheel
+# install, breaking the pluggable framework end-to-end (issue #19).
+# Templates (leading-underscore files) are silently skipped by both
+# loaders, so including the whole directory is harmless.
+[tool.hatch.build.targets.wheel.force-include]
+"datasets" = "census_augment/datasets/_specs"
+"features" = "census_augment/_features"
 
 [tool.ruff]
 line-length = 100
