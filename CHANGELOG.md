@@ -9,6 +9,30 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — Dev Container build broken by yarn apt-source GPG key rotation
+
+VSCode `Reopen in Container` failed against the Python base image
+with:
+
+```
+The following signatures couldn't be verified because the public
+key is not available: NO_PUBKEY 62D54FD4003F6525
+```
+
+`mcr.microsoft.com/devcontainers/python:1-3.11-bookworm` ships a yarn
+apt source whose upstream signing key was rotated; the cached key in
+the image no longer validates, so every `apt-get update` run by the
+devcontainer features fails. Yarn isn't used by anything in this
+project.
+
+`.devcontainer/devcontainer.json` now builds from a tiny local
+`.devcontainer/Dockerfile` that bases on the Microsoft image and
+removes `/etc/apt/sources.list.d/yarn.list` before features run.
+Feature installs proceed cleanly.
+
+The Dockerfile can be deleted once Microsoft refreshes the upstream
+image with the new yarn key.
+
 ## [1.4.2] - 2026-05-10
 
 ### Fixed — PRESET column refs against real GCP DataPack (closes #23)

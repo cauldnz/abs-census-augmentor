@@ -17,7 +17,9 @@
 // Subsequent attaches are seconds.
 {
     "name": "abs-census-augmentor",
-    "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
 
     "features": {
         // Docker access for VHS demo rendering. "outside-of-docker"
