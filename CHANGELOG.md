@@ -9,6 +9,28 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — Native VHS render failed with "No usable sandbox!"
+
+After PR #31 installed the chromium runtime libs, the next render
+attempt aborted at chromium startup:
+
+```
+No usable sandbox! If this is a Debian system, please install the
+chromium-sandbox package to solve this problem.
+```
+
+Inside a container, unprivileged user namespaces are typically
+disabled, so chromium needs its setuid sandbox helper to start.
+The `chromium` package only *recommends* `chromium-sandbox`, and
+`apt-get install --no-install-recommends` (which we use to keep
+the image lean) drops recommended-but-not-required deps. Result:
+chromium gets installed but its sandbox helper doesn't.
+
+Fixed by naming `chromium-sandbox` explicitly in the apt-install
+list. Verified against
+[packages.debian.org/bookworm/chromium-sandbox](https://packages.debian.org/bookworm/chromium-sandbox)
+— ~377 kB installed, in bookworm main.
+
 ### Fixed — Native VHS render in devcontainer failed for missing chromium libs
 
 After the dev container's post-create finished installing vhs +

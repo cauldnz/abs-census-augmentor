@@ -74,8 +74,19 @@ if ! command -v vhs >/dev/null 2>&1; then
     #           deps; vhs's downloaded headless chromium needs
     #           those at runtime even though it doesn't use the
     #           apt-installed chromium binary itself.
+    # chromium-sandbox: provides the setuid sandbox helper
+    #           (`chrome_sandbox`) chromium requires when
+    #           unprivileged user namespaces aren't usable (the
+    #           common case inside containers). Without it,
+    #           vhs's chromium aborts at startup with "No usable
+    #           sandbox!". The `chromium` package itself only
+    #           *recommends* chromium-sandbox, so
+    #           --no-install-recommends drops it; we name it
+    #           explicitly. Verified against
+    #           https://packages.debian.org/bookworm/chromium-sandbox
+    #           (~377 kB installed).
     sudo apt-get install -y --no-install-recommends \
-        ffmpeg bsdmainutils chromium >/dev/null
+        ffmpeg bsdmainutils chromium chromium-sandbox >/dev/null
 
     # Resolve the architecture once for both ttyd and vhs.
     arch="$(uname -m)"
