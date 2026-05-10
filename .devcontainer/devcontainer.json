@@ -70,6 +70,22 @@
         // Tell uv to use a project-local venv at .venv/ (matches
         // `uv sync` defaults; documented for clarity).
         "UV_PROJECT_ENVIRONMENT": "${containerWorkspaceFolder}/.venv",
+        // Force uv to copy files instead of hardlinking when
+        // populating .venv/. uv's cache lives under ~/.cache/uv/
+        // on the container's overlayfs, but .venv/ lives in the
+        // bind-mounted workspace (a separate filesystem). Cross-
+        // filesystem hardlinks fail, so uv falls back to copy and
+        // prints a warning on every operation. This flag tells uv
+        // "we know, use copy mode, don't warn":
+        //
+        //   warning: Failed to hardlink files; falling back to full
+        //   copy. ... set `export UV_LINK_MODE=copy` ... to suppress
+        //   this warning.
+        //
+        // The performance "degradation" is negligible for our
+        // dependency tree (the cache still avoids re-downloads;
+        // only the install hop changes).
+        "UV_LINK_MODE": "copy",
         // Force colour output in tools that respect this — the GIF
         // demo renders look better when ruff / pytest stay coloured.
         "FORCE_COLOR": "1"
