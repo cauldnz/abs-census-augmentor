@@ -9,6 +9,29 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — Tool excludes for `.claude/` agent scratch space
+
+`pyproject.toml` now tells ruff, mypy, and pytest to skip
+`.claude/worktrees/<slug>/`. Without these, each tool re-scans
+every source file once per active worktree AND honours each
+worktree's own `pyproject.toml` via nested-config discovery — so a
+rule disabled on `main` keeps firing inside in-flight branch
+worktrees, producing a wave of phantom findings.
+
+| Tool | Block | Setting |
+| --- | --- | --- |
+| ruff | `[tool.ruff]` | `extend-exclude = [".claude/"]` |
+| mypy | `[tool.mypy]` | `exclude = ['^\.claude/']` |
+| pytest | `[tool.pytest.ini_options]` | `testpaths = ["tests"]` |
+
+`CLAUDE.md` documents this as a project convention and lists the
+current exclusion set, so future agents adding a new tool that
+auto-walks the tree (coverage, black, pre-commit, etc.) extend the
+list rather than re-discover the bug.
+
+Pattern documented in
+[cauldnz/aus-fuel-forecaster#17](https://github.com/cauldnz/aus-fuel-forecaster/issues/17).
+
 ### Added — `Makefile` for common workflows
 
 A `Makefile` at the repo root wraps the everyday dev commands:
