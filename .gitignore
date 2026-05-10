@@ -29,3 +29,22 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude Code state — agent worktrees, session metadata, etc. All
+# per-machine and per-session; never useful in version control.
+# Worktrees live at .claude/worktrees/<slug>/ during development;
+# without this ignore, the main worktree sees them as untracked
+# directories and the GUI git tooling auto-stashes them on every pull.
+.claude/
+
+# VSCode Dev Containers generates this on container build. Records
+# the resolved feature versions for the most recent build —
+# per-machine state, not portable.
+.devcontainer/devcontainer-lock.json
+
+# uv's lockfile. We deliberately don't commit it (lockfile policy
+# wasn't decided when v1.0 shipped, and the project's dependency
+# closure is small enough that pinning hasn't been worth the
+# version-conflict noise). If the project ever moves to a strict
+# lockfile workflow this line goes.
+uv.lock
