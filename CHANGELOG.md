@@ -9,6 +9,50 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — Demo Dockerfile missing `features/` and `datasets/` (regression from v1.4.1)
+
+`tools/demo/Dockerfile` only copied `pyproject.toml`, `README.md`,
+and `src/` into the build context. v1.4.1's wheel-bundles-specs fix
+(closes #19) added `[tool.hatch.build.targets.wheel.force-include]`
+entries for `datasets/` and `features/` to `pyproject.toml`. Inside
+the demo image's `pip install /work` step, hatchling failed:
+
+```
+FileNotFoundError: Forced include not found: /work/features
+```
+
+That broke `tools/demo/render.sh` end-to-end (anyone, not just
+dev-container users). Fix: extend the Dockerfile's `COPY` lines to
+also copy `datasets/` and `features/` into `/work/`. Comment notes
+the dependency on the pyproject.toml force-include block so the two
+don't drift again.
+
+### Added — `--local` / `--docker` flags on `tools/demo/render.sh` and `render.ps1`
+
+Demo rendering now supports two modes:
+
+- **`--local`** — runs `vhs` natively from PATH. Requires `vhs`,
+  `ttyd`, `ffmpeg`, and `column` available on the host. Fast; no
+  Docker dependency.
+- **`--docker`** — builds the custom VHS image and renders through
+  it. Works on any host with Docker reachable.
+
+The default is auto: prefer `--local` if `vhs` is on PATH, else
+fall back to `--docker`.
+
+This pairs with the dev container update below: rendering from
+inside the dev container no longer round-trips through host Docker
+(via `docker-outside-of-docker`), removing one layer of indirection.
+
+### Added — Native VHS in the dev container
+
+`.devcontainer/post-create.sh` now installs `vhs` (Go release
+binary), `ttyd`, `ffmpeg`, and `bsdmainutils` so
+`tools/demo/render.sh` renders demos natively inside the dev
+container by default. The host Docker socket is still mounted (via
+the `docker-outside-of-docker` feature), so `--docker` mode remains
+available for testing the Dockerfile path.
+
 ### Fixed — Dev Container build broken by yarn apt-source GPG key rotation
 
 VSCode `Reopen in Container` failed against the Python base image

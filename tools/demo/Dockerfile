@@ -32,9 +32,18 @@ RUN apt-get update \
 #
 # README.md is COPY'd because hatchling reads pyproject.toml's
 # `readme = "README.md"` field at build time and errors if it's missing.
+#
+# datasets/ and features/ MUST also be COPY'd because pyproject.toml's
+# `[tool.hatch.build.targets.wheel.force-include]` (added in v1.4.1
+# closing #19) bundles those markdown spec dirs into the wheel. Without
+# them present in the build context, hatchling raises FileNotFoundError
+# and the install step fails. Don't drop these COPY lines without also
+# updating pyproject.toml.
 WORKDIR /work
 COPY pyproject.toml README.md /work/
 COPY src /work/src/
+COPY datasets /work/datasets/
+COPY features /work/features/
 RUN pip install --break-system-packages --no-cache-dir /work \
     && rm -rf /work
 

@@ -56,17 +56,28 @@ uv run census-augment --help   # CLI is on PATH via the venv
 
 ## Rendering demos
 
-The existing `tools/demo/render.sh` works inside the devcontainer because the
-host Docker socket is mounted:
+`post-create.sh` installs `vhs`, `ttyd`, `ffmpeg`, and
+`bsdmainutils` so demo rendering runs natively inside the
+devcontainer — no docker-in-docker needed. The render script
+auto-detects this and uses local vhs by default:
 
 ```bash
 ./tools/demo/render.sh                       # docs/demo.gif (headline)
 ./tools/demo/render.sh discover-datasets     # docs/discover-datasets.gif
 ./tools/demo/render.sh preset-features       # docs/preset-features.gif
+./tools/demo/render.sh --all                 # render every tape in one go
 ```
 
-The script pulls the VHS image (`ghcr.io/charmbracelet/vhs:latest`) and
-mounts the repo into it. Renders take ~30 s of wall-clock per demo.
+Renders take ~30 s wall-clock per demo. The host Docker socket is
+also mounted (via the `docker-outside-of-docker` feature) so you can
+force the Docker rendering path if you need to test the Dockerfile:
+
+```bash
+./tools/demo/render.sh --docker --all
+```
+
+See [`tools/demo/README.md`](../tools/demo/README.md) for the full
+mode matrix and timing details.
 
 ## Troubleshooting
 
