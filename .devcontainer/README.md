@@ -96,6 +96,29 @@ mode matrix and timing details.
   failure should not be reachable. If it ever resurfaces, check the
   Dockerfile is still being picked up (i.e. devcontainer.json's
   `build.dockerfile` field still points at `Dockerfile`).
+- **`render.sh --local` fails with `No usable sandbox!` or
+  `Failed to move to new namespace`**: Chromium's sandbox needs to
+  create a user namespace, which Docker's default seccomp profile
+  blocks. The `runArgs` in `devcontainer.json` lift that restriction
+  with `--security-opt seccomp=unconfined --ipc=host`. If the error
+  comes back, check those flags are still present — rebuilding the
+  container without them produces this exact failure.
+
+## Why the runArgs?
+
+`devcontainer.json` passes `--security-opt seccomp=unconfined` and
+`--ipc=host` to Docker via `runArgs`. The first lets chromium's
+sandbox create user namespaces (otherwise blocked by Docker's
+default seccomp profile, which produces the
+"No usable sandbox / Operation not permitted" error). The second is
+chromium's recommended IPC mode under Docker per Playwright's
+docker docs — without it, chromium hits shared-memory issues
+encoding the demo GIFs.
+
+Same posture every Playwright / Puppeteer Docker workflow uses.
+The dev container runs trusted user-attached code, so the broader
+security surface is fine here; it would **not** be appropriate for
+multi-tenant CI running untrusted browser content.
 
 ## Why the local Dockerfile?
 
