@@ -137,6 +137,7 @@ if ($resolvedMode -eq "docker") {
 }
 
 New-Item -ItemType Directory -Force -Path docs | Out-Null
+New-Item -ItemType Directory -Force -Path docs/frames | Out-Null
 
 # ---- per-tape render ---------------------------------------------------
 

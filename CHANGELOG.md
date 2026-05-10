@@ -9,6 +9,24 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — Per-scene PNG snapshots from every demo tape
+
+Each VHS tape in `tools/demo/` now writes per-scene `Screenshot
+<path>.png` snapshots alongside the animated GIF. 12 PNGs total
+(4 per tape) land in `docs/frames/`. Useful for:
+
+- Embedding in static contexts (blog posts, Slack previews,
+  anywhere GIF animation doesn't reliably autoplay).
+- Sharing a specific frame without forcing the reader to wait for
+  the GIF to loop.
+- Letting LLM-based code review actually see what the demo shows
+  (single frames are viewable; animated GIFs aren't).
+
+Render is the same as before — `make demos` (or
+`./tools/demo/render.sh --all`) produces both the GIFs and the
+PNGs in one pass. `docs/frames/README.md` documents the file
+naming and per-scene mapping.
+
 ### Fixed — `uv` hardlink warning on every operation inside the dev container
 
 Every `uv sync` / `uv run` inside the dev container printed:

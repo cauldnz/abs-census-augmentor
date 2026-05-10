@@ -157,7 +157,7 @@ if [[ "$resolved_mode" == "docker" ]]; then
     docker build -f tools/demo/Dockerfile -t census-augment-vhs . >/dev/null
 fi
 
-mkdir -p docs
+mkdir -p docs docs/frames
 
 # ---- per-tape render ---------------------------------------------------
 

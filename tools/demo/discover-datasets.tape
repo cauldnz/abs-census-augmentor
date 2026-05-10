@@ -9,6 +9,8 @@
 
 Output docs/discover-datasets.gif
 
+# Per-scene PNG snapshots — see comment in demo.tape.
+
 Set Shell "bash"
 Set Theme "Dracula"
 Set FontSize 16
@@ -24,6 +26,7 @@ Sleep 800ms
 Type "census-augment discover --config tools/demo/config.yaml --datasets"
 Enter
 Sleep 5s
+Screenshot docs/frames/discover-datasets-1-list.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -35,6 +38,7 @@ Sleep 800ms
 Type "census-augment discover --config tools/demo/config.yaml --dataset seifa_2021"
 Enter
 Sleep 5s
+Screenshot docs/frames/discover-datasets-2-schema.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -46,6 +50,7 @@ Sleep 800ms
 Type "head -25 datasets/seifa_2021.md"
 Enter
 Sleep 6s
+Screenshot docs/frames/discover-datasets-3-spec.png
 Type "clear"
 Enter
 Sleep 300ms
@@ -57,3 +62,4 @@ Sleep 800ms
 Type "census-augment discover --config tools/demo/config.yaml --features"
 Enter
 Sleep 6s
+Screenshot docs/frames/discover-datasets-4-presets.png
