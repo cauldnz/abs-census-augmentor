@@ -130,6 +130,56 @@ def test_registry_get_unknown_raises() -> None:
         features.get("nope_doesnt_exist")
 
 
+# ---- source_fields() ----------------------------------------------------
+
+
+def test_source_fields_for_field_expression() -> None:
+    """``field`` expressions contribute their single ref."""
+    spec = features.get("pct_renters")
+    assert spec.source_fields() == {"G37.R_Tot", "G37.OPDs_Total"}
+
+
+def test_source_fields_for_sum_expression() -> None:
+    """``sum`` expressions contribute every field; combined with the
+    denominator's single field."""
+    spec = features.get("pct_drive_to_work")
+    assert spec.source_fields() == {
+        "G62.OneMethod_CarAsDriver_P",
+        "G62.OneMethod_CarAsPassenger_P",
+        "G62.OneMethod_Truck_P",
+        "G62.OneMethod_MotorbikeOrScooter_P",
+        "G62.Tot_P",
+    }
+
+
+def test_source_fields_dedupes_across_numerator_and_denominator(
+    tmp_path: Path,
+) -> None:
+    """If the same field appears in both num and den, it surfaces once."""
+    spec_path = _write_feature_spec(
+        tmp_path,
+        dedent(
+            """\
+            ---
+            id: same_top_and_bottom
+            status: proposed
+            output_kind: ratio
+            dataset: gcp_2021
+            numerator:
+              expression: field
+              field: G01.Tot_P_P
+            denominator:
+              expression: field
+              field: G01.Tot_P_P
+            ---
+            test
+            """
+        ),
+    )
+    spec = parse_feature_spec(spec_path)
+    assert spec.source_fields() == {"G01.Tot_P_P"}
+
+
 # ---- evaluator ----------------------------------------------------------
 
 
@@ -181,11 +231,13 @@ def test_evaluate_sum_numerator() -> None:
         },
         denominator={"expression": "field", "field": "G62.den"},
     )
-    df = _make_df(**{
-        "G62.a": [20.0, 10.0],
-        "G62.b": [30.0, 20.0],
-        "G62.den": [100.0, 100.0],
-    })
+    df = _make_df(
+        **{
+            "G62.a": [20.0, 10.0],
+            "G62.b": [30.0, 20.0],
+            "G62.den": [100.0, 100.0],
+        }
+    )
     result = FeatureEvaluator(spec).evaluate(df)
     assert list(result) == [50.0, 30.0]
 

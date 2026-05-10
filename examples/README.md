@@ -9,6 +9,7 @@ Runnable scripts and a CLI sample. Browse by **what you want to do**:
 | [`library_basic.py`](library_basic.py) | Smallest possible library use: `Pipeline.create()` + `augment(df)` with GCP variables. |
 | [`library_with_overrides.py`](library_with_overrides.py) | Per-call column-name overrides, custom output prefix, `AugmentResult` masks. |
 | [`library_with_seifa.py`](library_with_seifa.py) | **v1.3** — mix GCP + SEIFA variables in one config. The pipeline dispatches each through the right dataset's fetcher transparently. |
+| [`library_with_preset_features.py`](library_with_preset_features.py) | **v1.4** — mix GCP + SEIFA + PRESET ratios (`PRESET.pct_renters`, `PRESET.pct_drive_to_work`, ...) in one config. PRESETs are first-class variable refs; their source columns load transparently. |
 
 ## CLI
 
@@ -24,7 +25,6 @@ spatial-join + DataFrame-merge dance:
 | Example | What |
 |---|---|
 | [`standalone_dataset_fetchers.py`](standalone_dataset_fetchers.py) | **v1.3** — drive the four new dataset fetchers (SEIFA, ERP, DSS, ATO) directly. Caches a parquet on first call; subsequent loads are instant. |
-| [`library_with_preset_features.py`](library_with_preset_features.py) | **v1.3** — compute PRESET ratio features (pct_renters etc.) standalone via `FeatureEvaluator`. |
 
 ## How to run them
 

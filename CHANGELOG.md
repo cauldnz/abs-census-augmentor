@@ -9,6 +9,63 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-05-10
+
+### Added — PRESET features as first-class pipeline variables
+
+`PRESET.<id>` is now a usable variable reference in any
+config — alongside the existing `G\d+.<col>` (GCP), `SEIFA.<field>`,
+`ERP.<field>`, `DSS.<field>`, and `ATO.<field>` namespaces.
+
+```yaml
+variables:
+  pop_total:    G01.Tot_P_P
+  renters_pct:  PRESET.pct_renters         # NEW: PRESET as first-class ref
+  drove_pct:    PRESET.pct_drive_to_work
+  irsd_decile:  SEIFA.irsd_aus_decile
+```
+
+Behind the scenes, `CensusEnricher.build_lookup()` now:
+
+1. Detects every `PRESET.<id>` in the configured variables.
+2. Looks each one up in the `FeatureRegistry` and walks
+   numerator + denominator to collect the underlying source columns
+   (e.g. `G37.R_Tot`, `G37.OPDs_Total` for `pct_renters`).
+3. Auto-loads those source columns through the existing GCP /
+   registered-dataset dispatch — deduplicated across PRESETs, so two
+   PRESETs that share `G01.Tot_P_P` only fetch it once.
+4. Runs `FeatureEvaluator` against the workspace and surfaces the
+   derived column as `<output_prefix><friendly>` (e.g.
+   `sa2_renters_pct`).
+5. Drops the synthetic source columns from the result so callers see
+   only the variables they explicitly asked for.
+
+In v1.3 the same workflow was possible but required the user to
+manually request the source columns and apply `FeatureEvaluator`
+themselves; `examples/library_with_preset_features.py` showed the
+manual recipe. v1.4 makes both `Pipeline.run()` (file in/out via the
+CLI) and `Pipeline.augment(df)` (library in/out) treat
+`PRESET.<id>` like any other variable namespace.
+
+The standalone `FeatureEvaluator` / `FeatureRegistry` API is unchanged
+and still available for direct use against an existing
+SA2-keyed DataFrame.
+
+### Added — `FeatureSpec.source_fields()` helper
+
+A new `set[str]` accessor on `FeatureSpec` that returns every
+`<NAMESPACE>.<field>` ref the evaluator will look up — used internally
+by the pipeline integration above and useful for downstream tooling
+that wants to introspect what GCP / dataset columns a PRESET depends
+on.
+
+### Verified
+
+`tools/verify_real_parsers.py` confirmed against the live ABS /
+data.gov.au endpoints that all v1.3 datasets (SEIFA, ERP, DSS, ATO)
+still parse cleanly post-#16. No fixtures or schemas changed in
+v1.4.
+
 ## [1.3.0] - 2026-05-09
 
 ### Fixed — G-NAF remote/cache mode against the real ``minus34.com`` bucket (closes #17)

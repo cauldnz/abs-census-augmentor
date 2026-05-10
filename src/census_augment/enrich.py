@@ -8,12 +8,15 @@ The variable string's namespace tells us which dataset provides it:
 - ``SEIFA.<field>``, ``ERP.<field>``, ``DSS.<field>``,
   ``ATO.<field>`` → the corresponding registered dataset's fetcher.
 
-Loads only the datasets / tables actually referenced. PRESET features
-(``PRESET.<id>``) are evaluated by :class:`FeatureEvaluator` and are
-**not** handled here in v1.3 — call them separately on the enriched
-DataFrame. Wiring PRESETs into this stage is on the v1.4 backlog
-(needs auto-loading of the underlying numerator/denominator source
-columns).
+v1.4 adds first-class PRESET integration: variables of the form
+``PRESET.<id>`` are looked up in the :class:`FeatureRegistry`,
+their underlying numerator/denominator source columns are fetched
+transparently (deduplicated across PRESETs), and the
+:class:`FeatureEvaluator` produces the derived column. The synthetic
+source columns are dropped from the final lookup so callers see only
+the PRESETs they asked for.
+
+Loads only the datasets / tables actually referenced.
 """
 
 from __future__ import annotations
@@ -29,8 +32,15 @@ from .catalog import VariableCatalog
 from .data_sources.datapacks import DataPacksDataSource
 from .datasets import registry
 from .datasets._registry import RegistryError
+from .features import FeatureEvaluator, FeatureSpec, features
 
 _log = logging.getLogger(__name__)
+
+#: Internal prefix for synthetic source-column entries the enricher
+#: injects when it auto-loads PRESET inputs. The chance a user names
+#: a friendly variable starting with this prefix is essentially zero;
+#: if they do, build_lookup() raises (see _SyntheticPrefixCollision).
+_PRESET_SOURCE_PREFIX = "__preset_src__"
 
 
 class CensusEnricher:
@@ -55,6 +65,7 @@ class CensusEnricher:
         self._variables = dict(variables)
         self._output_prefix = output_prefix
         self._data_dir = data_dir
+        self._validate_no_synthetic_prefix_collision()
 
     def build_lookup(self) -> pd.DataFrame:
         """Return a DataFrame indexed by SA2 code with one column per variable.
@@ -62,15 +73,42 @@ class CensusEnricher:
         Dispatches each variable through the registry. GCP variables go
         through the existing :class:`VariableCatalog` +
         :class:`DataPacksDataSource` path; non-GCP variables resolve
-        through registered fetchers. Unknown namespaces fall through to
-        the GCP catalog (which raises a helpful CatalogError listing
-        near-matches).
+        through registered fetchers; ``PRESET.<id>`` refs are expanded
+        to their numerator/denominator source columns, which are fetched
+        through the same dispatch logic and then collapsed by the
+        :class:`FeatureEvaluator` into the derived column. Unknown
+        namespaces fall through to the GCP catalog (which raises a
+        helpful CatalogError listing near-matches).
+        """
+        preset_vars, non_preset_vars = self._split_presets(self._variables)
+        synthetic_sources = self._collect_synthetic_sources(preset_vars)
+
+        combined_vars = {**non_preset_vars, **synthetic_sources}
+        base_lookup = self._build_base_lookup(combined_vars)
+
+        if not preset_vars:
+            return base_lookup
+
+        workspace = self._build_preset_workspace(base_lookup, synthetic_sources)
+        for friendly, preset_id, spec in preset_vars:
+            self._evaluate_preset_into(base_lookup, workspace, friendly, preset_id, spec)
+
+        return self._drop_synthetic_columns(base_lookup, list(synthetic_sources))
+
+    # ---- dispatch ------------------------------------------------------
+
+    def _build_base_lookup(self, variables: dict[str, str]) -> pd.DataFrame:
+        """Run the GCP-vs-dataset dispatch over an arbitrary vars dict.
+
+        Public ``build_lookup`` calls this on the user's vars *plus*
+        any synthetic PRESET-source entries we needed to inject.
+        Variables themselves are unchanged from the v1.3 dispatch logic.
         """
         gcp_vars: list[tuple[str, str]] = []
         # dataset_id -> [(friendly_name, field_name)]
         per_dataset: dict[str, list[tuple[str, str]]] = {}
 
-        for friendly, ref in self._variables.items():
+        for friendly, ref in variables.items():
             try:
                 spec, field = registry.resolve_variable(ref)
             except RegistryError:
@@ -101,16 +139,12 @@ class CensusEnricher:
 
         return pd.concat(pieces, axis=1)
 
-    def _build_gcp_lookup(
-        self, friendly_refs: list[tuple[str, str]]
-    ) -> pd.DataFrame:
+    def _build_gcp_lookup(self, friendly_refs: list[tuple[str, str]]) -> pd.DataFrame:
         """Build the GCP slice of the lookup (existing v1.0 path)."""
         by_table: dict[str, list[tuple[str, str]]] = {}
         for friendly, ref in friendly_refs:
             col_meta = self._catalog.resolve(ref)
-            by_table.setdefault(col_meta.table_id, []).append(
-                (friendly, col_meta.code)
-            )
+            by_table.setdefault(col_meta.table_id, []).append((friendly, col_meta.code))
 
         if not by_table:
             return pd.DataFrame()
@@ -119,10 +153,7 @@ class CensusEnricher:
         for table_id, fc in by_table.items():
             table_df = self._datapacks.load_table(table_id)
             codes = [code for _, code in fc]
-            rename_map = {
-                code: f"{self._output_prefix}{friendly}"
-                for friendly, code in fc
-            }
+            rename_map = {code: f"{self._output_prefix}{friendly}" for friendly, code in fc}
             pieces.append(table_df[codes].rename(columns=rename_map))
 
         return pd.concat(pieces, axis=1)
@@ -149,8 +180,7 @@ class CensusEnricher:
                 f"{missing}. Available: {sorted(df.columns)[:10]}..."
             )
         rename_map = {
-            field: f"{self._output_prefix}{friendly}"
-            for friendly, field in friendly_fields
+            field: f"{self._output_prefix}{friendly}" for friendly, field in friendly_fields
         }
         result: pd.DataFrame = df[cols].rename(columns=rename_map)
         return result
@@ -176,6 +206,136 @@ class CensusEnricher:
             )
         return factory(self._data_dir / dataset_id)
 
+    # ---- PRESET integration --------------------------------------------
+
+    def _split_presets(
+        self, variables: dict[str, str]
+    ) -> tuple[list[tuple[str, str, FeatureSpec]], dict[str, str]]:
+        """Partition ``variables`` into (preset_entries, non_preset_vars).
+
+        Each preset_entry is ``(friendly_name, preset_id, FeatureSpec)``.
+        Non-preset entries pass through to the existing dispatch logic
+        unchanged.
+
+        Raises :class:`ValueError` if a ``PRESET.<id>`` ref is malformed
+        or if ``id`` isn't registered.
+        """
+        preset_vars: list[tuple[str, str, FeatureSpec]] = []
+        non_preset_vars: dict[str, str] = {}
+        for friendly, ref in variables.items():
+            if not ref.startswith("PRESET."):
+                non_preset_vars[friendly] = ref
+                continue
+            preset_id = ref[len("PRESET.") :]
+            if not preset_id:
+                raise ValueError(
+                    f"Variable {friendly!r}: malformed PRESET ref {ref!r}; expected 'PRESET.<id>'."
+                )
+            try:
+                spec = features.get(preset_id)
+            except KeyError as e:
+                known = [s.id for s in features.list_features()]
+                raise ValueError(
+                    f"Variable {friendly!r}: unknown PRESET id "
+                    f"{preset_id!r}. Known PRESETs: {known}"
+                ) from e
+            preset_vars.append((friendly, preset_id, spec))
+        return preset_vars, non_preset_vars
+
+    def _collect_synthetic_sources(
+        self,
+        preset_vars: list[tuple[str, str, FeatureSpec]],
+    ) -> dict[str, str]:
+        """Build a synthetic ``{friendly_name: source_ref}`` dict that the
+        normal dispatch loop will pull through alongside the user's vars.
+
+        Source refs are deduplicated across PRESETs — if two PRESETs
+        share ``G01.Tot_P_P``, we fetch it once. Synthetic friendly
+        names use a fixed prefix that will not collide with user names
+        (the constructor validates this).
+        """
+        synthetic: dict[str, str] = {}
+        for _, _, spec in preset_vars:
+            for source_ref in spec.source_fields():
+                synthetic[f"{_PRESET_SOURCE_PREFIX}{source_ref}"] = source_ref
+        return synthetic
+
+    def _build_preset_workspace(
+        self,
+        base_lookup: pd.DataFrame,
+        synthetic_sources: dict[str, str],
+    ) -> pd.DataFrame:
+        """Return a copy of ``base_lookup`` whose synthetic-source columns
+        are renamed back to the bare ``<NAMESPACE>.<field>`` refs the
+        :class:`FeatureEvaluator` expects to find.
+
+        The original ``base_lookup`` is not mutated — we keep its
+        prefixed synthetic columns around so they can be dropped in
+        a single pass at the end of ``build_lookup``.
+        """
+        rename: dict[str, str] = {}
+        for synth_friendly, source_ref in synthetic_sources.items():
+            prefixed = f"{self._output_prefix}{synth_friendly}"
+            if prefixed in base_lookup.columns:
+                rename[prefixed] = source_ref
+        if not rename:
+            return base_lookup
+        return base_lookup.rename(columns=rename)
+
+    def _evaluate_preset_into(
+        self,
+        base_lookup: pd.DataFrame,
+        workspace: pd.DataFrame,
+        friendly: str,
+        preset_id: str,
+        spec: FeatureSpec,
+    ) -> None:
+        """Run the evaluator and mutate ``base_lookup`` in place.
+
+        Errors get a friendly wrapper that names the offending PRESET
+        and friendly so the user can find it in their config.
+        """
+        try:
+            result = FeatureEvaluator(spec).evaluate(workspace)
+        except KeyError as e:
+            raise ValueError(
+                f"Failed to evaluate PRESET {preset_id!r} (friendly name "
+                f"{friendly!r}): {e}. The PRESET's source columns may not "
+                "have been loaded — confirm the underlying dataset is "
+                "registered and the ref shapes match."
+            ) from e
+        base_lookup[f"{self._output_prefix}{friendly}"] = result.values
+
+    def _drop_synthetic_columns(
+        self,
+        base_lookup: pd.DataFrame,
+        synth_friendlies: list[str],
+    ) -> pd.DataFrame:
+        """Strip synthetic ``<prefix>__preset_src__*`` columns from the result."""
+        cols_to_drop = [
+            f"{self._output_prefix}{name}"
+            for name in synth_friendlies
+            if f"{self._output_prefix}{name}" in base_lookup.columns
+        ]
+        if not cols_to_drop:
+            return base_lookup
+        return base_lookup.drop(columns=cols_to_drop)
+
+    def _validate_no_synthetic_prefix_collision(self) -> None:
+        """Reject user-friendly names that start with the internal prefix.
+
+        Defensive: the prefix is `__preset_src__` and is unlikely to
+        collide with a real column name, but we want a clean error if
+        it does instead of silent drop.
+        """
+        collisions = [f for f in self._variables if f.startswith(_PRESET_SOURCE_PREFIX)]
+        if collisions:
+            raise ValueError(
+                f"Variable names starting with {_PRESET_SOURCE_PREFIX!r} "
+                "are reserved for internal PRESET source-column "
+                f"injection. Rename: {sorted(collisions)}."
+            )
+
     def add_enrichment_columns(
         self,
         df: pd.DataFrame,
@@ -189,8 +349,7 @@ class CensusEnricher:
         """
         if sa2_code_col not in df.columns:
             raise ValueError(
-                f"sa2_code_col {sa2_code_col!r} not in DataFrame; "
-                f"got: {list(df.columns)}"
+                f"sa2_code_col {sa2_code_col!r} not in DataFrame; got: {list(df.columns)}"
             )
 
         lookup = self.build_lookup()
@@ -202,9 +361,7 @@ class CensusEnricher:
         lookup_for_merge = lookup.reset_index()
         first_col = lookup_for_merge.columns[0]
         if first_col != sa2_code_col:
-            lookup_for_merge = lookup_for_merge.rename(
-                columns={first_col: sa2_code_col}
-            )
+            lookup_for_merge = lookup_for_merge.rename(columns={first_col: sa2_code_col})
 
         return df.merge(lookup_for_merge, on=sa2_code_col, how="left")
 

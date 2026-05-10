@@ -89,17 +89,19 @@ should land as its own PR when the upstream demand surfaces.
 
 ## Future PRESET features (deferred from #11)
 
-The v1.3 catalog has six PRESETs sourced entirely from `gcp_2021`.
+The v1.3 catalog ships six PRESETs sourced entirely from `gcp_2021`,
+and v1.4 (#18) lands first-class pipeline integration so any config
+can write `variables: {pct_renters: PRESET.pct_renters}` directly.
 Cross-dataset features (e.g. `pct_age_pension_recipients` =
-`DSS.age_pension_recipients` / `ERP.population_65_plus`) are
-supported by the format (spec §21) but waiting on:
+`DSS.age_pension_recipients` / `ERP.population_65_plus`) are now
+implementable end-to-end — the only remaining blocker is:
 
-1. PRESET integration into the pipeline (spec §21.2 / v1.4 plan).
-2. ERP exposing age-band breakdowns (currently total population
-   only; spec example file describes age-band columns but the
-   real ERP DS0003 is total-only).
+1. ERP exposing age-band breakdowns (currently total population
+   only; spec example file describes age-band columns but the real
+   ERP DS0003 is total-only).
 
-Once both land, cross-dataset PRESETs become straightforward.
+When ERP gets age bands, cross-dataset PRESETs become a markdown-only
+authoring exercise.
 
 ## Other deferred items
 
