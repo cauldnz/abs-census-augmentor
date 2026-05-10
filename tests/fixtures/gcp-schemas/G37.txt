@@ -1,0 +1,73 @@
+Table G37: Tenure and Landlord Type by Dwelling Structure
+  O_OR_DS_Sep_house	Dwelling structure: Separate house
+  O_OR_DS_SemiD_ro_or_tce_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  O_OR_DS_Flat_apart	Dwelling structure: Flat or apartment
+  O_OR_DS_Oth_dwell	Dwelling structure: Other dwelling
+  O_OR_DS_not_stated	Dwelling structure: not stated
+  O_OR_Total	Total
+  O_MTG_DS_Sep_house	Dwelling structure: Separate house
+  O_MTG_DS_SemiD_ro_or_tce_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  O_MTG_DS_Flat_apart	Dwelling structure: Flat or apartment
+  O_MTG_DS_Oth_dwell	Dwelling structure: Other dwelling
+  O_MTG_DS_not_stated	Dwelling structure: not stated
+  O_MTG_Total	Total
+  R_RE_Agt_DS_Sep_house	Dwelling structure: Separate house
+  R_RE_Ag_DS_SemD_ro_or_tc_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_RE_Agt_DS_Flat_apart	Dwelling structure: Flat or apartment
+  R_RE_Agt_DS_Oth_dwell	Dwelling structure: Other dwelling
+  R_RE_Agt_DS_not_stated	Dwelling structure: not stated
+  R_RE_Agt_Total	Total
+  R_ST_h_auth_DS_Sep_house	Dwelling structure: Separate house
+  R_ST_h_au_DS_SD_ro_or_tc_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_ST_h_auth_DS_Flat_apart	Dwelling structure: Flat or apartment
+  R_ST_h_auth_DS_Oth_dwell	Dwelling structure: Other dwelling
+  R_ST_h_auth_DS_not_stated	Dwelling structure: not stated
+  R_ST_h_auth_Total	Total
+  R_Com_Hp_DS_Sp_ho	Dwelling structure: Separate house
+  R_Com_Hp_DS_SD_ro_t_h_t	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_Com_Hp_DS_Flt_apt	Dwelling structure: Flat or apartment
+  R_Com_Hp_DS_Ot_dwel	Dwelling structure: Other dwelling
+  R_Com_Hp_DS_NS	Dwelling structure: not stated
+  R_Com_Hp_Total	Total
+  R_Psn_not_in_s_hh_DS_Sep_hous	Dwelling structure: Separate house
+  R_P_not_in_s_h_DS_SD_ro_t_h_t	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_P_not_in_s_hh_DS_Flat_apart	Dwelling structure: Flat or apartment
+  R_Psn_not_in_s_hh_DS_Oth_dwel	Dwelling structure: Other dwelling
+  R_Psn_not_in_s_hh_DS_NS	Dwelling structure: not stated
+  R_Psn_not_in_s_hh_Total	Total
+  R_Ot_landld_typ_DS_Sep_house	Dwelling structure: Separate house
+  R_O_LLd_typ_DS_SD_ro_tc_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_Ot_LLd_typ_DS_Flat_apart	Dwelling structure: Flat or apartment
+  R_Ot_landld_typ_DS_Oth_dwell	Dwelling structure: Other dwelling
+  R_Ot_landld_typ_DS_not_stated	Dwelling structure: not stated
+  R_Ot_landld_typ_Total	Total
+  R_Landld_typ_NS_DS_Sep_house	Dwelling structure: Separate house
+  R_Ld_typ_NS_DS_SD_ro_tce_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_LLd_typ_NS_DS_Flat_apart	Dwelling structure: Flat or apartment
+  R_Landld_typ_NS_DS_Oth_dwell	Dwelling structure: Other dwelling
+  R_Landld_typ_NS_DS_not_stated	Dwelling structure: not stated
+  R_Landld_typ_NS_Total	Total
+  R_Tot_DS_Sep_house	Dwelling structure: Separate house
+  R_Tot_DS_SemiD_ro_or_tce_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  R_Tot_DS_Flat_apart	Dwelling structure: Flat or apartment
+  R_Tot_DS_Oth_dwell	Dwelling structure: Other dwelling
+  R_Tot_DS_not_stated	Dwelling structure: not stated
+  R_Tot_Total	Total
+  Oth_ten_type_DS_Sep_house	Dwelling structure: Separate house
+  Oth_ten_ty_DS_SD_ro_tce_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  Oth_ten_type_DS_Flat_apart	Dwelling structure: Flat or apartment
+  Oth_ten_type_DS_Oth_dwell	Dwelling structure: Other dwelling
+  Oth_ten_type_DS_not_stated	Dwelling structure: not stated
+  Oth_ten_type_Total	Total
+  Ten_type_NS_DS_Sep_house	Dwelling structure: Separate house
+  Ten_ty_NS_DS_SD_ro_tce_h_t	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  Ten_ty_NS_DS_Flat_apart	Dwelling structure: Flat or apartment
+  Ten_type_NS_DS_Oth_dwell	Dwelling structure: Other dwelling
+  Ten_type_NS_DS_not_stated	Dwelling structure: not stated
+  Ten_type_NS_Total	Total
+  Total_DS_Sep_house	Dwelling structure: Separate house
+  Total_DS_SemiD_ro_or_tce_h_th	Dwelling structure: Semi-detached\ row or terrace house\ townhouse etc.
+  Total_DS_Flat_apart	Dwelling structure: Flat or apartment
+  Total_DS_Oth_dwell	Dwelling structure: Other dwelling
+  Total_DS_not_stated	Dwelling structure: not stated
+  Total_Total	Total

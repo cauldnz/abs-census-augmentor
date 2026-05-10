@@ -68,10 +68,7 @@ def _check(label: str, fn: Callable[[], None]) -> bool:
 def main() -> int:
     data_dir = default_data_dir()
     if not data_dir.exists():
-        print(
-            f"{data_dir} does not exist. "
-            "Run `python tools/fetch_real_data.py` first."
-        )
+        print(f"{data_dir} does not exist. Run `python tools/fetch_real_data.py` first.")
         return 1
 
     census = CensusConfig()
@@ -91,9 +88,7 @@ def main() -> int:
     def _load_boundary() -> None:
         gdf = boundaries.load()
         assert len(gdf) > 1000, f"only {len(gdf)} rows (expected ~2473)"
-        assert "SA2_CODE21" in gdf.columns, (
-            f"missing SA2_CODE21; got: {list(gdf.columns)[:5]}"
-        )
+        assert "SA2_CODE21" in gdf.columns, f"missing SA2_CODE21; got: {list(gdf.columns)[:5]}"
         assert "SA2_NAME21" in gdf.columns, "missing SA2_NAME21"
         assert gdf.crs is not None, "CRS is None"
         crs_epsg = gdf.crs.to_epsg()
@@ -170,17 +165,13 @@ def main() -> int:
         root=data_dir / "mb",
     )
     if not mb_ds.is_cached():
-        print(
-            "  (skipped; no MB shapefile cached. "
-            "Run fetch_real_data.py to populate it.)"
-        )
+        print("  (skipped; no MB shapefile cached. Run fetch_real_data.py to populate it.)")
     else:
+
         def _load_mb_correspondence() -> None:
             lookup = mb_ds.load_correspondence()
             # Australia has ~360k mesh blocks across all states.
-            assert len(lookup) > 100_000, (
-                f"only {len(lookup)} mesh blocks (expected ~360k)"
-            )
+            assert len(lookup) > 100_000, f"only {len(lookup)} mesh blocks (expected ~360k)"
             # Spot-check: pick a known Sydney CBD mesh block.
             sample_mb = next(iter(lookup))
             info = lookup[sample_mb]
@@ -208,18 +199,14 @@ def main() -> int:
             "Run `python tools/fetch_real_data.py` to download from S3.)"
         )
     else:
+
         def _open_gnaf() -> None:
             con = gnaf_ds.open_connection()
             row = con.execute("SELECT COUNT(*) FROM gnaf").fetchone()
             assert row is not None, "COUNT(*) returned no row?"
             (count,) = row
-            assert count > 10_000_000, (
-                f"only {count:,} addresses (expected ~15.86M)"
-            )
-            print(
-                f"         -> {count:,} addresses; "
-                f"release {gnaf_ds.resolved_release}"
-            )
+            assert count > 10_000_000, f"only {count:,} addresses (expected ~15.86M)"
+            print(f"         -> {count:,} addresses; release {gnaf_ds.resolved_release}")
 
         def _gnaf_tier1_hit() -> None:
             geocoder = GnafGeocoder(data_source=gnaf_ds, fuzzy_threshold=0.85)
@@ -245,6 +232,7 @@ def main() -> int:
     if not sample_path.exists():
         print("  (skipped; no sample. Run fetch_real_data.py without --skip-nominatim.)")
     else:
+
         def _check_nominatim() -> None:
             data = json.loads(sample_path.read_text(encoding="utf-8"))
             results = data["results"]
@@ -255,10 +243,7 @@ def main() -> int:
             assert isinstance(entry["lon"], str), f"lon not str: {type(entry['lon'])}"
             float(entry["lat"])  # parses
             float(entry["lon"])
-            print(
-                f"         ->({entry['lat']}, {entry['lon']}) "
-                f"for {data['address']!r}"
-            )
+            print(f"         ->({entry['lat']}, {entry['lon']}) for {data['address']!r}")
 
         if not _check("Sample response shape", _check_nominatim):
             failures.append("nominatim")
@@ -298,9 +283,7 @@ def main() -> int:
         assert len(df) >= 2000
         assert "release_quarter" in df.columns
         recipient_cols = [c for c in df.columns if c.endswith("_recipients")]
-        assert len(recipient_cols) >= 10, (
-            f"only {len(recipient_cols)} payment columns"
-        )
+        assert len(recipient_cols) >= 10, f"only {len(recipient_cols)} payment columns"
         print(
             f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
             f"{len(recipient_cols)} payment-type columns"
@@ -326,6 +309,56 @@ def main() -> int:
         failures.append("dss_payments")
     if not _check("ATO personal income (~2,450 SA2s)", _check_ato):
         failures.append("ato_personal_income")
+
+    # ------ PRESET source resolution against real GCP DataPack ------
+    # Acid test for the "Real Data First" rule (see CLAUDE.md): every
+    # PRESET feature's `source_fields()` must resolve cleanly against
+    # the live GCP catalog. This is the gate that should have caught
+    # #23 — its absence is what let v1.3 ship six PRESETs that all
+    # referenced columns the real DataPack didn't have.
+    print("=== PRESET source-column resolution ===")
+    from census_augment.catalog import VariableCatalog
+    from census_augment.features import features
+
+    if metadata is None:
+        print("  (skipped; DataPack metadata didn't load above.)")
+    else:
+        catalog = VariableCatalog(metadata)
+        preset_specs = features.list_features()
+        if not preset_specs:
+            print("  (skipped; no PRESETs registered.)")
+        else:
+
+            def _make_preset_check(
+                spec: object,
+            ) -> Callable[[], None]:
+                def _check_preset() -> None:
+                    # `spec` is a FeatureSpec; collect every source ref
+                    # it'd ask the catalog for and resolve each one.
+                    # If the GCP catalog can't find it, the spec is
+                    # broken — same surface that #23 originally hit.
+                    refs = spec.source_fields()  # type: ignore[attr-defined]
+                    unresolved: list[tuple[str, str]] = []
+                    for ref in sorted(refs):
+                        try:
+                            catalog.resolve(ref)
+                        except Exception as e:  # noqa: BLE001
+                            unresolved.append((ref, str(e).splitlines()[0]))
+                    assert not unresolved, (
+                        f"PRESET {spec.id!r} refs columns not in "  # type: ignore[attr-defined]
+                        f"the real GCP DataPack: {unresolved}"
+                    )
+                    print(
+                        f"         -> {spec.id}: {len(refs)} source refs "  # type: ignore[attr-defined]
+                        "all resolve."
+                    )
+
+                return _check_preset
+
+            for spec in preset_specs:
+                label = f"PRESET {spec.id} source refs resolve"
+                if not _check(label, _make_preset_check(spec)):
+                    failures.append(f"preset.{spec.id}")
 
     print()
     if not failures:

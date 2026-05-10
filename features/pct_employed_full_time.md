@@ -7,15 +7,11 @@ dataset: gcp_2021
 default: false
 tags: [employment, labour-force]
 numerator:
-  expression: sum
-  fields:
-    - G43.E_FT_15ov_M
-    - G43.E_FT_15ov_F
+  expression: field
+  field: G43.lfs_Emplyed_wrked_full_time_P
 denominator:
-  expression: sum
-  fields:
-    - G43.LF_15ov_M
-    - G43.LF_15ov_F
+  expression: field
+  field: G43.lfs_Tot_LF_P
 edge_cases:
   zero_denominator: null
   perturbation_tolerance: warn_only
@@ -46,7 +42,7 @@ unemployment is high (the SA2's unemployed are still part of the
 
 ## Edge cases
 
-- **Zero denominator** → null. SA2s with `LF_15ov_M + LF_15ov_F = 0`
+- **Zero denominator** → null. SA2s with `lfs_Tot_LF_P = 0`
   (industrial / no-resident / national-park SA2s).
 - ABS perturbation may produce sub-totals that don't sum exactly.
 
@@ -59,3 +55,4 @@ retirement-coast 35–45%.
 
 - ABS Census Dictionary, LFSP variable
 - 2021 Census product release guide
+- Real-data schema check: `tests/fixtures/gcp-schemas/G43.txt`

@@ -9,6 +9,81 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-05-10
+
+### Fixed — PRESET column refs against real GCP DataPack (closes #23)
+
+Every PRESET shipped in v1.3 (`pct_renters`, `pct_drive_to_work`,
+`pct_aged_65_plus`, `pct_employed_full_time`, `pct_one_parent_family`,
+`motor_vehicles_per_dwelling`) referenced column names that don't
+exist in the real 2021 GCP DataPack. Hermetic tests passed because
+the synthetic test fixtures encoded the same broken names; first
+real-data run hit `CatalogError: column 'X' not found in table 'Y'`.
+
+Each PRESET's `numerator:` / `denominator:` block has been rewritten
+against the actual DataPack column names, captured in
+`tests/fixtures/gcp-schemas/G##.txt` as a reviewable artifact.
+Highlights:
+
+- **`pct_renters`** — `G37.R_Tot` → `G37.R_Tot_Total`,
+  `G37.OPDs_Total` → `G37.Total_Total` (G37 is implicitly OPD-scoped).
+- **`pct_drive_to_work`** — camelCase `OneMethod_*_P` →
+  snake_case `One_method_*_P` across all four numerator fields.
+- **`motor_vehicles_per_dwelling`** — there's no `Total_motor_vehicles`
+  column; rewrote as a `weighted_sum` over the per-bucket counts
+  (0/1/2/3/4mo with weights 0..4). Denominator switched from the
+  fictional `Total_dwellings` to `Num_MVs_per_dweling_Tot` (excludes
+  the not-stated bucket).
+- **`pct_employed_full_time`** — collapsed M+F sums to the
+  pre-summed `_P` columns (`lfs_Emplyed_wrked_full_time_P` /
+  `lfs_Tot_LF_P`).
+- **`pct_aged_65_plus`** — referenced a non-existent `G04` table
+  (the GCP DataPack splits this into `G04A` males / `G04B` females,
+  and neither has a 65+ total). Rewrote as a `sum` over G01's three
+  65+ age bands (`Age_65_74_yr_P`, `Age_75_84_yr_P`, `Age_85ov_P`).
+- **`pct_one_parent_family`** — completely fictional column names.
+  Rewrote: numerator = `G29.OPF_ChU15_a_Total_F`, denominator =
+  sum of `G29.CF_ChU15_a_Total_F` + `G29.OPF_ChU15_a_Total_F`
+  (families with children under 15).
+
+End-to-end validated: a single `census-augment run` with all six
+PRESETs against real ABS data produces sensible values for the five
+demo SA2s (Sydney CBD 65.9% renters, 14.8% aged 65+, 0.62
+MVs/dwelling; etc.).
+
+### Added — Acid-test verifier step for PRESETs
+
+`tools/verify_real_parsers.py` gains a "PRESET source-column
+resolution" step that loads every registered PRESET, walks its
+`source_fields()`, and asks the live GCP catalog to resolve every
+ref. Fails loudly on any unresolved column. This is the gate that
+should have caught #23 the day v1.3 shipped — its presence now
+catches future drift the day it lands.
+
+This is the first practical application of the v1.4.1
+[Real Data First](CLAUDE.md#real-data-first) rule's "acid test"
+clause: every external column ref in a spec or fixture must be
+backed by a fixture file, a re-fetch script, or a live verifier
+probe. PRESETs now have all three.
+
+### Added — Reviewable schema reference dumps
+
+`tests/fixtures/gcp-schemas/G##.txt` now contains the
+`census-augment discover --table <id>` output for every GCP table
+referenced by a registered PRESET (G01, G02, G04A, G04B, G29, G34,
+G37, G43, G62). Captured 2026-05-10. Future PRESET authors can diff
+their column refs against these dumps before pushing; future
+releases (e.g. 2026 GCP) can use them as the v2021 baseline. See
+`tests/fixtures/gcp-schemas/README.md` for re-generation steps.
+
+### Updated — Test fixtures mirror real schemas
+
+`tests/test_features.py` and `tests/test_enrich_presets.py` synthetic
+DataFrames previously used the broken column names (so tests passed
+against the broken specs). Both updated to mirror the real GCP
+schema; tests would now fail if a PRESET drifts away from real ABS
+column names.
+
 ### Added — VSCode Dev Container
 
 `.devcontainer/` configures a Linux Python 3.11 sandbox (matching the CI

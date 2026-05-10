@@ -8,10 +8,10 @@ default: false
 tags: [housing, tenure, renters]
 numerator:
   expression: field
-  field: G37.R_Tot
+  field: G37.R_Tot_Total
 denominator:
   expression: field
-  field: G37.OPDs_Total
+  field: G37.Total_Total
 edge_cases:
   zero_denominator: null
   perturbation_tolerance: warn_only
@@ -28,24 +28,31 @@ landlord type) on Census night.
 
 ## Why this denominator
 
-`G37.OPDs_Total` is the count of *occupied* private dwellings — the
-right base for tenure analysis, since unoccupied dwellings have no
-tenure to report.
+`G37` is the GCP table "Tenure and Landlord Type by Dwelling
+Structure". It is implicitly OPD-scoped: tenure is only meaningful
+for occupied dwellings, so the published table only covers those.
+`G37.Total_Total` is the row total across every tenure type
+(owned-outright + owned-with-mortgage + the eight rental sub-types
++ other-tenure + tenure-not-stated) for every dwelling structure
+(separate-house + semi-detached + flat/apartment + other +
+not-stated). Using it as the denominator gives the OPD-scoped rate
+the PRESET intends.
 
-## Why not `G37.Total_dwellings`
+## Why this numerator
 
-The full G37 row total includes unoccupied dwellings, vacant
-dwellings, and visitor-occupied stock. Including those in the
-denominator under-counts the rental share by 5–10% in coastal /
-holiday-home SA2s where unoccupied stock is a meaningful slice of
-total dwellings.
+`G37.R_Tot_Total` is the row total for the "Rented" tenure block,
+summing across all eight rental sub-types (real-estate-agent,
+state-housing-authority, community-housing-provider,
+person-not-in-same-household, other-landlord-type, landlord-type-
+not-stated). That's the right population for "is the dwelling
+rented?" without committing to a specific landlord type.
 
 ## Edge cases
 
 - **Zero denominator** → null. Industrial / national-park SA2s with
   no occupied private dwellings.
 - **Suppressed source counts** → ABS perturbation can make
-  category-totals not sum to `OPDs_Total` exactly. Don't assert
+  category-totals not sum to `Total_Total` exactly. Don't assert
   equality.
 
 ## Bounds (typical, not theoretical)
@@ -58,3 +65,4 @@ indicate small-area noise.
 
 - ABS Census Dictionary, TEND variable: tenure type
 - 2021 Census product release guide
+- Real-data schema check: `tests/fixtures/gcp-schemas/G37.txt`

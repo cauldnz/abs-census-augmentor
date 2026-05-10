@@ -136,7 +136,7 @@ def test_registry_get_unknown_raises() -> None:
 def test_source_fields_for_field_expression() -> None:
     """``field`` expressions contribute their single ref."""
     spec = features.get("pct_renters")
-    assert spec.source_fields() == {"G37.R_Tot", "G37.OPDs_Total"}
+    assert spec.source_fields() == {"G37.R_Tot_Total", "G37.Total_Total"}
 
 
 def test_source_fields_for_sum_expression() -> None:
@@ -144,10 +144,10 @@ def test_source_fields_for_sum_expression() -> None:
     denominator's single field."""
     spec = features.get("pct_drive_to_work")
     assert spec.source_fields() == {
-        "G62.OneMethod_CarAsDriver_P",
-        "G62.OneMethod_CarAsPassenger_P",
-        "G62.OneMethod_Truck_P",
-        "G62.OneMethod_MotorbikeOrScooter_P",
+        "G62.One_method_Car_as_driver_P",
+        "G62.One_method_Car_as_passenger_P",
+        "G62.One_method_Truck_P",
+        "G62.One_method_Motorbike_scootr_P",
         "G62.Tot_P",
     }
 
@@ -357,14 +357,15 @@ def test_evaluate_strips_namespace_prefix_if_needed() -> None:
 
 def test_pct_drive_to_work_against_synthetic_gcp_data() -> None:
     """End-to-end: the repo's pct_drive_to_work spec + synthetic GCP
-    inputs produce the expected ratio."""
+    inputs produce the expected ratio. Column names mirror the real
+    G62 schema (`tests/fixtures/gcp-schemas/G62.txt`)."""
     spec = features.get("pct_drive_to_work")
     df = pd.DataFrame(
         {
-            "G62.OneMethod_CarAsDriver_P": [60.0],
-            "G62.OneMethod_CarAsPassenger_P": [5.0],
-            "G62.OneMethod_Truck_P": [3.0],
-            "G62.OneMethod_MotorbikeOrScooter_P": [2.0],
+            "G62.One_method_Car_as_driver_P": [60.0],
+            "G62.One_method_Car_as_passenger_P": [5.0],
+            "G62.One_method_Truck_P": [3.0],
+            "G62.One_method_Motorbike_scootr_P": [2.0],
             "G62.Tot_P": [100.0],
         }
     )
@@ -376,14 +377,19 @@ def test_pct_drive_to_work_against_synthetic_gcp_data() -> None:
 
 
 def test_pct_aged_65_plus_against_synthetic_gcp_data() -> None:
+    """The repo's pct_aged_65_plus spec sums G01's three 65+ age bands.
+    Column names mirror the real G01 schema (`tests/fixtures/gcp-schemas/G01.txt`)."""
     spec = features.get("pct_aged_65_plus")
     df = pd.DataFrame(
         {
-            "G04.Age_65_yr_above_P": [350.0],
+            "G01.Age_65_74_yr_P": [200.0],
+            "G01.Age_75_84_yr_P": [100.0],
+            "G01.Age_85ov_P": [50.0],
             "G01.Tot_P_P": [2000.0],
         }
     )
     df.index = ["sa2_0"]
     df.index.name = "sa2_code_2021"
     result = FeatureEvaluator(spec).evaluate(df)
+    # (200+100+50) / 2000 = 17.5%
     assert result.iloc[0] == 17.5
