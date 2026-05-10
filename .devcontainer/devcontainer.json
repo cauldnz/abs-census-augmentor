@@ -40,6 +40,32 @@
         }
     },
 
+    // Relax Docker security profile so the headless Chromium that
+    // vhs downloads (and uses to render demo GIFs) can sandbox
+    // itself. Docker's default seccomp profile blocks the
+    // `clone(CLONE_NEWUSER)` syscall chromium uses to set up its own
+    // sandbox; the symptom is:
+    //
+    //   Failed to move to new namespace: PID namespaces supported,
+    //   Network namespace supported, but failed: errno = Operation
+    //   not permitted
+    //
+    // Two flags:
+    //   --security-opt seccomp=unconfined : lets chromium create its
+    //                                       user namespace
+    //   --ipc=host                         : chromium's recommended
+    //                                       IPC mode under Docker
+    //                                       (per Playwright docs)
+    //                                       to avoid memory issues
+    //
+    // The dev container runs trusted, user-attached code; this is the
+    // same security posture every Playwright/Puppeteer Docker workflow
+    // uses. Not appropriate for untrusted multi-tenant CI.
+    "runArgs": [
+        "--security-opt", "seccomp=unconfined",
+        "--ipc=host"
+    ],
+
     "containerEnv": {
         // Tell uv to use a project-local venv at .venv/ (matches
         // `uv sync` defaults; documented for clarity).

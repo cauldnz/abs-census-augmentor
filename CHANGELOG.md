@@ -9,6 +9,41 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — Chromium sandbox blocked by Docker's default seccomp profile
+
+PR #32 installed `chromium-sandbox` so chromium had its setuid
+helper. The next render attempt got past that point but hit a
+different failure:
+
+```
+Failed to move to new namespace: PID namespaces supported,
+Network namespace supported, but failed: errno = Operation not
+permitted
+```
+
+Chromium's sandbox creates user namespaces via the `clone(2)`
+syscall with `CLONE_NEWUSER`. Docker's default seccomp profile
+blocks this syscall for non-root containers — and the dev
+container deliberately runs as `vscode` (non-root) so file
+permissions on bind-mounted host paths stay sane.
+
+(This is why the original Docker-based render path worked: the
+VHS image ran as root, and chromium auto-skips the sandbox when
+running as root. Same code, different security posture.)
+
+Fixed by adding two flags to `devcontainer.json`'s `runArgs`:
+
+- `--security-opt seccomp=unconfined` — lifts the seccomp filter
+  so chromium's namespace clone succeeds.
+- `--ipc=host` — chromium's recommended IPC mode under Docker
+  per Playwright's docker docs, avoiding shared-memory issues
+  during GIF encoding.
+
+This is the same posture every Playwright / Puppeteer Docker
+workflow uses. The dev container runs trusted user-attached code;
+not appropriate for multi-tenant CI running untrusted browser
+content. Documented in `.devcontainer/README.md`.
+
 ### Fixed — Native VHS render failed with "No usable sandbox!"
 
 After PR #31 installed the chromium runtime libs, the next render
