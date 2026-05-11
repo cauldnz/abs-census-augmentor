@@ -139,23 +139,29 @@ if ($resolvedMode -eq "docker") {
 New-Item -ItemType Directory -Force -Path docs | Out-Null
 New-Item -ItemType Directory -Force -Path docs/frames | Out-Null
 
-# Per-batch log file. Truncated at the start of every invocation,
-# then per-tape vhs output is appended. Useful for diagnosing
-# tapes that ran cleanly but produced a wrong-looking GIF
-# (`bash: <cmd>: command not found` inside the recorded subshell
-# is the classic symptom and won't surface as a non-zero exit
-# from vhs itself).
-$logPath = "tools/demo/.last-render.log"
-Set-Content -Path $logPath -Value $null
-Write-Host "Render log: $logPath" -ForegroundColor Cyan
+# Per-tape log files. Each tape's vhs output goes to its own log
+# rather than a shared one - necessary for parallel rendering
+# (interleaved stdout across tapes would be unreadable). After
+# every render an aggregate `.last-render.log` is rebuilt by
+# concatenating the per-tape logs in slug order, so diagnostic
+# UX stays the same.
+function Get-SlugLog { param([string]$Slug) "tools/demo/.last-render-${Slug}.log" }
+$aggLogPath = "tools/demo/.last-render.log"
 
 # ---- per-tape render ---------------------------------------------------
+#
+# Render-Tape runs entirely silently except for vhs's own output,
+# which is appended to that tape's per-tape log file. Stdout/stderr
+# are *not* tee'd to the terminal - when several tapes run in
+# parallel under --all, interleaved output would be unreadable.
+# The caller prints its own start/done lines around each render.
 
 function Render-Tape {
     param([string]$Slug)
 
     $tapePath   = "tools/demo/${Slug}.tape"
     $outputPath = "docs/${Slug}.gif"
+    $slugLog    = Get-SlugLog $Slug
 
     if (-not (Test-Path $tapePath)) {
         Write-Host "Tape file not found: $tapePath" -ForegroundColor Red
@@ -164,45 +170,116 @@ function Render-Tape {
         throw "tape missing"
     }
 
-    Write-Host "Rendering ${tapePath} -> ${outputPath} ..." -ForegroundColor Cyan
     $stamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
-    Add-Content -Path $logPath -Value ""
-    Add-Content -Path $logPath -Value "=== ${tapePath} -> ${outputPath} @ ${stamp} ==="
+    Set-Content -Path $slugLog -Value "=== ${tapePath} -> ${outputPath} @ ${stamp} ==="
 
     if ($resolvedMode -eq "local") {
-        # `uv run` is critical here, not cosmetic. `vhs` spawns its
-        # own bash subshell to record the tape; that subshell
-        # inherits this process's PATH. Without uv, `.venv/bin/`
-        # isn't on PATH, and any tape line invoking `census-augment`
-        # fails with `bash: census-augment: command not found` -
-        # silent in the GIF (just shows the error). `uv run vhs`
-        # prepends `.venv/bin/` to PATH for the entire process tree.
-        uv run vhs $tapePath 2>&1 | Tee-Object -FilePath $logPath -Append
+        # `uv run` is critical here, not cosmetic. See render.sh
+        # for the full explanation of the PATH inheritance issue.
+        uv run vhs $tapePath *>> $slugLog
     } else {
         docker run --rm `
             -v "${PWD}:/vhs" `
             -v "${hostCache}:/root/.cache/census-augment" `
             census-augment-vhs `
-            $tapePath 2>&1 | Tee-Object -FilePath $logPath -Append
+            $tapePath *>> $slugLog
     }
 
-    if ($LASTEXITCODE -ne 0) { Write-Error "vhs render failed for $Slug." }
+    if ($LASTEXITCODE -ne 0) { throw "vhs render failed for $Slug." }
 }
 
 # ---- dispatch ----------------------------------------------------------
 
 if ($all) {
-    $rendered = @()
+    # Parallel render: each tape is fully independent of the others
+    # (own tape, own GIF, own PNGs, own log). For 3 tapes this is
+    # ~3x faster than sequential. Chromium memory cost is
+    # ~200-400 MB per render; the dev container handles fine.
+    Write-Host "Rendering all tapes in parallel..." -ForegroundColor Cyan
+
+    $jobs = @()
     Get-ChildItem -Path tools/demo -Filter '*.tape' | ForEach-Object {
         $tapeSlug = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
-        Render-Tape -Slug $tapeSlug
-        $rendered += "docs/${tapeSlug}.gif"
+        Write-Host "  -> $tapeSlug (background)" -ForegroundColor Cyan
+
+        # Capture the function definition + dispatch-scope vars in
+        # the job's scriptblock so it can call Render-Tape.
+        $jobs += Start-Job -Name $tapeSlug -ScriptBlock {
+            param($Slug, $Cwd, $Mode, $Cache)
+            Set-Location $Cwd
+
+            # Replicate the bits Render-Tape needs - PowerShell
+            # jobs don't inherit caller scope.
+            $tapePath   = "tools/demo/${Slug}.tape"
+            $outputPath = "docs/${Slug}.gif"
+            $slugLog    = "tools/demo/.last-render-${Slug}.log"
+
+            $stamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
+            Set-Content -Path $slugLog -Value "=== ${tapePath} -> ${outputPath} @ ${stamp} ==="
+
+            if ($Mode -eq "local") {
+                uv run vhs $tapePath *>> $slugLog
+            } else {
+                docker run --rm `
+                    -v "${Cwd}:/vhs" `
+                    -v "${Cache}:/root/.cache/census-augment" `
+                    census-augment-vhs `
+                    $tapePath *>> $slugLog
+            }
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "vhs render failed for $Slug."
+            }
+        } -ArgumentList $tapeSlug, $PWD.Path, $resolvedMode, $hostCache
     }
+
+    # Wait for all and report.
+    $rendered = @()
+    $failed   = @()
+    foreach ($job in $jobs) {
+        $null = Wait-Job $job
+        if ($job.State -eq "Completed") {
+            $rendered += "docs/$($job.Name).gif"
+            Write-Host "     [done] $($job.Name)" -ForegroundColor Green
+        } else {
+            $failed += $job.Name
+            Write-Host "     [FAIL] $($job.Name) - see $(Get-SlugLog $job.Name)" -ForegroundColor Red
+        }
+        Receive-Job $job | Out-Null
+        Remove-Job $job
+    }
+
+    # Rebuild aggregate log from per-tape logs in slug order.
+    Set-Content -Path $aggLogPath -Value $null
+    Get-ChildItem -Path tools/demo -Filter '*.tape' | Sort-Object Name | ForEach-Object {
+        $tapeSlug = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+        $slugLog  = Get-SlugLog $tapeSlug
+        if (Test-Path $slugLog) {
+            Get-Content $slugLog | Add-Content -Path $aggLogPath
+            Add-Content -Path $aggLogPath -Value ""
+        }
+    }
+
     Write-Host ""
     Write-Host "Rendered $($rendered.Count) GIFs:" -ForegroundColor Green
     foreach ($gif in $rendered) { Write-Host "  - $gif" }
+    if ($failed.Count -gt 0) {
+        Write-Host ""
+        Write-Host "$($failed.Count) render(s) failed: $($failed -join ', ')" -ForegroundColor Red
+        Write-Host "Per-tape logs: tools/demo/.last-render-<slug>.log"
+        exit 1
+    }
     Write-Host "Inspect each and 'git add' the ones you're happy with."
+    Write-Host "Combined render log: $aggLogPath"
 } else {
-    Render-Tape -Slug $slug
-    Write-Host "Done. Inspect docs/${slug}.gif and 'git add' it when you're happy." -ForegroundColor Green
+    Write-Host "Rendering tools/demo/${slug}.tape -> docs/${slug}.gif ..." -ForegroundColor Cyan
+    try {
+        Render-Tape -Slug $slug
+        Copy-Item -Path (Get-SlugLog $slug) -Destination $aggLogPath -Force
+        Write-Host "Done. Inspect docs/${slug}.gif and 'git add' it when you're happy." -ForegroundColor Green
+        Write-Host "Render log: $aggLogPath"
+    } catch {
+        Write-Host "Render failed - see $(Get-SlugLog $slug)" -ForegroundColor Red
+        exit 1
+    }
 }
