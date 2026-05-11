@@ -9,6 +9,70 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — demo screenshots captured empty output panels
+
+The first round of rendered demos showed `census-augment` commands typed
+but with no output below them in the captured PNG frames. Repro: 7 of
+the 12 frame snapshots had only the typed command line and nothing else
+— including the headline demo's "Run output" and "Output table" scenes
+and three of the four discover-datasets scenes. The only frames that
+worked were ones that didn't invoke `census-augment` (e.g. `cat`,
+`head -25`).
+
+Two root causes stacked:
+
+1. **Python stdout buffering** — under vhs's chromium-fronted pseudo-TTY,
+   Python's TTY detection falls back to fully-buffered stdout. Output
+   only flushes at process exit. The Screenshot directive fires before
+   the process exits, capturing a "command typed, nothing yet" frame.
+2. **Sleeps too short for the real wallclock**. `time uv run
+   census-augment run --config tools/demo/config.yaml` measured 35 s
+   wallclock in the dev container on warm cache (16% CPU, ~29 s of
+   I/O wait on top of ~6 s of compute — see issue #43 for the perf
+   investigation). Even `discover` commands pay a 5-10 s typer +
+   pandas + geopandas import cost under chromium PTY.
+
+Three-pronged fix in all three tapes:
+
+- **`Env PYTHONUNBUFFERED "1"`** at the top forces Python to flush
+  stdout/stderr line-by-line.
+- **`Hide` / `Show` jump-cut pattern** for every scene that invokes
+  `census-augment`. The recorded GIF goes "command typed → brief pause
+  → output appears" instead of forcing the viewer to watch 35 s of
+  empty terminal. VHS's `Hide` directive pauses frame capture while
+  the shell keeps running underneath; `Show` resumes against the now-
+  populated terminal state. Per scene:
+
+  ```
+  Type   "<command>"
+  Enter
+  Sleep  1s          # let the typed command sit on screen briefly
+  Hide               # frame capture off
+  Sleep  40s         # shell runs the actual command off-camera
+  Show               # frame capture on, against populated terminal
+  Sleep  3s          # let the viewer see the output
+  Screenshot ...
+  ```
+
+  Sleeps for the off-camera execution windows: 40 s for `run` scenes
+  (covers measured 35 s + margin), 12 s for `discover` scenes (Python
+  startup + sub-second work).
+
+- **Pre-warm Hide block in `preset-features.tape`** had `Sleep 8s`
+  after a `census-augment run` that takes 35 s — the shell was still
+  running when scene 1 started, which is why the user's first round
+  of preset-features frames showed pre-warm command lines stacked
+  with scene 1's typed commands. Bumped to `Sleep 40s`.
+
+Pure-bash scenes (`cat`, `head -25`) keep their short Sleeps — no
+Python startup to wait through.
+
+The visible GIF length stays roughly the same as the original (~25-30 s
+per demo) because the 35 s waits are now off-camera. The total
+real-time render takes longer (each run scene now waits 40 s while the
+shell completes the actual command) but that only affects the renderer,
+not the viewer of the final GIF.
+
 ### Added — Parallel demo rendering under `--all`
 
 Each tape is fully independent at render time (own tape file, own

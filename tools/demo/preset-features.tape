@@ -24,17 +24,25 @@ Set Height 720
 Set TypingSpeed 50ms
 Set Padding 30
 
+# See demo.tape for why this is necessary.
+Env PYTHONUNBUFFERED "1"
+
 # ---- off-camera: warm the cache ---------------------------------------
 # render.sh / render.ps1 already pre-warm via a host-side
 # census-augment run, so this Hide block is just a safety net for
 # anyone running vhs against the tape directly.
+#
+# Sleep durations calibrated against measured wallclock in the
+# dev container: fetch is ~1 s on warm cache so 30 s is generous;
+# `census-augment run` measured ~35 s (issue #43) so we sleep
+# 40 s to be sure the shell is free before clear/Show.
 Hide
 Type "census-augment fetch --config tools/demo/preset-config.yaml --boundaries --census >/dev/null 2>&1"
 Enter
 Sleep 30s
 Type "census-augment run --config tools/demo/preset-config.yaml >/dev/null 2>&1"
 Enter
-Sleep 8s
+Sleep 40s
 Type "clear"
 Enter
 Sleep 500ms
@@ -65,16 +73,28 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run ------------------------------------------------------
+# Same Hide / Show pattern as demo.tape's scene 3: type the
+# command, brief pause, then jump-cut past 35 s of execution so
+# the visible recording goes straight from "command typed" to
+# "output rendered". See demo.tape for the full rationale.
 Type "census-augment run --config tools/demo/preset-config.yaml"
 Enter
-Sleep 7s
+Sleep 1s
+Hide
+Sleep 40s
+Show
+Sleep 3s
 Screenshot docs/frames/preset-features-3-run.png
 
 # ---- scene 4: show the computed ratios ---------------------------------
+# `clear` to avoid stacking the cut output under the run summary.
+Type "clear"
+Enter
+Sleep 300ms
 Type "# Each row carries the computed ratios; source columns hidden:"
 Enter
 Sleep 800ms
 Type "cut -d, -f1,9,11,12,13 tools/demo/preset-output.csv | column -s, -t"
 Enter
-Sleep 7s
+Sleep 4s
 Screenshot docs/frames/preset-features-4-output.png

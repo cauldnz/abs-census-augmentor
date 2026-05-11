@@ -29,6 +29,15 @@ Set Height 720
 Set TypingSpeed 50ms
 Set Padding 30
 
+# Force Python's stdout/stderr to flush per-line. Without this,
+# `census-augment` invocations (typer + pandas + geopandas imports)
+# can produce no visible output until the process exits, because
+# Python detects vhs's chromium PTY as non-TTY and goes fully
+# buffered. The result: a screenshot fired mid-run captures only
+# the typed command line, no output. Setting PYTHONUNBUFFERED
+# forces eager flushing regardless of TTY detection.
+Env PYTHONUNBUFFERED "1"
+
 # ---- off-camera: warm the cache ----------------------------------------
 # The render scripts already pre-warm SEIFA via a host-side
 # census-augment run, so this Hide block is just belt-and-braces in
@@ -67,16 +76,41 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run -------------------------------------------------------
+# `census-augment run` measured ~35 s wallclock on warm cache in
+# the dev container (issue #43 tracks the perf root cause). 35 s
+# of dead-air recording would be terrible UX in a demo GIF, so
+# we use Hide / Show to "edit out" the wait:
+#
+#   1. Type the command (visible — viewer sees what's about to run).
+#   2. Brief Sleep so the typed command sits on screen for a beat.
+#   3. Hide — frame capture pauses; the shell keeps executing.
+#   4. Sleep 40 s — shell completes the actual run off-camera
+#      (35 s measured + 5 s margin).
+#   5. Show — frame capture resumes against the now-populated
+#      terminal state. The GIF jumps directly from "command typed"
+#      to "output rendered".
+#   6. Sleep 3 s — viewer sees the populated output.
+#   7. Screenshot — captures the populated frame.
 Type "census-augment run --config tools/demo/config.yaml"
 Enter
-Sleep 7s
+Sleep 1s
+Hide
+Sleep 40s
+Show
+Sleep 3s
 Screenshot docs/frames/demo-3-run.png
 
 # ---- scene 4: the enriched output ---------------------------------------
+# `clear` between scenes 3 and 4 so the cut output isn't stacked
+# under the run summary (which would overflow the 720-row
+# viewport).
+Type "clear"
+Enter
+Sleep 300ms
 Type "# Each row carries Census + SEIFA columns for its SA2:"
 Enter
 Sleep 800ms
 Type "cut -d, -f1,9,11,12,13,14 tools/demo/output.csv | column -s, -t"
 Enter
-Sleep 7s
+Sleep 4s
 Screenshot docs/frames/demo-4-output.png
