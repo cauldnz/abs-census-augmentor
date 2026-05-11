@@ -3,6 +3,11 @@
 output.csv
 preset-output.csv
 
-# render.sh / render.ps1 tee vhs output here for post-render
-# diagnostics. Overwritten on every render invocation.
+# render.sh / render.ps1 capture vhs output here for post-render
+# diagnostics. Per-tape logs land at `.last-render-<slug>.log`
+# (necessary for parallel rendering — interleaved stdout would be
+# unreadable); the aggregate `.last-render.log` is rebuilt at the
+# end by concatenating per-tape logs in slug order. All
+# overwritten per invocation.
 .last-render.log
+.last-render-*.log

@@ -9,6 +9,32 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — Parallel demo rendering under `--all`
+
+Each tape is fully independent at render time (own tape file, own
+output GIF, own PNG frames). `tools/demo/render.sh --all` (and the
+PowerShell equivalent) now spawn one vhs per tape concurrently and
+wait for the batch to finish, instead of rendering them
+sequentially. For the current three-tape bundle that's roughly a
+3× wall-clock reduction.
+
+Concurrency is implicit (spawn-all, wait-all). With three tapes
+each running its own chromium (~200-400 MB RAM each), the dev
+container handles fine. If the tape count grows enough to thrash,
+this turns into a worker-pool problem — easy to add a concurrency
+cap later.
+
+### Changed — Per-tape vhs log files
+
+Render scripts now write each tape's vhs output to
+`tools/demo/.last-render-<slug>.log` instead of all teeing into a
+shared file. Required for parallel mode (interleaved stdout
+across tapes would be unreadable). The aggregate
+`tools/demo/.last-render.log` is rebuilt at the end by
+concatenating per-tape logs in slug order, so the diagnostic UX
+(`cat tools/demo/.last-render.log`) is unchanged. All log files
+are gitignored.
+
 ### Fixed — `bash: census-augment: command not found` in rendered demos
 
 When PR #29 switched dev-container demo rendering from a Docker

@@ -46,8 +46,26 @@ From the **repo root**:
 
 `--all` is the easiest path when you've added or edited a tape and
 want every GIF refreshed. Pre-warm and (Docker-mode) image build run
-once for the whole batch; only the actual vhs render repeats per
-tape (~30 s each on a warm cache).
+once for the whole batch; the actual vhs renders run **in parallel**
+— each tape is fully independent (own GIF, own PNGs, own log), so
+spawning all of them at once is safe and roughly 3× faster than
+sequential for the headline + discover + presets bundle.
+
+Per-tape vhs output is captured to `tools/demo/.last-render-<slug>.log`
+(parallel mode would interleave a shared log unreadably). The
+aggregate `tools/demo/.last-render.log` is rebuilt by concatenating
+per-tape logs in slug order at the end, so post-render diagnosis
+stays a single-file affair: `cat tools/demo/.last-render.log`.
+
+For sequential rendering — useful when debugging one specific tape
+or when chromium memory is tight — render each slug explicitly
+instead of passing `--all`:
+
+```bash
+./tools/demo/render.sh demo
+./tools/demo/render.sh discover-datasets
+./tools/demo/render.sh preset-features
+```
 
 ### Render modes
 

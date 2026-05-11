@@ -159,22 +159,32 @@ fi
 
 mkdir -p docs docs/frames
 
-# Per-batch log file. Truncated at the start of every invocation,
-# then per-tape vhs output is tee'd in. Useful for diagnosing
-# tapes that ran cleanly but produced a wrong-looking GIF
-# (`bash: <cmd>: command not found` inside the recorded subshell
-# is the classic symptom and won't surface as a non-zero exit
-# from vhs itself).
-log_path="tools/demo/.last-render.log"
-: > "$log_path"
-echo "Render log: $log_path"
+# Per-tape log files. Each tape's vhs output goes to its own log
+# rather than a shared one — necessary for parallel rendering
+# (interleaved tee output across tapes would be unreadable). After
+# every render an aggregate `.last-render.log` is rebuilt by
+# concatenating the per-tape logs in order, so diagnostic UX
+# stays the same: `cat tools/demo/.last-render.log` shows
+# everything.
+log_for_slug() { echo "tools/demo/.last-render-${1}.log"; }
+agg_log_path="tools/demo/.last-render.log"
 
 # ---- per-tape render ---------------------------------------------------
+#
+# render_one() runs entirely silently except for vhs's own output,
+# which is appended to that tape's per-tape log file. Stdout/stderr
+# of vhs are *not* tee'd to the terminal here — when several
+# render_one calls run in parallel under --all, interleaved chunks
+# would be unreadable. The caller (sequential or parallel) prints
+# its own start/done lines around each render so the user has a
+# coherent progress trail.
 
 render_one() {
     local s="$1"
     local tape_path="tools/demo/${s}.tape"
     local output_path="docs/${s}.gif"
+    local slug_log
+    slug_log="$(log_for_slug "$s")"
 
     if [[ ! -f "$tape_path" ]]; then
         echo "Tape file not found: $tape_path" >&2
@@ -183,17 +193,11 @@ render_one() {
         return 1
     fi
 
-    echo "Rendering ${tape_path} -> ${output_path} ..."
     {
-        echo
         echo "=== ${tape_path} -> ${output_path} @ $(date -Iseconds) ==="
-    } >> "$log_path"
+    } > "$slug_log"
 
     if [[ "$resolved_mode" == "local" ]]; then
-        # Local vhs reads the tape and writes the .gif directly to
-        # the path the tape's `Output` line specifies (relative to
-        # cwd, which is the repo root).
-        #
         # `uv run` is critical here, not cosmetic. `vhs` spawns its
         # own bash subshell to record the tape; that subshell
         # inherits this process's PATH. Without uv, `.venv/bin/`
@@ -202,32 +206,84 @@ render_one() {
         # silent in the GIF (just shows the error) but the user
         # discovers it post-render. `uv run vhs` prepends
         # `.venv/bin/` to PATH for the entire process tree.
-        uv run vhs "$tape_path" 2>&1 | tee -a "$log_path"
+        uv run vhs "$tape_path" >>"$slug_log" 2>&1
     else
         docker run --rm \
             -v "$PWD:/vhs" \
             -v "$host_cache:/root/.cache/census-augment" \
             census-augment-vhs \
-            "$tape_path" 2>&1 | tee -a "$log_path"
+            "$tape_path" >>"$slug_log" 2>&1
     fi
 }
 
 # ---- dispatch ----------------------------------------------------------
 
 if (( all )); then
-    rendered=()
+    # Parallel render: each tape is fully independent of the others
+    # (own tape file, own output GIF, own PNG frames, own log) so
+    # we spawn render_one for every tape concurrently and wait
+    # for all to finish. For 3 tapes this is ~3x faster than
+    # sequential. Memory cost: chromium per render (~200-400 MB
+    # each), which the dev container handles fine.
+    #
+    # If you want sequential renders for debugging, render each
+    # slug explicitly: `./tools/demo/render.sh demo` etc.
+    echo "Rendering all tapes in parallel..."
+    declare -A pid_to_slug=()
     for tape in tools/demo/*.tape; do
         s="$(basename "$tape" .tape)"
-        render_one "$s"
-        rendered+=("docs/${s}.gif")
+        echo "  -> ${s} (background)"
+        render_one "$s" &
+        pid_to_slug[$!]="$s"
     done
+
+    failed=()
+    rendered=()
+    for pid in "${!pid_to_slug[@]}"; do
+        s="${pid_to_slug[$pid]}"
+        if wait "$pid"; then
+            rendered+=("docs/${s}.gif")
+            echo "     [done] $s"
+        else
+            failed+=("$s")
+            echo "     [FAIL] $s — see $(log_for_slug "$s")" >&2
+        fi
+    done
+
+    # Rebuild the aggregate log from per-tape logs in slug order
+    # so `cat .last-render.log` stays a useful diagnostic.
+    : > "$agg_log_path"
+    for tape in tools/demo/*.tape; do
+        s="$(basename "$tape" .tape)"
+        slug_log="$(log_for_slug "$s")"
+        if [[ -f "$slug_log" ]]; then
+            cat "$slug_log" >> "$agg_log_path"
+            echo >> "$agg_log_path"
+        fi
+    done
+
     echo
     echo "Rendered ${#rendered[@]} GIFs:"
     for gif in "${rendered[@]}"; do
         echo "  - $gif"
     done
+    if (( ${#failed[@]} > 0 )); then
+        echo
+        echo "${#failed[@]} render(s) failed: ${failed[*]}" >&2
+        echo "Per-tape logs: $(log_for_slug '<slug>')" >&2
+        exit 1
+    fi
     echo "Inspect each and 'git add' the ones you're happy with."
+    echo "Combined render log: $agg_log_path"
 else
-    render_one "$slug"
-    echo "Done. Inspect docs/${slug}.gif and 'git add' it when you're happy."
+    echo "Rendering tools/demo/${slug}.tape -> docs/${slug}.gif ..."
+    if render_one "$slug"; then
+        slug_log="$(log_for_slug "$slug")"
+        cp -f "$slug_log" "$agg_log_path"
+        echo "Done. Inspect docs/${slug}.gif and 'git add' it when you're happy."
+        echo "Render log: $agg_log_path"
+    else
+        echo "Render failed — see $(log_for_slug "$slug")" >&2
+        exit 1
+    fi
 fi
