@@ -1,16 +1,13 @@
 # Headline README demo config — mixes Census GCP and SEIFA variables
-# in one shot to show the v1.3 pluggable framework in action.
+# in one shot to show the pluggable framework in action.
 #
 # Inputs are lat/lon, so the Nominatim provider is never actually
 # invoked — the user_agent below is only here because the config
 # validator requires it when 'nominatim' is in `providers`.
 #
-# PRESETs are intentionally excluded from this demo until issue #23
-# lands (PRESET column refs don't match the real GCP DataPack); once
-# that's fixed, this config will gain `pct_renters` /
-# `pct_drive_to_work` and the headline demo gets to show off
-# `PRESET.<id>` too. The preset-features.tape demo is gated on the
-# same fix.
+# The dedicated preset-features.tape demo covers the PRESET.<id>
+# variable namespace; this headline demo deliberately keeps to
+# GCP + SEIFA to stay readable in 4 scenes.
 
 input:
   path: tools/demo/input.csv

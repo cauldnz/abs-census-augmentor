@@ -112,5 +112,8 @@ Enter
 Sleep 800ms
 Type "cut -d, -f1,9,11,12,13,14 tools/demo/output.csv | column -s, -t"
 Enter
-Sleep 4s
+# 6s rather than 4s — under parallel rendering with the other
+# tapes' census-augment runs hammering the CPU, even fast `cut`
+# pipelines get scheduled slowly enough that 4s isn't margin.
+Sleep 6s
 Screenshot docs/frames/demo-4-output.png

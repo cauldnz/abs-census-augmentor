@@ -32,6 +32,12 @@ Env PYTHONUNBUFFERED "1"
 # populated terminal, brief pause, screenshot. See demo.tape
 # scene 3 for the full rationale.
 #
+# Hide-window is 18 s rather than the "should be 10-12 s" lower
+# bound. Under parallel render (`./tools/demo/render.sh --all`),
+# this tape runs concurrently with demo.tape + preset-features.tape
+# each executing a 35 s `census-augment run` — CPU is hot, Python
+# startup gets stretched. 18 s absorbs the contention margin.
+#
 # Scene 3 (`head -25 datasets/seifa_2021.md`) is pure bash and
 # returns in microseconds — keeps its existing Sleep 6 s with
 # no Hide / Show.
@@ -42,7 +48,7 @@ Type "census-augment discover --config tools/demo/config.yaml --datasets"
 Enter
 Sleep 1s
 Hide
-Sleep 12s
+Sleep 18s
 Show
 Sleep 3s
 Screenshot docs/frames/discover-datasets-1-list.png
@@ -58,7 +64,7 @@ Type "census-augment discover --config tools/demo/config.yaml --dataset seifa_20
 Enter
 Sleep 1s
 Hide
-Sleep 12s
+Sleep 18s
 Show
 Sleep 3s
 Screenshot docs/frames/discover-datasets-2-schema.png
@@ -86,7 +92,7 @@ Type "census-augment discover --config tools/demo/config.yaml --features"
 Enter
 Sleep 1s
 Hide
-Sleep 12s
+Sleep 18s
 Show
 Sleep 3s
 Screenshot docs/frames/discover-datasets-4-presets.png
