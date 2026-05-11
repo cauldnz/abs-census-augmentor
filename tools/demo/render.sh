@@ -159,6 +159,16 @@ fi
 
 mkdir -p docs docs/frames
 
+# Per-batch log file. Truncated at the start of every invocation,
+# then per-tape vhs output is tee'd in. Useful for diagnosing
+# tapes that ran cleanly but produced a wrong-looking GIF
+# (`bash: <cmd>: command not found` inside the recorded subshell
+# is the classic symptom and won't surface as a non-zero exit
+# from vhs itself).
+log_path="tools/demo/.last-render.log"
+: > "$log_path"
+echo "Render log: $log_path"
+
 # ---- per-tape render ---------------------------------------------------
 
 render_one() {
@@ -174,18 +184,31 @@ render_one() {
     fi
 
     echo "Rendering ${tape_path} -> ${output_path} ..."
+    {
+        echo
+        echo "=== ${tape_path} -> ${output_path} @ $(date -Iseconds) ==="
+    } >> "$log_path"
 
     if [[ "$resolved_mode" == "local" ]]; then
         # Local vhs reads the tape and writes the .gif directly to
         # the path the tape's `Output` line specifies (relative to
         # cwd, which is the repo root).
-        vhs "$tape_path"
+        #
+        # `uv run` is critical here, not cosmetic. `vhs` spawns its
+        # own bash subshell to record the tape; that subshell
+        # inherits this process's PATH. Without uv, `.venv/bin/`
+        # isn't on PATH, and any tape line invoking `census-augment`
+        # fails with `bash: census-augment: command not found` —
+        # silent in the GIF (just shows the error) but the user
+        # discovers it post-render. `uv run vhs` prepends
+        # `.venv/bin/` to PATH for the entire process tree.
+        uv run vhs "$tape_path" 2>&1 | tee -a "$log_path"
     else
         docker run --rm \
             -v "$PWD:/vhs" \
             -v "$host_cache:/root/.cache/census-augment" \
             census-augment-vhs \
-            "$tape_path"
+            "$tape_path" 2>&1 | tee -a "$log_path"
     fi
 }
 

@@ -9,6 +9,49 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — `bash: census-augment: command not found` in rendered demos
+
+When PR #29 switched dev-container demo rendering from a Docker
+image (which had `census-augment` apt-installed system-wide) to
+native vhs (which runs in the host process tree), every tape that
+invokes `census-augment` failed inside the recorded subshell:
+
+```
+> census-augment run --config tools/demo/config.yaml
+bash: census-augment: command not found
+```
+
+vhs spawns its own bash subshell to capture each tape. That
+subshell inherits the parent's PATH — and `render.sh`'s parent
+PATH didn't include `.venv/bin/`. The pre-warm worked (it used
+`uv run census-augment ...`) but the tape's raw `census-augment`
+commands didn't.
+
+The symptom was particularly nasty: `vhs` itself exits 0 (it
+successfully recorded the failure). Caught only when squinting
+at the rendered GIF or PNGs.
+
+Fixed in `render.sh` and `render.ps1` by wrapping the vhs
+invocation in `uv run`:
+
+```bash
+uv run vhs "$tape_path"   # was: vhs "$tape_path"
+```
+
+`uv run` prepends `.venv/bin/` to PATH for the entire process
+tree, so vhs's recorded subshell now finds `census-augment` on
+PATH. No tape change needed.
+
+### Added — `.last-render.log` for post-render diagnostics
+
+Both `render.sh` and `render.ps1` now tee their vhs output to
+`tools/demo/.last-render.log` (gitignored, overwritten per
+invocation). Catches the class of breakage above — a tape that
+records a `command not found` error inside the captured shell
+won't surface as a non-zero exit, but the log makes it visible.
+Per-tape sections are timestamped so the log stays useful when
+re-rendering with `--all`.
+
 ### Added — Per-scene PNG snapshots from every demo tape
 
 Each VHS tape in `tools/demo/` now writes per-scene `Screenshot
