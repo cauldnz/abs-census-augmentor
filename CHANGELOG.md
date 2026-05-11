@@ -25,36 +25,53 @@ Two root causes stacked:
    Python's TTY detection falls back to fully-buffered stdout. Output
    only flushes at process exit. The Screenshot directive fires before
    the process exits, capturing a "command typed, nothing yet" frame.
+2. **Sleeps too short for the real wallclock**. `time uv run
+   census-augment run --config tools/demo/config.yaml` measured 35 s
+   wallclock in the dev container on warm cache (16% CPU, ~29 s of
+   I/O wait on top of ~6 s of compute — see issue #43 for the perf
+   investigation). Even `discover` commands pay a 5-10 s typer +
+   pandas + geopandas import cost under chromium PTY.
 
-2. **Sleep durations too short for chromium-PTY Python startup** —
-   even `census-augment discover --datasets` (which should take <1 s
-   of actual work) pays a 4-6 s Python+typer+pandas+geopandas import
-   cost under chromium PTY. The previous Sleeps (5-7 s) closed the
-   screenshot window before output appeared.
+Three-pronged fix in all three tapes:
 
-Two-pronged fix in all three tape files:
-
-- `Env PYTHONUNBUFFERED "1"` at the top forces Python to flush
+- **`Env PYTHONUNBUFFERED "1"`** at the top forces Python to flush
   stdout/stderr line-by-line.
-- Sleep durations for every scene that invokes `census-augment`
-  bumped, calibrated against measured wallclock in the dev
-  container (`time uv run census-augment run --config ...`
-  reported 35 s on warm cache): 7s → **40s** on "run" scenes,
-  5-6s → **20s** on "discover" scenes, 7s → 10s on "cut output"
-  scenes. Pure-bash scenes (`cat`, `head`) unchanged.
+- **`Hide` / `Show` jump-cut pattern** for every scene that invokes
+  `census-augment`. The recorded GIF goes "command typed → brief pause
+  → output appears" instead of forcing the viewer to watch 35 s of
+  empty terminal. VHS's `Hide` directive pauses frame capture while
+  the shell keeps running underneath; `Show` resumes against the now-
+  populated terminal state. Per scene:
 
-  The 35 s wallclock is suspiciously long — only 16% CPU,
-  meaning ~29 s of pure I/O wait on top of ~6 s of compute.
-  Tracked separately as a perf investigation in issue #43; once
-  that lands faster, these Sleeps can dial back down.
+  ```
+  Type   "<command>"
+  Enter
+  Sleep  1s          # let the typed command sit on screen briefly
+  Hide               # frame capture off
+  Sleep  40s         # shell runs the actual command off-camera
+  Show               # frame capture on, against populated terminal
+  Sleep  3s          # let the viewer see the output
+  Screenshot ...
+  ```
 
-Discover-datasets scene 3 (`head -25 datasets/seifa_2021.md`) stays at
-6s because it's pure bash — no Python startup to wait through.
+  Sleeps for the off-camera execution windows: 40 s for `run` scenes
+  (covers measured 35 s + margin), 12 s for `discover` scenes (Python
+  startup + sub-second work).
 
-Each demo's total wallclock grows by 30-40 s (run scenes dominate).
-Total visible content per GIF is now ~70-80 s, which is long but
-captures real working output. If issue #43 lands a faster runtime
-the Sleeps can drop again.
+- **Pre-warm Hide block in `preset-features.tape`** had `Sleep 8s`
+  after a `census-augment run` that takes 35 s — the shell was still
+  running when scene 1 started, which is why the user's first round
+  of preset-features frames showed pre-warm command lines stacked
+  with scene 1's typed commands. Bumped to `Sleep 40s`.
+
+Pure-bash scenes (`cat`, `head -25`) keep their short Sleeps — no
+Python startup to wait through.
+
+The visible GIF length stays roughly the same as the original (~25-30 s
+per demo) because the 35 s waits are now off-camera. The total
+real-time render takes longer (each run scene now waits 40 s while the
+shell completes the actual command) but that only affects the renderer,
+not the viewer of the final GIF.
 
 ### Added — Parallel demo rendering under `--all`
 

@@ -76,24 +76,41 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run -------------------------------------------------------
-# Sleep 40s because `census-augment run` measured ~35 s wallclock
-# in the dev container on warm cache (16% CPU, ~29 s of I/O wait
-# on top of ~6 s of actual compute). See issue #43 for the perf
-# investigation — for now we just sleep through it so the demo
-# captures real output. If issue #43 lands a faster runtime, we
-# can dial this down again.
+# `census-augment run` measured ~35 s wallclock on warm cache in
+# the dev container (issue #43 tracks the perf root cause). 35 s
+# of dead-air recording would be terrible UX in a demo GIF, so
+# we use Hide / Show to "edit out" the wait:
+#
+#   1. Type the command (visible — viewer sees what's about to run).
+#   2. Brief Sleep so the typed command sits on screen for a beat.
+#   3. Hide — frame capture pauses; the shell keeps executing.
+#   4. Sleep 40 s — shell completes the actual run off-camera
+#      (35 s measured + 5 s margin).
+#   5. Show — frame capture resumes against the now-populated
+#      terminal state. The GIF jumps directly from "command typed"
+#      to "output rendered".
+#   6. Sleep 3 s — viewer sees the populated output.
+#   7. Screenshot — captures the populated frame.
 Type "census-augment run --config tools/demo/config.yaml"
 Enter
+Sleep 1s
+Hide
 Sleep 40s
+Show
+Sleep 3s
 Screenshot docs/frames/demo-3-run.png
 
 # ---- scene 4: the enriched output ---------------------------------------
-# 10s after the cut command. `cut | column` on a 5-row CSV is
-# sub-second; this is mostly visual breathing room.
+# `clear` between scenes 3 and 4 so the cut output isn't stacked
+# under the run summary (which would overflow the 720-row
+# viewport).
+Type "clear"
+Enter
+Sleep 300ms
 Type "# Each row carries Census + SEIFA columns for its SA2:"
 Enter
 Sleep 800ms
 Type "cut -d, -f1,9,11,12,13,14 tools/demo/output.csv | column -s, -t"
 Enter
-Sleep 10s
+Sleep 4s
 Screenshot docs/frames/demo-4-output.png
