@@ -9,6 +9,29 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Changed — Docs restructure: README as sales pitch, handbook in `docs/` (closes #46)
+
+`README.md` is now ~120 lines — the elevator pitch, the three demo
+GIFs (with their auto-generated scene strips), a hello-world snippet,
+and a "where to go next" pointer. The reference material that had
+accumulated in the README — full library API walkthrough, full CLI
+reference, the ~100-line G-NAF setup section, the development
+workflow, cache locations — has moved into a new `docs/` handbook:
+
+- `docs/index.md` — entry point / TOC.
+- `docs/usage-library.md` — `Pipeline.augment(df)`, `AugmentResult`, examples.
+- `docs/usage-cli.md` — full `census-augment` command reference.
+- `docs/configuration.md` — `config.yaml` schema, cache locations, variable namespaces.
+- `docs/gnaf-setup.md` — cache vs remote mode, prefetch, bring-your-own parquet, attribution.
+- `docs/development.md` — Make targets, dev container, contributing rules.
+
+The handbook lives next to the existing demo assets (`docs/*.gif` and
+`docs/frames/*.png`), so all user-facing documentation is in one
+tree. `spec.md` §5 (Project Structure) updated to reflect the new
+`docs/` layout. Future feature additions (cross-dataset PRESETs,
+new datasets, etc.) land in `docs/` first rather than growing the
+README.
+
 ### Performance — Parsed-result caches collapse warm-cache run from 5.4s to 2.2s (closes #43)
 
 Two sidecar caches now sit next to the heaviest parsed artefacts and
