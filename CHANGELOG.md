@@ -37,15 +37,24 @@ Two-pronged fix in all three tape files:
 - `Env PYTHONUNBUFFERED "1"` at the top forces Python to flush
   stdout/stderr line-by-line.
 - Sleep durations for every scene that invokes `census-augment`
-  bumped: 7s → 15s on "run" scenes, 5-6s → 12s on "discover" scenes,
-  7s → 10s on "cut output" scenes. Pure-bash scenes (`cat`, `head`)
-  unchanged.
+  bumped, calibrated against measured wallclock in the dev
+  container (`time uv run census-augment run --config ...`
+  reported 35 s on warm cache): 7s → **40s** on "run" scenes,
+  5-6s → **20s** on "discover" scenes, 7s → 10s on "cut output"
+  scenes. Pure-bash scenes (`cat`, `head`) unchanged.
+
+  The 35 s wallclock is suspiciously long — only 16% CPU,
+  meaning ~29 s of pure I/O wait on top of ~6 s of compute.
+  Tracked separately as a perf investigation in issue #43; once
+  that lands faster, these Sleeps can dial back down.
 
 Discover-datasets scene 3 (`head -25 datasets/seifa_2021.md`) stays at
 6s because it's pure bash — no Python startup to wait through.
 
-Each demo's total wallclock grows by 8-15 s; acceptable for "headline"
-material at 35-50 s visible per GIF.
+Each demo's total wallclock grows by 30-40 s (run scenes dominate).
+Total visible content per GIF is now ~70-80 s, which is long but
+captures real working output. If issue #43 lands a faster runtime
+the Sleeps can drop again.
 
 ### Added — Parallel demo rendering under `--all`
 

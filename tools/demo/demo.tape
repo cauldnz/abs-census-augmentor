@@ -76,20 +76,20 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run -------------------------------------------------------
-# Sleep is generous (15s) because `census-augment run` does a lot
-# of Python work even on a warm cache: typer + pandas + geopandas
-# + pyogrio imports (slow under chromium PTY) + boundary load +
-# DataPack load + SEIFA xlsx load + spatial join + write. The
-# previous 7s window captured only the typed command line — no
-# output had appeared yet.
+# Sleep 40s because `census-augment run` measured ~35 s wallclock
+# in the dev container on warm cache (16% CPU, ~29 s of I/O wait
+# on top of ~6 s of actual compute). See issue #43 for the perf
+# investigation — for now we just sleep through it so the demo
+# captures real output. If issue #43 lands a faster runtime, we
+# can dial this down again.
 Type "census-augment run --config tools/demo/config.yaml"
 Enter
-Sleep 15s
+Sleep 40s
 Screenshot docs/frames/demo-3-run.png
 
 # ---- scene 4: the enriched output ---------------------------------------
-# 10s after the cut command so the table has time to render and
-# `column -s, -t` finishes its alignment pass.
+# 10s after the cut command. `cut | column` on a 5-row CSV is
+# sub-second; this is mostly visual breathing room.
 Type "# Each row carries Census + SEIFA columns for its SA2:"
 Enter
 Sleep 800ms

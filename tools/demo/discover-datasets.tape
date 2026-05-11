@@ -25,18 +25,21 @@ Env PYTHONUNBUFFERED "1"
 
 # ---- scene 1: list registered datasets ---------------------------------
 # Sleeps that invoke `census-augment` (here and in scenes 2 + 4)
-# bumped to 12s. Even the lightweight `discover` commands pay a
-# full Python+typer+pandas+geopandas startup cost (~4-6 s under
-# the chromium PTY) before producing output. The previous 5-6s
-# windows captured only the typed command line. Pure-bash scenes
-# (scene 3's `head -25`) keep their short Sleeps since they
-# return in microseconds.
+# bumped to 20s. `census-augment run` was measured at ~35 s
+# wallclock on the dev container even on warm cache (see issue
+# #43), and `discover` commands hit the same Python startup wall
+# (~4-6 s typer+pandas+geopandas import cost under chromium PTY)
+# even though their actual work is sub-second. The previous 5-6s
+# windows captured only the typed command line.
+#
+# Pure-bash scenes (scene 3's `head -25`) keep their short Sleeps
+# since they return in microseconds.
 Type "# What ABS datasets does the augmentor know about?"
 Enter
 Sleep 800ms
 Type "census-augment discover --config tools/demo/config.yaml --datasets"
 Enter
-Sleep 12s
+Sleep 20s
 Screenshot docs/frames/discover-datasets-1-list.png
 Type "clear"
 Enter
@@ -48,7 +51,7 @@ Enter
 Sleep 800ms
 Type "census-augment discover --config tools/demo/config.yaml --dataset seifa_2021"
 Enter
-Sleep 12s
+Sleep 20s
 Screenshot docs/frames/discover-datasets-2-schema.png
 Type "clear"
 Enter
@@ -72,5 +75,5 @@ Enter
 Sleep 800ms
 Type "census-augment discover --config tools/demo/config.yaml --features"
 Enter
-Sleep 12s
+Sleep 20s
 Screenshot docs/frames/discover-datasets-4-presets.png

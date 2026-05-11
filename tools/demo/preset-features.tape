@@ -68,11 +68,11 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run ------------------------------------------------------
-# 15s same as demo.tape's run scene — chromium PTY's Python
-# startup cost dominates.
+# 40s same as demo.tape's run scene — measured ~35 s wallclock
+# in the dev container; see issue #43.
 Type "census-augment run --config tools/demo/preset-config.yaml"
 Enter
-Sleep 15s
+Sleep 40s
 Screenshot docs/frames/preset-features-3-run.png
 
 # ---- scene 4: show the computed ratios ---------------------------------
