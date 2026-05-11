@@ -25,7 +25,7 @@
         install clean clean-all \
         test test-fast lint format typecheck check \
         smoke verify-real \
-        demo demos \
+        demo demos check-readme-frames \
         build build-test
 
 # ---- help ---------------------------------------------------------------
@@ -34,7 +34,7 @@ help: ## Show this help
 	@echo "Usage: make <target>"
 	@awk 'BEGIN{FS=":.*## "} \
 	     /^##@ / {printf "\n%s:\n", substr($$0, 5); next} \
-	     /^[a-zA-Z_-]+:.*## / {printf "  %-15s %s\n", $$1, $$2}' \
+	     /^[a-zA-Z_-]+:.*## / {printf "  %-22s %s\n", $$1, $$2}' \
 	     $(MAKEFILE_LIST)
 
 ##@ Setup
@@ -88,11 +88,16 @@ verify-real: ## Real-data parser check (hits live ABS endpoints)
 
 ##@ Demos
 
-demo: ## Render docs/demo.gif (headline)
+demo: ## Render docs/demo.gif AND refresh its README scene-strip
 	./tools/demo/render.sh
+	uv run python tools/demo/refresh_readme_frames.py
 
-demos: ## Render every tape in tools/demo/
+demos: ## Render every tape AND refresh README scene-strips
 	./tools/demo/render.sh --all
+	uv run python tools/demo/refresh_readme_frames.py
+
+check-readme-frames: ## Fail if README.md scene-strips are stale (CI lint)
+	uv run python tools/demo/refresh_readme_frames.py --check
 
 ##@ Build
 

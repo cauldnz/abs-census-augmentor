@@ -9,6 +9,50 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — Demo GIFs + scene strips embedded in README (closes #40)
+
+The README now embeds all three demo GIFs at sensible places —
+headline `docs/demo.gif` at the top, `docs/discover-datasets.gif`
+and `docs/preset-features.gif` under a new "See it in action"
+section — each followed by a collapsible `<details>` block holding
+a 4-column thumbnail strip of the scene-by-scene PNGs. Each
+thumbnail is a click-through to the full-resolution image
+(GitHub's built-in image viewer handles the lightbox; no JS, no
+CSS).
+
+### Added — `tools/demo/refresh_readme_frames.py`
+
+A small script (~150 lines, no new deps) that scans
+`docs/frames/<slug>-<n>-<label>.png`, generates a markdown table
+of clickable thumbnails per tape slug, and writes it between
+matching `<!-- BEGIN demo-frames: <slug> -->` /
+`<!-- END demo-frames: <slug> -->` markers in `README.md`. Run via
+the new Makefile targets:
+
+- `make demo` / `make demos` now invoke the refresh script after
+  rendering, so the README scene strips always reflect what the
+  tapes produced. Add a scene to a tape, re-render, the strip
+  grows by a column automatically.
+- `make check-readme-frames` is a CI-friendly lint mode that exits
+  non-zero if the strips are stale relative to the committed PNGs.
+  Not currently wired into CI but available for manual / future
+  use.
+
+Loud failure modes (per #40's "definition of done"):
+
+- Missing marker pair → `RuntimeError` listing what to add.
+- Mismatched BEGIN/END counts → `RuntimeError` flagging the
+  imbalance.
+- Tape exists but no rendered PNGs yet → silent skip (normal
+  state before first `make demos`).
+
+Pattern A from the design discussion (GIF + collapsible scene
+strip) chosen over alternatives because it stays uncluttered for
+the 80% who just want the GIF, while letting interested readers
+expand the static breakdown. GIF-shy contexts (some Slack /
+Discord embeds, README mirrors that don't loop GIFs) get the
+direct PNG links inside the strip.
+
 ### Fixed — demo screenshots captured empty output panels
 
 The first round of rendered demos showed `census-augment` commands typed
