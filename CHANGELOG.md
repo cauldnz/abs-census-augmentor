@@ -73,6 +73,23 @@ real-time render takes longer (each run scene now waits 40 s while the
 shell completes the actual command) but that only affects the renderer,
 not the viewer of the final GIF.
 
+**Margin bumps for parallel-render contention.** First pass with the
+Hide/Show pattern still left two frames empty
+(`demo-4-output.png`, `discover-datasets-4-presets.png`) — the same
+scenes worked in isolation but failed when the renderer was concurrently
+executing `census-augment run` on the other two tapes. Bumped the
+specific Sleeps that fired during peak contention: discover scenes'
+Hide-window 12s → 18s, demo scene 4's cut Sleep 4s → 6s. Margin under
+serial render is now generous; under parallel render it's sufficient.
+
+### Updated — `tools/demo/config.yaml` comment
+
+Removed the stale `# PRESETs are intentionally excluded ... until
+issue #23 lands` block. That issue closed back in PR #26; the
+preset-features.tape demo covers the PRESET namespace separately.
+Comment was visible in every rendered headline demo frame —
+misleading for any viewer who landed on the GIF.
+
 ### Added — Parallel demo rendering under `--all`
 
 Each tape is fully independent at render time (own tape file, own
