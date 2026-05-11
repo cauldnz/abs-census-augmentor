@@ -29,6 +29,15 @@ Set Height 720
 Set TypingSpeed 50ms
 Set Padding 30
 
+# Force Python's stdout/stderr to flush per-line. Without this,
+# `census-augment` invocations (typer + pandas + geopandas imports)
+# can produce no visible output until the process exits, because
+# Python detects vhs's chromium PTY as non-TTY and goes fully
+# buffered. The result: a screenshot fired mid-run captures only
+# the typed command line, no output. Setting PYTHONUNBUFFERED
+# forces eager flushing regardless of TTY detection.
+Env PYTHONUNBUFFERED "1"
+
 # ---- off-camera: warm the cache ----------------------------------------
 # The render scripts already pre-warm SEIFA via a host-side
 # census-augment run, so this Hide block is just belt-and-braces in
@@ -67,16 +76,24 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run -------------------------------------------------------
+# Sleep is generous (15s) because `census-augment run` does a lot
+# of Python work even on a warm cache: typer + pandas + geopandas
+# + pyogrio imports (slow under chromium PTY) + boundary load +
+# DataPack load + SEIFA xlsx load + spatial join + write. The
+# previous 7s window captured only the typed command line — no
+# output had appeared yet.
 Type "census-augment run --config tools/demo/config.yaml"
 Enter
-Sleep 7s
+Sleep 15s
 Screenshot docs/frames/demo-3-run.png
 
 # ---- scene 4: the enriched output ---------------------------------------
+# 10s after the cut command so the table has time to render and
+# `column -s, -t` finishes its alignment pass.
 Type "# Each row carries Census + SEIFA columns for its SA2:"
 Enter
 Sleep 800ms
 Type "cut -d, -f1,9,11,12,13,14 tools/demo/output.csv | column -s, -t"
 Enter
-Sleep 7s
+Sleep 10s
 Screenshot docs/frames/demo-4-output.png

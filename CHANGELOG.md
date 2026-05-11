@@ -9,6 +9,44 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — demo screenshots captured empty output panels
+
+The first round of rendered demos showed `census-augment` commands typed
+but with no output below them in the captured PNG frames. Repro: 7 of
+the 12 frame snapshots had only the typed command line and nothing else
+— including the headline demo's "Run output" and "Output table" scenes
+and three of the four discover-datasets scenes. The only frames that
+worked were ones that didn't invoke `census-augment` (e.g. `cat`,
+`head -25`).
+
+Two root causes stacked:
+
+1. **Python stdout buffering** — under vhs's chromium-fronted pseudo-TTY,
+   Python's TTY detection falls back to fully-buffered stdout. Output
+   only flushes at process exit. The Screenshot directive fires before
+   the process exits, capturing a "command typed, nothing yet" frame.
+
+2. **Sleep durations too short for chromium-PTY Python startup** —
+   even `census-augment discover --datasets` (which should take <1 s
+   of actual work) pays a 4-6 s Python+typer+pandas+geopandas import
+   cost under chromium PTY. The previous Sleeps (5-7 s) closed the
+   screenshot window before output appeared.
+
+Two-pronged fix in all three tape files:
+
+- `Env PYTHONUNBUFFERED "1"` at the top forces Python to flush
+  stdout/stderr line-by-line.
+- Sleep durations for every scene that invokes `census-augment`
+  bumped: 7s → 15s on "run" scenes, 5-6s → 12s on "discover" scenes,
+  7s → 10s on "cut output" scenes. Pure-bash scenes (`cat`, `head`)
+  unchanged.
+
+Discover-datasets scene 3 (`head -25 datasets/seifa_2021.md`) stays at
+6s because it's pure bash — no Python startup to wait through.
+
+Each demo's total wallclock grows by 8-15 s; acceptable for "headline"
+material at 35-50 s visible per GIF.
+
 ### Added — Parallel demo rendering under `--all`
 
 Each tape is fully independent at render time (own tape file, own

@@ -24,6 +24,9 @@ Set Height 720
 Set TypingSpeed 50ms
 Set Padding 30
 
+# See demo.tape for why this is necessary.
+Env PYTHONUNBUFFERED "1"
+
 # ---- off-camera: warm the cache ---------------------------------------
 # render.sh / render.ps1 already pre-warm via a host-side
 # census-augment run, so this Hide block is just a safety net for
@@ -65,9 +68,11 @@ Enter
 Sleep 300ms
 
 # ---- scene 3: run ------------------------------------------------------
+# 15s same as demo.tape's run scene — chromium PTY's Python
+# startup cost dominates.
 Type "census-augment run --config tools/demo/preset-config.yaml"
 Enter
-Sleep 7s
+Sleep 15s
 Screenshot docs/frames/preset-features-3-run.png
 
 # ---- scene 4: show the computed ratios ---------------------------------
@@ -76,5 +81,5 @@ Enter
 Sleep 800ms
 Type "cut -d, -f1,9,11,12,13 tools/demo/preset-output.csv | column -s, -t"
 Enter
-Sleep 7s
+Sleep 10s
 Screenshot docs/frames/preset-features-4-output.png
