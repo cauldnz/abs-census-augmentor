@@ -28,6 +28,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .._spec_loader import iter_specs_from_dir
 from ._spec import DatasetSpec, parse_dataset_spec
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -81,23 +82,15 @@ class Registry:
     def from_repo_specs(cls, spec_dir: Path | None = None) -> Registry:
         """Construct a registry pre-populated with every ``.md`` file
         under ``spec_dir`` (defaults to the repo's ``datasets/``).
+
+        Skips leading-underscore filenames (templates) and logs+skips
+        any spec that fails to parse — see
+        :func:`census_augment._spec_loader.iter_specs_from_dir`.
         """
         registry = cls()
         directory = spec_dir or _default_spec_dir()
-        if directory.is_dir():
-            for spec_path in sorted(directory.glob("*.md")):
-                # Skip "_template.md" and any leading-underscore files —
-                # those are documentation/templates, not real specs.
-                if spec_path.name.startswith("_"):
-                    continue
-                try:
-                    spec = parse_dataset_spec(spec_path)
-                except ValueError:
-                    _log.exception("Skipping invalid dataset spec at %s", spec_path)
-                    continue
-                registry.register_spec(spec)
-        else:
-            _log.debug("No dataset specs found at %s", directory)
+        for spec in iter_specs_from_dir(directory, parse_dataset_spec, label="dataset spec"):
+            registry.register_spec(spec)
         return registry
 
     # ---- spec registration ----------------------------------------------

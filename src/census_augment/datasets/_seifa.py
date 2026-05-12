@@ -30,7 +30,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from .._http_retry import retry_stream_get
+from ._xlsx_base import _AbsXlsxDataset
 
 _log = logging.getLogger(__name__)
 
@@ -99,16 +99,18 @@ _SA2_CODE_HEADER_FRAGMENTS = (
 )
 
 
-class SeifaDataSource:
+class SeifaDataSource(_AbsXlsxDataset):
     """Fetch + load the SEIFA 2021 SA2 XLSX (spec §20, dataset id ``seifa_2021``).
 
-    Implements the :class:`DatasetFetcher` Protocol. Files land at
+    Implements the :class:`DatasetFetcher` Protocol via the shared
+    :class:`_AbsXlsxDataset` base. Files land at
     ``<root>/seifa-{release}.xlsx``; parsed parquet alongside as
     ``seifa-{release}.parquet`` (so subsequent loads skip the XLSX
     parse).
     """
 
     _label = "SEIFA 2021 SA2 workbook"
+    _cache_glob = "seifa-*.xlsx"
 
     def __init__(
         self,
@@ -127,74 +129,29 @@ class SeifaDataSource:
                 "When ABS publishes 2026, register it as a separate "
                 "dataset spec."
             )
-        self._release = release
-        self._root = Path(root)
-        self._url = url or DEFAULT_SEIFA_2021_URL
-        self._session = session if session is not None else requests.Session()
-        self._chunk_size = chunk_size
-        self._timeout = timeout
+        super().__init__(
+            release=release,
+            root=root,
+            session=session,
+            chunk_size=chunk_size,
+            timeout=timeout,
+        )
+        # SEIFA has a static URL (no landing-page scrape), so we
+        # populate the resolved attrs eagerly in __init__ — the
+        # base's _resolve_release() then becomes a no-op early-exit.
+        self._resolved_release = release
+        self._resolved_url = url or DEFAULT_SEIFA_2021_URL
 
-    # ---- protocol -------------------------------------------------------
+    # ---- hooks ---------------------------------------------------------
 
-    @property
-    def resolved_release(self) -> str:
-        return self._release
+    def _filename_stem(self, release: str) -> str:
+        return f"seifa-{release}"
 
-    @property
-    def is_cached(self) -> bool:
-        return self._xlsx_path.exists()
-
-    @property
-    def _xlsx_path(self) -> Path:
-        return self._root / f"seifa-{self._release}.xlsx"
-
-    @property
-    def _parquet_path(self) -> Path:
-        return self._root / f"seifa-{self._release}.parquet"
-
-    def fetch(self, refresh: bool = False) -> Path:
-        """Ensure the SA2 SEIFA XLSX is on disk; return its path.
-
-        Streams the download to a ``.tmp`` file then renames atomically.
-        Retries on transient ABS / data.gov.au failures per spec §10
-        (see :mod:`census_augment._http_retry`).
-        """
-        if self._xlsx_path.exists() and not refresh:
-            _log.debug("SEIFA cached at %s", self._xlsx_path)
-            return self._xlsx_path
-
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = self._xlsx_path.with_suffix(self._xlsx_path.suffix + ".tmp")
-        _log.info("Downloading %s from %s", self._label, self._url)
-        with retry_stream_get(
-            self._session,
-            self._url,
-            timeout=self._timeout,
-            label=self._label,
-        ) as response:
-            response.raise_for_status()
-            with tmp.open("wb") as f:
-                for chunk in response.iter_content(chunk_size=self._chunk_size):
-                    if chunk:
-                        f.write(chunk)
-        tmp.replace(self._xlsx_path)
-        _log.info("Saved %s to %s", self._label, self._xlsx_path)
-        return self._xlsx_path
-
-    def load(self) -> pd.DataFrame:
-        """Return a DataFrame indexed by ``sa2_code_2021``.
-
-        Caches the parsed parquet alongside the XLSX so repeat ``load()``
-        calls are cheap (XLSX parse takes ~3 seconds; parquet read is
-        instant).
-        """
-        if self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
-
-        xlsx = self.fetch()
-        df = self._parse_xlsx(xlsx)
-        df.reset_index().to_parquet(self._parquet_path, index=False)
-        return df
+    def _resolve_release(self) -> None:
+        # No-op: __init__ populated both attributes eagerly. The base's
+        # fetch()/resolved_release pathway expects this to be idempotent
+        # and a no-op when already resolved is exactly that.
+        return
 
     # ---- parsing --------------------------------------------------------
 

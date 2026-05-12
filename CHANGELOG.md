@@ -9,6 +9,48 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Phase 2 PR-1 — Architectural simplification: shared dataset base + spec loader
+
+Two structural duplications from the v1.3 / v1.4 evolution have been
+collapsed into shared helpers.
+
+**`_AbsXlsxDataset` shared base.** The four registered datasets
+(`_seifa.py`, `_erp.py`, `_dss.py`, `_ato.py`) all implemented the
+same skeleton inline: `__init__` boilerplate, `resolved_release`
+lazy property, `is_cached`, `_xlsx_path` / `_parquet_path`,
+streaming `fetch()` with retry, and `load()` with parquet sidecar
+caching. Pulled the shared plumbing into
+`src/census_augment/datasets/_xlsx_base.py`. Subclasses now declare
+only the dataset-specific bits:
+
+- `_label`, `_cache_glob` (class attrs).
+- `_filename_stem(release)` — basename without extension.
+- `_resolve_release()` — landing-page scrape (ERP / ATO), CKAN
+  lookup (DSS), or eager no-op (SEIFA — static URL).
+- `_parse_xlsx(xlsx_path)` — dataset-specific parser.
+- `_post_parse(df)` — optional hook for DSS's `release_quarter` /
+  ATO's `reference_financial_year` columns.
+
+Net effect: ~120 lines of duplicate plumbing collapsed per dataset
+into the base, and the existing `DatasetFetcher` Protocol contract
+is preserved — subclasses opt into the base by inheritance, but
+nothing forces it (a future parquet-native source can implement the
+protocol directly).
+
+**Shared `iter_specs_from_dir` for registry loading.** Both
+`Registry.from_repo_specs` (datasets) and
+`FeatureRegistry.from_repo_specs` (PRESETs) had near-identical loops
+walking `*.md` files, skipping leading-underscore filenames, and
+logging+swallowing `ValueError` from the parser. Pulled into
+`src/census_augment/_spec_loader.py::iter_specs_from_dir` — a
+generic `(directory, parser, label) -> Iterator[T]` helper. Both
+registries now call it with their respective parser callbacks.
+Behaviour is bit-identical (verified by the existing test suite).
+
+Full suite still passes (**543 passed, 1 skipped**); mypy clean
+across 64 source files; lint + format clean. Test files unchanged —
+the public API is identical, the refactor is structural only.
+
 ### Phase 1 polish — correctness, error UX, hygiene
 
 A bundle of small wins surfaced by the v1.4.2 all-up review.
