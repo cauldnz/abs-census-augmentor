@@ -8,6 +8,7 @@ Detailed documentation for `census-augment`. The [README](../README.md) is the e
 - [CLI usage](usage-cli.md) — full `census-augment` command reference.
 - [Configuration](configuration.md) — `config.yaml` schema, env vars, cache locations.
 - [Cache reference](cache.md) — what gets cached where, sizes, invalidation, ops procedures.
+- [Temporal data](temporal-data.md) — augmenting time-series with the right snapshot per row (the planned per-row temporal mode).
 
 ## Data sources
 
