@@ -1,4 +1,10 @@
-"""ABS Personal Income (ATO administrative) fetcher (spec §20, dataset id ``ato_personal_income``).
+"""ABS Personal Income in Australia fetcher (spec §20, dataset id ``abs_personal_income``).
+
+ABS catalogue 6524.0.55.002. A LEED-derived ABS product (using ATO
+administrative data as one input, not ATO Taxation Statistics itself).
+Previously this dataset was misnamed `ato_personal_income` with
+namespace `ATO`; renamed to `abs_personal_income` / `ABS_PIA` to
+match what it actually is.
 
 ABS publishes Personal Income annually as a series of XLSX workbooks
 (Tables 1–14). Table 1 carries the **total-income summary statistics**
@@ -57,7 +63,7 @@ _GROUP_COLUMNS: dict[str, str] = {
 }
 
 
-class AtoDataSource(_AbsXlsxDataset):
+class AbsPiaDataSource(_AbsXlsxDataset):
     """Fetch + load ABS Personal Income SA2 (Table 1 summary).
 
     Implements the :class:`DatasetFetcher` Protocol via the shared
@@ -66,8 +72,8 @@ class AtoDataSource(_AbsXlsxDataset):
     ``"latest"`` resolves the landing page's most recent.
     """
 
-    _label = "ABS Personal Income SA2 (Table 1)"
-    _cache_glob = "ato-*.xlsx"
+    _label = "ABS Personal Income in Australia SA2 (Table 1)"
+    _cache_glob = "abs-personal-income-*.xlsx"
 
     def __init__(
         self,
@@ -91,7 +97,7 @@ class AtoDataSource(_AbsXlsxDataset):
     # ---- hooks ---------------------------------------------------------
 
     def _filename_stem(self, release: str) -> str:
-        return f"ato-personal-income-{release}"
+        return f"abs-personal-income-{release}"
 
     def _post_parse(self, df: pd.DataFrame) -> pd.DataFrame:
         # Tag rows with the reference FY so downstream consumers see
@@ -261,14 +267,14 @@ def _coerce_number(cell: object) -> object:
 # ---- fetcher registration ------------------------------------------------
 
 
-def _build_fetcher(root: Path) -> AtoDataSource:
-    return AtoDataSource(root=root)
+def _build_fetcher(root: Path) -> AbsPiaDataSource:
+    return AbsPiaDataSource(root=root)
 
 
 def _register() -> None:
     from . import registry  # noqa: PLC0415
 
-    registry.register_fetcher("ato_personal_income", _build_fetcher)
+    registry.register_fetcher("abs_personal_income", _build_fetcher)
 
 
 _register()

@@ -6,7 +6,8 @@ SA2-keyed data for analysis but don't need geocoding / spatial-join
 on top.
 
 This example demonstrates each of the four new datasets in v1.3:
-SEIFA, ERP, DSS, and ATO. Each call hits the upstream source on
+SEIFA, ERP, DSS, and ABS Personal Income (formerly mislabelled
+ATO). Each call hits the upstream source on
 first run (one-time download) and caches a parquet locally for
 subsequent calls.
 
@@ -21,7 +22,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from census_augment.datasets._ato import AtoDataSource
+from census_augment.datasets._abs_pia import AbsPiaDataSource
 from census_augment.datasets._dss import DssDataSource
 from census_augment.datasets._erp import ErpDataSource
 from census_augment.datasets._seifa import SeifaDataSource
@@ -57,11 +58,14 @@ def main() -> None:
         print(df_dss[cols].head(2).to_string())
         print()
 
-        ato = AtoDataSource(root=root / "ato")
-        df_ato = ato.load()
-        print(f"ATO {ato.resolved_release}: {len(df_ato):,} SA2s × {len(df_ato.columns)} cols")
+        abs_pia = AbsPiaDataSource(root=root / "abs_personal_income")
+        df_pia = abs_pia.load()
         print(
-            df_ato[["median_total_income", "mean_total_income", "income_earners_count"]]
+            f"ABS Personal Income {abs_pia.resolved_release}: "
+            f"{len(df_pia):,} SA2s × {len(df_pia.columns)} cols"
+        )
+        print(
+            df_pia[["median_total_income", "mean_total_income", "income_earners_count"]]
             .head(2)
             .to_string()
         )

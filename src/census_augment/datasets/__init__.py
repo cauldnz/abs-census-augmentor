@@ -39,7 +39,7 @@ registry = Registry.from_repo_specs()
 # `registry = Registry.from_repo_specs()` so the registration is
 # attached to the canonical singleton. Suppressed-unused-import lint:
 # the modules' side-effect is the whole point.
-from . import _ato as _ato  # noqa: F401, E402
+from . import _abs_pia as _abs_pia  # noqa: F401, E402
 from . import _dss as _dss  # noqa: F401, E402
 from . import _erp as _erp  # noqa: F401, E402
 from . import _seifa as _seifa  # noqa: F401, E402

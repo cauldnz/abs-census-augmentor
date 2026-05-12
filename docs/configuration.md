@@ -38,7 +38,7 @@ variables:
 ```
 
 - `G<n>.<col>` — Census GCP DataPack columns (table → column).
-- `SEIFA.<col>`, `ERP.<col>`, `DSS.<col>`, `ATO.<col>` — other registered datasets (one entry per registered dataset spec in `datasets/<id>.md`).
+- `SEIFA.<col>`, `ERP.<col>`, `DSS.<col>`, `ABS_PIA.<col>` — other registered datasets (one entry per registered dataset spec in `datasets/<id>.md`).
 - `PRESET.<id>` — curated ratio features defined in `features/<id>.md`. The pipeline auto-loads the underlying numerator + denominator columns from whichever dataset(s) they reference.
 
 Run `census-augment discover --datasets` (and `--features`) for the registered list, or browse [`datasets/`](../datasets/) and [`features/`](../features/) directly.

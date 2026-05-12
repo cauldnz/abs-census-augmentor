@@ -10,9 +10,9 @@ import pandas as pd
 import pytest
 import responses
 
-from census_augment.datasets._ato import (
+from census_augment.datasets._abs_pia import (
     ATO_LANDING_URL,
-    AtoDataSource,
+    AbsPiaDataSource,
 )
 
 
@@ -119,7 +119,7 @@ def test_resolve_latest_picks_highest_period(ato_data_dir: Path) -> None:
         body=_make_landing_html(["2021-22", "2022-23"]),
         status=200,
     )
-    ds = AtoDataSource(release="latest", root=ato_data_dir)
+    ds = AbsPiaDataSource(release="latest", root=ato_data_dir)
     assert ds.resolved_release == "2022-23"
 
 
@@ -131,7 +131,7 @@ def test_resolve_no_links_raises(ato_data_dir: Path) -> None:
         body="<html></html>",
         status=200,
     )
-    ds = AtoDataSource(release="latest", root=ato_data_dir)
+    ds = AbsPiaDataSource(release="latest", root=ato_data_dir)
     with pytest.raises(RuntimeError, match="Could not find"):
         _ = ds.resolved_release
 
@@ -174,7 +174,7 @@ def test_load_returns_sa2_indexed_dataframe(ato_data_dir: Path) -> None:
     )
     responses.add(responses.GET, download_url, body=fake_xlsx, status=200)
 
-    ds = AtoDataSource(root=ato_data_dir)
+    ds = AbsPiaDataSource(root=ato_data_dir)
     df = ds.load()
 
     assert df.index.name == "sa2_code_2021"
@@ -225,7 +225,7 @@ def test_load_handles_suppressed_cells(ato_data_dir: Path) -> None:
         status=200,
     )
 
-    ds = AtoDataSource(root=ato_data_dir)
+    ds = AbsPiaDataSource(root=ato_data_dir)
     df = ds.load()
     assert df.loc["117011326", "income_earners_count"] == 8500
     assert pd.isna(df.loc["117011326", "median_total_income"])

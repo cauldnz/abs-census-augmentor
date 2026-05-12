@@ -402,7 +402,7 @@ def test_registry_loads_repo_specs_on_import() -> None:
         "seifa_2021",
         "erp_by_sa2",
         "dss_payments",
-        "ato_personal_income",
+        "abs_personal_income",
     } <= ids
 
 

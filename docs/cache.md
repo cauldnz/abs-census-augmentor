@@ -36,7 +36,7 @@ The tool splits cache into two roots: `data/` (everything downloaded from upstre
 | `seifa_2021/` | SEIFA SA2 XLSX (`seifa-2021.xlsx`) + parsed parquet sidecar (`seifa-2021.parquet`). | ~150 KB | Re-download via the dataset's `fetch(refresh=True)` (no CLI flag yet). |
 | `erp_by_sa2/` | ERP SA2 XLSX (`erp-sa2-{year}.xlsx`) per release + parsed parquet sidecar. | ~1 MB per release | Same: dataset-level refresh. |
 | `dss_payments/` | DSS quarterly XLSX (`dss-{YYYY-Qn}.xlsx`) per release + parsed parquet sidecar. | ~3 MB per release | Same. |
-| `ato_personal_income/` | ATO Table 1 XLSX (`ato-personal-income-{FY}.xlsx`) per release + parsed parquet sidecar. | ~500 KB per release | Same. |
+| `abs_personal_income/` | ATO Table 1 XLSX (`ato-personal-income-{FY}.xlsx`) per release + parsed parquet sidecar. | ~500 KB per release | Same. |
 | `gnaf/{YYYYMM}/` | G-NAF parquet files (only when `geocoding.gnaf.mode: cache`). | **~10 GB per release** | `census-augment fetch --gnaf --refresh`. |
 
 **G-NAF is by far the biggest item.** If you're disk-constrained:

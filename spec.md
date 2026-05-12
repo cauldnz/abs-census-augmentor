@@ -823,7 +823,7 @@ Dataset Enrichment ─── for each requested variable, look up which
    │                   ├── seifa_2021     (SEIFA.*)
    │                   ├── erp_by_sa2     (ERP.*)
    │                   ├── dss_payments   (DSS.*)
-   │                   └── ato_personal_income (ATO.*)
+   │                   └── abs_personal_income (ABS_PIA.*)
    ▼
 Feature Derivation ─── for each PRESET feature, compute the curated
                        ratio with the right denominator (§21).

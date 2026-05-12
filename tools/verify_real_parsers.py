@@ -248,9 +248,9 @@ def main() -> int:
         if not _check("Sample response shape", _check_nominatim):
             failures.append("nominatim")
 
-    # ------ v1.3 datasets (SEIFA, ERP, DSS, ATO) ------
+    # ------ v1.3 datasets (SEIFA, ERP, DSS, ABS PIA) ------
     print("=== v1.3 registered datasets ===")
-    from census_augment.datasets._ato import AtoDataSource
+    from census_augment.datasets._abs_pia import AbsPiaDataSource
     from census_augment.datasets._dss import DssDataSource
     from census_augment.datasets._erp import ErpDataSource
     from census_augment.datasets._seifa import SeifaDataSource
@@ -289,8 +289,8 @@ def main() -> int:
             f"{len(recipient_cols)} payment-type columns"
         )
 
-    def _check_ato() -> None:
-        ds = AtoDataSource(root=data_dir / "ato_personal_income")
+    def _check_abs_pia() -> None:
+        ds = AbsPiaDataSource(root=data_dir / "abs_personal_income")
         df = ds.load()
         assert len(df) >= 2000
         assert "median_total_income" in df.columns
@@ -307,8 +307,8 @@ def main() -> int:
         failures.append("erp_by_sa2")
     if not _check("DSS payments (~2,454 SA2s, 22 payment types)", _check_dss):
         failures.append("dss_payments")
-    if not _check("ATO personal income (~2,450 SA2s)", _check_ato):
-        failures.append("ato_personal_income")
+    if not _check("ABS Personal Income (~2,450 SA2s)", _check_abs_pia):
+        failures.append("abs_personal_income")
 
     # ------ PRESET source resolution against real GCP DataPack ------
     # Acid test for the "Real Data First" rule (see CLAUDE.md): every
