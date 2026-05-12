@@ -9,6 +9,36 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Phase 3 — Operational hardening
+
+Three small additions surfaced by the v1.4.2 all-up review.
+
+**Row-level partial-enrichment log.** `Pipeline.augment(df)` now
+emits one `INFO`-level log line per enrichment column when any rows
+came back partially enriched, naming the column and the
+nulls-vs-total ratio. Previously the run summary only had an
+aggregate "partially_enriched: N" — a user staring at a 5-of-100
+partial-enrichment row couldn't tell which configured variable
+nulled out without inspecting the output CSV. Now the log line
+("SA2s outside SEIFA coverage", typically) names the culprit.
+
+**`docs/cache.md` ops reference.** New documentation page covering
+what's cached where, how big each subdir gets, what triggers
+invalidation, and how to clear selectively vs nuke everything.
+Linked from `docs/index.md`. Picks up the G-NAF "this is the 10 GB
+item" callout from the existing G-NAF docs but consolidates the
+data-subdir-by-data-subdir breakdown in one place.
+
+**Scheduled real-data CI workflow.** New
+`.github/workflows/real-data-check.yml` runs `fetch_real_data.py
+--skip-gnaf` + `verify_real_parsers.py` weekly (Monday 04:00 UTC) +
+on `workflow_dispatch`. Opens a `real-data-drift` GitHub issue on
+failure (or comments on an existing open one). Catches ABS / data.gov.au
+schema drift the week it lands rather than waiting for a maintainer
+to bump into it locally. G-NAF is skipped (10 GB; gnaf-loader has
+its own upstream monitoring) — `make verify-real` covers G-NAF for
+maintainers who want it.
+
 ### Phase 2 PR-2 — Architectural simplification: fetcher-registration consolidation
 
 Before this change there were **two** fetcher-registration mechanisms

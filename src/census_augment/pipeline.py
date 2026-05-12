@@ -602,6 +602,27 @@ class Pipeline:
             **{**summary.__dict__, "unused_configured_columns": unused_configured_columns}
         )
 
+        # Diagnostic: when rows came back partially enriched, name the
+        # specific variables that nulled out. The summary already has
+        # the aggregate count; this surfaces which configured variable
+        # didn't resolve so users can pinpoint (e.g.) "SA2s outside
+        # SEIFA coverage" without having to inspect the output CSV.
+        if (
+            summary_with_unused.partially_enriched > 0
+            and enrichment_cols
+            and all(c in df_out.columns for c in enrichment_cols)
+        ):
+            enriched_df = df_out.loc[has_sa2, enrichment_cols]
+            for col in enrichment_cols:
+                null_count = int(enriched_df[col].isna().sum())
+                if null_count > 0:
+                    _log.info(
+                        "Enrichment column %r: %d/%d SA2-resolved rows null",
+                        col,
+                        null_count,
+                        len(enriched_df),
+                    )
+
         return AugmentResult(
             df=df_out,
             summary=summary_with_unused,
