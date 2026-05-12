@@ -85,7 +85,7 @@ def main() -> int:
     boundaries_ds = BoundariesDataSource(
         census=config.census,
         base_url=config.data_sources.boundaries_base_url,
-        root=data_dir / "boundaries",
+        root=data_dir / "boundaries" / str(config.census.year),
     )
     gdf = boundaries_ds.load()
     t = _phase("boundaries.load", t, results)
@@ -97,7 +97,7 @@ def main() -> int:
     datapacks_ds = DataPacksDataSource(
         census=config.census,
         base_url=config.data_sources.datapacks_base_url,
-        root=data_dir / "census",
+        root=data_dir / "census" / str(config.census.year),
     )
     catalog = VariableCatalog.from_data_source(datapacks_ds)
     gcp_variables = {
@@ -112,7 +112,7 @@ def main() -> int:
             year=config.census.year,
             datum=config.geocoding.gnaf.datum,
             base_url=config.data_sources.boundaries_base_url,
-            root=data_dir / "mb",
+            root=data_dir / "mb" / str(config.census.year),
         )
         mb_lookup: Any = mb_ds.load_correspondence()
     else:

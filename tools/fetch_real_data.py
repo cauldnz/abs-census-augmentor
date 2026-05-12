@@ -117,7 +117,7 @@ def main() -> int:
     boundaries = BoundariesDataSource(
         census=census,
         base_url=DEFAULT_BOUNDARIES_URL,
-        root=data_dir / "boundaries",
+        root=data_dir / "boundaries" / str(census.year),
     )
     print(f"  URL:  {boundaries.url}")
     shp = boundaries.fetch(refresh=args.refresh)
@@ -127,7 +127,7 @@ def main() -> int:
     datapacks = DataPacksDataSource(
         census=census,
         base_url=DEFAULT_DATAPACKS_URL,
-        root=data_dir / "census",
+        root=data_dir / "census" / str(census.year),
     )
     print(f"  URL:    {datapacks.url}")
     extract = datapacks.fetch(refresh=args.refresh)
@@ -138,7 +138,7 @@ def main() -> int:
         year=census.year,
         datum=census.datum,
         base_url=DEFAULT_BOUNDARIES_URL,
-        root=data_dir / "mb",
+        root=data_dir / "mb" / str(census.year),
     )
     print(f"  URL:    {mb_ds.url}")
     mb_shp = mb_ds.fetch(refresh=args.refresh)

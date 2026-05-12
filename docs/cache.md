@@ -28,15 +28,20 @@ The tool splits cache into two roots: `data/` (everything downloaded from upstre
 
 ### `<data_dir>/` — ABS / G-NAF downloads
 
+ASGS-edition-keyed subdirs let multiple boundary editions coexist for
+temporal-mode runs that touch more than one. The configured
+`census.year` (currently 2021 by default) selects which subdir gets
+populated during cross-sectional runs.
+
 | Subdir | Contents | Approximate size | Invalidation |
 |---|---|---|---|
-| `boundaries/` | ASGS SA2 shapefile ZIP (`SA2_2021_AUST_SHP_GDA2020.zip`) + extracted `.shp` / `.dbf` / `.prj` / `.shx` + a `<shp>.feather` sidecar for fast geopandas re-reads. | ~50 MB | Re-download via `census-augment fetch --refresh --boundaries`. |
-| `census/` | 2021 GCP DataPack ZIP + extracted CSVs (one per G## table) + metadata XLSX + a `<metadata-xlsx>.<descriptor>.parsed.pkl` sidecar for fast openpyxl-skipping re-reads. | ~40 MB | Re-download via `census-augment fetch --refresh --census`. |
-| `mb/` | Mesh Block correspondence shapefile (used by the MB-fast-path SA2 resolver when G-NAF geocoding returns an MB code). | ~50 MB | Re-download via `census-augment fetch --refresh --boundaries`. |
-| `seifa_2021/` | SEIFA SA2 XLSX (`seifa-2021.xlsx`) + parsed parquet sidecar (`seifa-2021.parquet`). | ~150 KB | Re-download via the dataset's `fetch(refresh=True)` (no CLI flag yet). |
-| `erp_by_sa2/` | ERP SA2 XLSX (`erp-sa2-{year}.xlsx`) per release + parsed parquet sidecar. | ~1 MB per release | Same: dataset-level refresh. |
+| `boundaries/<year>/` | ASGS SA2 shapefile ZIP (`SA2_<year>_AUST_SHP_<datum>.zip`) + extracted `.shp` / `.dbf` / `.prj` / `.shx` + a `<shp>.feather` sidecar. | ~50 MB per edition | `census-augment fetch --refresh --boundaries`. |
+| `census/<year>/` | GCP DataPack ZIP + extracted CSVs (one per G## table) + metadata XLSX + a `<metadata-xlsx>.<descriptor>.parsed.pkl` sidecar for fast openpyxl-skipping re-reads. | ~40 MB per edition | `census-augment fetch --refresh --census`. |
+| `mb/<year>/` | Mesh Block correspondence shapefile (MB→SA2 fast-path resolver). | ~50 MB per edition | `census-augment fetch --refresh --boundaries`. |
+| `seifa_2021/` | SEIFA SA2 XLSX (`seifa-2021.xlsx`) + parsed parquet sidecar (`seifa-2021.parquet`). | ~150 KB | Dataset-level refresh. |
+| `erp_by_sa2/` | ERP SA2 XLSX (`erp-sa2-{year}.xlsx`) per release + parsed parquet sidecar. | ~1 MB per release | Same. |
 | `dss_payments/` | DSS quarterly XLSX (`dss-{YYYY-Qn}.xlsx`) per release + parsed parquet sidecar. | ~3 MB per release | Same. |
-| `abs_personal_income/` | ATO Table 1 XLSX (`ato-personal-income-{FY}.xlsx`) per release + parsed parquet sidecar. | ~500 KB per release | Same. |
+| `abs_personal_income/` | ABS Personal Income Table 1 XLSX (`abs-personal-income-{FY}.xlsx`) per release + parsed parquet sidecar. | ~500 KB per release | Same. |
 | `gnaf/{YYYYMM}/` | G-NAF parquet files (only when `geocoding.gnaf.mode: cache`). | **~10 GB per release** | `census-augment fetch --gnaf --refresh`. |
 
 **G-NAF is by far the biggest item.** If you're disk-constrained:

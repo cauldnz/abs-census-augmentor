@@ -9,6 +9,38 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase D — Cache restructure to per-ASGS-edition subdirs (BREAKING)
+
+The boundary, census DataPack, and Mesh Block caches now live in
+edition-keyed subdirectories so multiple ASGS editions can coexist
+on disk. Layout change:
+
+```
+Before:
+  <data_dir>/boundaries/SA2_2021_AUST_SHP_GDA2020.zip (+ extracted)
+  <data_dir>/census/2021_GCP_SA2_for_AUS_short-header.zip (+ extracted)
+  <data_dir>/mb/MB_2021_AUST_SHP_GDA2020.zip (+ extracted)
+
+After:
+  <data_dir>/boundaries/2021/SA2_2021_AUST_SHP_GDA2020.zip
+  <data_dir>/census/2021/2021_GCP_SA2_for_AUS_short-header.zip
+  <data_dir>/mb/2021/MB_2021_AUST_SHP_GDA2020.zip
+```
+
+**Breaking**, no auto-migration: existing caches in the old flat layout
+remain on disk but are not read. Wipe `<data_dir>/boundaries/`,
+`<data_dir>/census/`, and `<data_dir>/mb/` and run
+`census-augment fetch --refresh --boundaries --census` to repopulate
+the new layout. The dataset-specific caches (`seifa_2021/`,
+`erp_by_sa2/`, `dss_payments/`, `abs_personal_income/`) and the G-NAF
+cache (`gnaf/{YYYYMM}/`) are unaffected.
+
+Why now: Phase E (input.date_column + bucketing) needs to load multiple
+boundary editions in a single run. The per-edition layout sets that up
+without further restructure later. Today's cross-sectional runs see the
+same on-disk behaviour as before (just one level deeper). Documented
+in `docs/cache.md`.
+
 ### Temporal Phase C — Rename `ato_personal_income` → `abs_personal_income` (BREAKING)
 
 The dataset we called `ato_personal_income` (with namespace `ATO`)

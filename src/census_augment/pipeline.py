@@ -311,17 +311,21 @@ class Pipeline:
         if cache_dir is None:
             cache_dir = default_cache_dir()
 
+        # Cache layout is per-ASGS-edition (spec-temporal.md §13). The
+        # `<year>` segment lets multiple editions coexist on disk for
+        # future temporal-mode runs that touch more than one edition.
+        boundary_year = str(config.census.year)
         boundaries_ds = BoundariesDataSource(
             census=config.census,
             base_url=config.data_sources.boundaries_base_url,
-            root=data_dir / "boundaries",
+            root=data_dir / "boundaries" / boundary_year,
         )
         spatial = SpatialIndex(boundaries_ds.load())
 
         datapacks_ds = DataPacksDataSource(
             census=config.census,
             base_url=config.data_sources.datapacks_base_url,
-            root=data_dir / "census",
+            root=data_dir / "census" / boundary_year,
         )
         catalog = VariableCatalog.from_data_source(datapacks_ds)
         # Pre-validate only the GCP-shape variables against the
@@ -380,7 +384,7 @@ class Pipeline:
                         year=config.census.year,
                         datum=config.geocoding.gnaf.datum,
                         base_url=config.data_sources.boundaries_base_url,
-                        root=data_dir / "mb",
+                        root=data_dir / "mb" / boundary_year,
                     )
                     mb_lookup = mb_ds.load_correspondence()
             elif provider == "nominatim":
