@@ -27,25 +27,39 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install apt deps (ffmpeg, chromium, sandbox helper, column)
+    - name: Install apt deps (ffmpeg, chromium runtime libs, column)
       shell: bash
       run: |
         sudo apt-get update -y
         # ffmpeg              — vhs encodes captured frames to GIF.
         # bsdmainutils        — provides `column`, used by demo tapes.
-        # chromium            — installs the runtime shared libs that
-        #                       vhs's bundled (go-rod) chromium needs
-        #                       (libatk, libnss, libgbm, libgtk, ...).
-        # chromium-sandbox    — setuid sandbox helper; chromium uses
-        #                       it as a fallback when unprivileged
-        #                       user namespaces aren't available.
-        #                       GHA ubuntu-latest does have userns
-        #                       enabled, but installing the helper
-        #                       costs nothing and makes the workflow
-        #                       robust to changes in runner image
-        #                       defaults.
+        #
+        # The remaining libs are chromium's runtime shared-library set.
+        # vhs's go-rod downloads its own headless-chromium binary to
+        # ~/.cache/rod/; that binary still needs the standard chromium
+        # / Playwright shared-lib set at runtime.
+        #
+        # Why not just `apt install chromium`? `ubuntu-latest` on
+        # GitHub Actions is Ubuntu 24.04 (noble), where chromium is
+        # only available as a snap — the apt package no longer exists,
+        # and `chromium-sandbox` has no candidate either. Debian
+        # bookworm (the devcontainer base) still has apt chromium, so
+        # `.devcontainer/post-create.sh` uses the single-package path
+        # there. On noble we list the libs explicitly.
+        #
+        # The list matches Playwright's published `chromium` deps for
+        # ubuntu-24.04. Package names use the `t64` time-64-bit
+        # variants on noble; apt resolves the legacy names as aliases.
+        # No `chromium-sandbox` either — GHA runners aren't
+        # containerised, so unprivileged user namespaces are enabled
+        # by default and the setuid sandbox helper isn't needed.
         sudo apt-get install -y --no-install-recommends \
-            ffmpeg bsdmainutils chromium chromium-sandbox
+            ffmpeg bsdmainutils \
+            libnss3 libnspr4 \
+            libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 
     - name: Install ttyd ${{ inputs.ttyd-version }}
       shell: bash
