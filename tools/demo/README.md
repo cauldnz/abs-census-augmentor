@@ -105,8 +105,15 @@ is fragile — it relies on `bash.exe` and `ttyd.exe` being
 discoverable, which often hangs in initialisation. The Docker path
 bypasses every Windows-toolchain issue: the vhs image is Linux,
 all unix tooling Just Works, and the same `Dockerfile` reproduces
-identically on macOS / Linux / Windows / WSL / devcontainer. One
-workflow for whoever doesn't want vhs on their host.
+identically on macOS / Linux / Windows / WSL. One workflow for
+whoever doesn't want vhs on their host.
+
+> `--docker` is **host-only**. The devcontainer no longer mounts a
+> Docker / Podman socket (see `.devcontainer/README.md` "Why no
+> Docker socket?"). Inside the devcontainer, the `--local` path
+> with the natively-installed VHS is the only supported render
+> mode. To exercise the Dockerfile path, run `--docker` from the
+> host shell where your runtime CLI lives.
 
 ### Timing
 
