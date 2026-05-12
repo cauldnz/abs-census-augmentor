@@ -29,6 +29,8 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ._spec_loader import iter_specs_from_dir
+
 _log = logging.getLogger(__name__)
 
 
@@ -161,18 +163,16 @@ class FeatureRegistry:
 
     @classmethod
     def from_repo_specs(cls, features_dir: Path | None = None) -> FeatureRegistry:
+        """Discover every ``.md`` spec under ``features_dir``.
+
+        Skips leading-underscore filenames (templates) and logs+skips
+        any spec that fails to parse — see
+        :func:`census_augment._spec_loader.iter_specs_from_dir`.
+        """
         registry = cls()
         directory = features_dir or _default_features_dir()
-        if directory.is_dir():
-            for spec_path in sorted(directory.glob("*.md")):
-                if spec_path.name.startswith("_"):
-                    continue
-                try:
-                    spec = parse_feature_spec(spec_path)
-                except ValueError:
-                    _log.exception("Skipping invalid feature spec at %s", spec_path)
-                    continue
-                registry._by_id[spec.id] = spec
+        for spec in iter_specs_from_dir(directory, parse_feature_spec, label="feature spec"):
+            registry._by_id[spec.id] = spec
         return registry
 
     def list_features(self) -> list[FeatureSpec]:

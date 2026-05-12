@@ -24,7 +24,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from .._http_retry import retry_stream_get
+from ._xlsx_base import _AbsXlsxDataset
 
 _log = logging.getLogger(__name__)
 
@@ -53,10 +53,11 @@ _MONTH_TO_QUARTER: dict[str, str] = {
 }
 
 
-class DssDataSource:
+class DssDataSource(_AbsXlsxDataset):
     """Fetch + load the DSS Payment Demographic Data SA2 file.
 
-    Implements the :class:`DatasetFetcher` Protocol.
+    Implements the :class:`DatasetFetcher` Protocol via the shared
+    :class:`_AbsXlsxDataset` base.
 
     The ``release`` parameter accepts ``"latest"`` (default), or a
     ``"YYYY-Qn"`` string like ``"2025-Q4"``. Resolution picks the
@@ -65,6 +66,7 @@ class DssDataSource:
     """
 
     _label = "DSS payment demographics"
+    _cache_glob = "dss-*.xlsx"
 
     def __init__(
         self,
@@ -76,92 +78,25 @@ class DssDataSource:
         chunk_size: int = 256 * 1024,
         timeout: float = 60.0,
     ) -> None:
-        self._release_request = release
-        self._root = Path(root)
-        self._ckan_url = ckan_url
-        self._session = session if session is not None else requests.Session()
-        self._chunk_size = chunk_size
-        self._timeout = timeout
-        self._resolved_release: str | None = None
-        self._resolved_url: str | None = None
-
-    # ---- protocol -------------------------------------------------------
-
-    @property
-    def resolved_release(self) -> str:
-        if self._resolved_release is None:
-            self._resolve_release()
-        assert self._resolved_release is not None
-        return self._resolved_release
-
-    @property
-    def is_cached(self) -> bool:
-        # Cached if any release file exists; we can't be sure about a
-        # specific one without resolving release first.
-        if self._resolved_release is not None:
-            return self._xlsx_path.exists()
-        return self._root.exists() and any(self._root.glob("dss-*.xlsx"))
-
-    @property
-    def _xlsx_path(self) -> Path:
-        return self._root / f"dss-{self.resolved_release}.xlsx"
-
-    @property
-    def _parquet_path(self) -> Path:
-        return self._root / f"dss-{self.resolved_release}.parquet"
-
-    def fetch(self, refresh: bool = False) -> Path:
-        """Resolve release if needed, download XLSX if not cached.
-
-        Returns the local XLSX path.
-        """
-        self._resolve_release()
-        if self._xlsx_path.exists() and not refresh:
-            _log.debug("DSS cached at %s", self._xlsx_path)
-            return self._xlsx_path
-
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = self._xlsx_path.with_suffix(self._xlsx_path.suffix + ".tmp")
-        url = self._resolved_url or ""
-        _log.info(
-            "Downloading %s (%s) from %s",
-            self._label,
-            self.resolved_release,
-            url,
+        super().__init__(
+            release=release,
+            root=root,
+            session=session,
+            chunk_size=chunk_size,
+            timeout=timeout,
         )
-        with retry_stream_get(
-            self._session,
-            url,
-            timeout=self._timeout,
-            label=self._label,
-        ) as response:
-            response.raise_for_status()
-            with tmp.open("wb") as f:
-                for chunk in response.iter_content(chunk_size=self._chunk_size):
-                    if chunk:
-                        f.write(chunk)
-        tmp.replace(self._xlsx_path)
-        _log.info("Saved %s to %s", self._label, self._xlsx_path)
-        return self._xlsx_path
+        self._ckan_url = ckan_url
 
-    def load(self) -> pd.DataFrame:
-        """Return DataFrame indexed by ``sa2_code_2021``.
+    # ---- hooks ---------------------------------------------------------
 
-        Caches the parsed parquet alongside the XLSX. Adds a
-        ``release_quarter`` column carrying the release identifier so
-        downstream consumers can tell which quarter's snapshot they're
-        looking at.
-        """
-        if self._resolved_release is not None and self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
+    def _filename_stem(self, release: str) -> str:
+        return f"dss-{release}"
 
-        xlsx = self.fetch()
-        df = self._parse_xlsx(xlsx)
+    def _post_parse(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Tag rows with the release identifier so downstream consumers
+        # can tell which quarter's snapshot they're looking at.
         df["release_quarter"] = self.resolved_release
-        df.reset_index().to_parquet(self._parquet_path, index=False)
         return df
-
-    # ---- release resolution --------------------------------------------
 
     def _resolve_release(self) -> None:
         if self._resolved_release is not None:

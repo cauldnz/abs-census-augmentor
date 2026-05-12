@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from .._http_retry import retry_stream_get
+from ._xlsx_base import _AbsXlsxDataset
 
 _log = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ _TABLE1_SA2_NAME_COL = 9
 _TABLE1_FIRST_YEAR_COL = 10
 
 
-class ErpDataSource:
+class ErpDataSource(_AbsXlsxDataset):
     """Fetch + load ABS Regional Population (SA2 long-history series).
 
     Implements the :class:`DatasetFetcher` Protocol. ``release`` is the
@@ -59,6 +59,7 @@ class ErpDataSource:
     """
 
     _label = "ABS Regional Population SA2 (long history)"
+    _cache_glob = "erp-*.xlsx"
 
     def __init__(
         self,
@@ -70,88 +71,19 @@ class ErpDataSource:
         chunk_size: int = 256 * 1024,
         timeout: float = 60.0,
     ) -> None:
-        self._release_request = str(release)
-        self._root = Path(root)
-        self._landing_url = landing_url
-        self._session = session if session is not None else requests.Session()
-        self._chunk_size = chunk_size
-        self._timeout = timeout
-        self._resolved_release: str | None = None
-        self._resolved_url: str | None = None
-
-    # ---- protocol -------------------------------------------------------
-
-    @property
-    def resolved_release(self) -> str:
-        if self._resolved_release is None:
-            self._resolve_release()
-        assert self._resolved_release is not None
-        return self._resolved_release
-
-    @property
-    def is_cached(self) -> bool:
-        if self._resolved_release is not None:
-            return self._xlsx_path.exists()
-        return self._root.exists() and any(self._root.glob("erp-*.xlsx"))
-
-    @property
-    def _xlsx_path(self) -> Path:
-        return self._root / f"erp-sa2-{self.resolved_release}.xlsx"
-
-    @property
-    def _parquet_path(self) -> Path:
-        return self._root / f"erp-sa2-{self.resolved_release}.parquet"
-
-    def fetch(self, refresh: bool = False) -> Path:
-        self._resolve_release()
-        if self._xlsx_path.exists() and not refresh:
-            _log.debug("ERP cached at %s", self._xlsx_path)
-            return self._xlsx_path
-
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = self._xlsx_path.with_suffix(self._xlsx_path.suffix + ".tmp")
-        url = self._resolved_url or ""
-        _log.info(
-            "Downloading %s (%s) from %s",
-            self._label,
-            self.resolved_release,
-            url,
+        super().__init__(
+            release=str(release),
+            root=root,
+            session=session,
+            chunk_size=chunk_size,
+            timeout=timeout,
         )
-        with retry_stream_get(
-            self._session,
-            url,
-            timeout=self._timeout,
-            label=self._label,
-        ) as response:
-            response.raise_for_status()
-            with tmp.open("wb") as f:
-                for chunk in response.iter_content(chunk_size=self._chunk_size):
-                    if chunk:
-                        f.write(chunk)
-        tmp.replace(self._xlsx_path)
-        _log.info("Saved %s to %s", self._label, self._xlsx_path)
-        return self._xlsx_path
+        self._landing_url = landing_url
 
-    def load(self) -> pd.DataFrame:
-        """Return SA2-keyed DataFrame.
+    # ---- hooks ---------------------------------------------------------
 
-        Columns:
-
-        - ``population_total`` — latest available year's ERP.
-        - ``reference_year`` — the year ``population_total`` is for.
-        - ``population_history_<year>`` — population estimates per year
-          back to 2001 (one column per year).
-        - ``state_abbreviation`` — copied from the source's S/T name.
-        """
-        if self._resolved_release is not None and self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
-
-        xlsx = self.fetch()
-        df = self._parse_xlsx(xlsx)
-        df.reset_index().to_parquet(self._parquet_path, index=False)
-        return df
-
-    # ---- release resolution --------------------------------------------
+    def _filename_stem(self, release: str) -> str:
+        return f"erp-sa2-{release}"
 
     def _resolve_release(self) -> None:
         if self._resolved_release is not None:
