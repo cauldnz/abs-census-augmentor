@@ -9,6 +9,53 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Removed — Host Docker socket bind from the devcontainer
+
+`.devcontainer/devcontainer.json` no longer enables the
+`ghcr.io/devcontainers/features/docker-outside-of-docker` feature.
+The devcontainer is now host-runtime agnostic — it works under
+Docker Desktop, Podman Desktop, Colima, etc., with no project-side
+changes.
+
+**Why.** The socket was only ever load-bearing for one path:
+`./tools/demo/render.sh --docker` invoked from inside the
+devcontainer. Nothing in `src/`, the 515+ hermetic tests, or
+`.github/workflows/test.yml` talks to Docker at all. The render
+script's default inside the devcontainer is `--local` (native VHS
+installed by `post-create.sh`), so the socket sat unused under the
+common workflow. Meanwhile, hard-coding `/var/run/docker.sock`
+broke under Podman Desktop — the host socket lives elsewhere and
+the bind created an empty socket file that produced confusing
+`docker: connection refused` errors.
+
+**Trade-off.** From inside the devcontainer,
+`./tools/demo/render.sh --docker` now fails with "Docker isn't
+reachable". This is intentional — that mode is a maintainer-only
+diagnostic for testing `tools/demo/Dockerfile`, and a maintainer
+doing that can run it from the host shell where Docker / Podman /
+Colima already live.
+
+**Verification.** Inside the rebuilt devcontainer, `command -v docker`
+returns nothing and `./tools/demo/render.sh` (default `--local`)
+still produces working GIFs. The `.devcontainer/README.md` has a
+new "Why no Docker socket?" section spelling this out; spec.md §14
+records the decision as #33.
+
+This builds on the earlier `[Unreleased]` "Podman Desktop noted as
+a Docker Desktop alternative" entry — that one added the host-side
+guidance; this one drops the now-unnecessary feature.
+
+### Docs — Podman Desktop noted as a Docker Desktop alternative
+
+`.devcontainer/README.md` now lists Podman Desktop as a supported
+host container runtime alongside Docker Desktop. Same
+`devcontainer.json`, no project-side changes — point VSCode's Dev
+Containers extension at the Podman socket. New "Podman Desktop"
+section covers the `dev.containers.dockerPath` setting, the rootless
+seccomp/userns posture, and the one host sysctl
+(`kernel.unprivileged_userns_clone`) to check if chromium sandbox
+complains under rootless mode.
+
 ### Changed — Docs restructure: README as sales pitch, handbook in `docs/` (closes #46)
 
 `README.md` is now ~120 lines — the elevator pitch, the three demo

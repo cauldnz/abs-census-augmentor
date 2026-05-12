@@ -39,10 +39,12 @@ print(f'  features: {len(features.list_features())} PRESETs')
 #   trigger 'dubious ownership' warnings).
 git config --global --add safe.directory "$(pwd)"
 
-# Install VHS + its runtime deps so `tools/demo/render.sh --local`
-# can render demo GIFs natively from inside the devcontainer
-# (avoiding the docker-in-docker round-trip through the host's
-# Docker socket). Idempotent — skipped if vhs is already on PATH.
+# Install VHS + its runtime deps so `tools/demo/render.sh` can
+# render demo GIFs natively from inside the devcontainer. This is
+# the only supported render path from inside the container — the
+# `--docker` mode is host-only since the devcontainer no longer
+# mounts a Docker socket (see spec.md §14 #33). Idempotent —
+# skipped if vhs is already on PATH.
 #
 # Notes on what apt vs. GitHub-release installs:
 #
@@ -101,7 +103,8 @@ if ! command -v vhs >/dev/null 2>&1; then
             ;;
         *)
             echo "  WARNING: unknown arch $arch; skipping VHS install." \
-                 "render.sh will fall back to Docker." >&2
+                 "render.sh inside the devcontainer will not work; render" \
+                 "from the host instead." >&2
             arch=""
             ;;
     esac
@@ -139,5 +142,4 @@ fi
 echo
 echo "==> Devcontainer ready."
 echo "   Run 'uv run pytest' to verify the full suite."
-echo "   Run 'tools/demo/render.sh' to render a demo GIF (uses local vhs"
-echo "        if available, else falls back to host Docker)."
+echo "   Run 'tools/demo/render.sh' to render a demo GIF (native vhs)."
