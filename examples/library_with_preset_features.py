@@ -5,7 +5,7 @@ PRESET features are curated ratios (``pct_renters``, ``pct_drive_to_work``,
 right denominator pre-baked. v1.3 shipped them as a standalone
 ``FeatureEvaluator``; v1.4 wires ``PRESET.<id>`` into the pipeline as
 a first-class variable namespace alongside ``G\\d+.<col>``,
-``SEIFA.<field>``, ``ERP.<field>``, ``DSS.<field>``, and ``ATO.<field>``.
+``SEIFA.<field>``, ``ERP.<field>``, ``DSS.<field>``, and ``ABS_PIA.<field>``.
 
 You no longer need to request the underlying GCP source columns yourself
 or apply ``FeatureEvaluator`` manually — the pipeline auto-loads the

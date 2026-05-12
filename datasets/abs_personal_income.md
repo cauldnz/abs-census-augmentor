@@ -1,5 +1,5 @@
 ---
-id: ato_personal_income
+id: abs_personal_income
 name: ABS Personal Income in Australia by SA2
 status: proposed
 custodian: Australian Bureau of Statistics (sourced from ATO administrative data)
@@ -12,7 +12,7 @@ join_key: sa2_code_2021
 landing_page: https://www.abs.gov.au/statistics/labour/earnings-and-working-conditions/personal-income-australia
 fetch_size_compressed: ~4 MB
 tags: [income, employment, administrative-data]
-namespace: ATO
+namespace: ABS_PIA
 temporal:
   cadence: annual
   cover_basis: financial_year_ending
@@ -78,15 +78,15 @@ current ASGS via concordance.
 
 | Variable | Type | Description |
 |---|---|---|
-| `ATO.median_total_income` | float | Median total income across persons in SA2 ($) |
-| `ATO.mean_total_income` | float | Mean total income ($) |
-| `ATO.median_employee_income` | float | Median employee income ($) |
-| `ATO.median_investment_income` | float | Median investment income ($) — many people have $0 here |
-| `ATO.median_super_income` | float | Median superannuation income ($) |
-| `ATO.median_own_business_income` | float | Median income from own unincorporated business ($) |
-| `ATO.gini_coefficient` | float | Gini coefficient of total income within the SA2 |
-| `ATO.income_earners_count` | int | Number of income earners (people who lodged a return with non-zero income) |
-| `ATO.reference_financial_year` | str | Reference period (e.g. "2022-23") |
+| `ABS_PIA.median_total_income` | float | Median total income across persons in SA2 ($) |
+| `ABS_PIA.mean_total_income` | float | Mean total income ($) |
+| `ABS_PIA.median_employee_income` | float | Median employee income ($) |
+| `ABS_PIA.median_investment_income` | float | Median investment income ($) — many people have $0 here |
+| `ABS_PIA.median_super_income` | float | Median superannuation income ($) |
+| `ABS_PIA.median_own_business_income` | float | Median income from own unincorporated business ($) |
+| `ABS_PIA.gini_coefficient` | float | Gini coefficient of total income within the SA2 |
+| `ABS_PIA.income_earners_count` | int | Number of income earners (people who lodged a return with non-zero income) |
+| `ABS_PIA.reference_financial_year` | str | Reference period (e.g. "2022-23") |
 
 ## Fetch notes
 
@@ -110,7 +110,7 @@ current ASGS via concordance.
   as a feature for completeness).
 - `pct_high_income_earners` — would need ATO income-band data, which is in
   a separate workbook; not in v1 scope.
-- `census_vs_ato_income_ratio` — ATO.median_total_income / (G02.Median_tot_hhd_inc_weekly × 52).
+- `census_vs_ato_income_ratio` — ABS_PIA.median_total_income / (G02.Median_tot_hhd_inc_weekly × 52).
   Useful diagnostic — if much greater than 1, the SA2 has substantial income
   invisible to Census self-report (high-income tail or significant non-employee
   income).

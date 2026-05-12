@@ -9,6 +9,37 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase C — Rename `ato_personal_income` → `abs_personal_income` (BREAKING)
+
+The dataset we called `ato_personal_income` (with namespace `ATO`)
+since v1.3 was always a misnomer. What it actually fetches is **ABS
+catalogue 6524.0.55.002 "Personal Income in Australia"**, a
+LEED-derived ABS product that uses ATO administrative data as one
+input. It is **not** ATO Taxation Statistics. Surfaced during
+temporal-spec research; fixed here while the surface area is small.
+
+**Breaking changes:**
+
+- Dataset id: `ato_personal_income` → `abs_personal_income`.
+- Variable namespace: `ATO` → `ABS_PIA`. Users with `variables: {foo:
+  ATO.bar}` must update to `ABS_PIA.bar`.
+- Cache directory: `<data_dir>/ato_personal_income/` →
+  `<data_dir>/abs_personal_income/`. Filenames in the cache also
+  change (`ato-personal-income-{release}.xlsx` →
+  `abs-personal-income-{release}.xlsx`).
+- Module path: `census_augment.datasets._ato` →
+  `census_augment.datasets._abs_pia`.
+- Class name: `AtoDataSource` → `AbsPiaDataSource`.
+
+**To migrate:** in your config(s), replace `ATO.<field>` references
+with `ABS_PIA.<field>` and run `census-augment fetch --refresh` (or
+just delete `<data_dir>/ato_personal_income/`; the new cache lands
+on next run).
+
+The dataset's *content* is unchanged — same SA2 codes, same
+columns, same upstream URL pattern. This rename is purely about
+calling the thing what it actually is.
+
 ### Temporal Phase B — Per-dataset `temporal:` metadata blocks
 
 Adds the schema layer the upcoming temporal-mode pipeline (see

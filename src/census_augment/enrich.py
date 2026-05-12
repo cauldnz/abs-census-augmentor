@@ -6,7 +6,7 @@ The variable string's namespace tells us which dataset provides it:
 - ``G\\d+.<col>`` → ``gcp_2021`` dataset (existing GCP path via
   :class:`VariableCatalog` + :class:`DataPacksDataSource`).
 - ``SEIFA.<field>``, ``ERP.<field>``, ``DSS.<field>``,
-  ``ATO.<field>`` → the corresponding registered dataset's fetcher.
+  ``ABS_PIA.<field>`` → the corresponding registered dataset's fetcher.
 
 v1.4 adds first-class PRESET integration: variables of the form
 ``PRESET.<id>`` are looked up in the :class:`FeatureRegistry`,
