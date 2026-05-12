@@ -9,6 +9,56 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — CI demo rendering (closes #38)
+
+Two new GitHub Actions workflows under `.github/workflows/`:
+
+- **`demo-render.yml`** — triggered on PRs that touch the tapes, the
+  CLI / pipeline / enricher, the registered dataset / PRESET specs,
+  or either workflow file. Renders every tape via the same
+  `tools/demo/render.sh --local --all` path the devcontainer uses,
+  refreshes the README scene strips, and uploads the resulting
+  `docs/*.gif` + `docs/frames/*.png` as a `demo-renders` artifact
+  (14-day retention). Reviewers download it to see the visual delta a
+  PR would land. Nothing gets committed by this workflow.
+- **`demo-publish.yml`** — manual `workflow_dispatch` only; renders
+  on the latest `main` and pushes the refreshed demo assets + any
+  README scene-strip change back to `main` as a
+  `github-actions[bot]` commit. Use this to land a refresh of the
+  committed demo assets without authoring a PR — e.g. after an ABS
+  data update or a tape edit whose render-validation PR has
+  already merged.
+
+Both workflows share a composite action,
+`.github/actions/install-render-deps/`, that installs `ffmpeg`,
+chromium's runtime shared-library set (`libnss3`, `libatk1.0-0t64`,
+`libgbm1`, etc. — `chromium` itself doesn't have an apt package on
+Ubuntu 24.04 noble, where `ubuntu-latest` resolves; vhs's go-rod
+downloads its own headless-chromium binary to `~/.cache/rod/`),
+`ttyd`, and `vhs`. Pinned versions for `ttyd` and `vhs` match
+`.devcontainer/post-create.sh` so the devcontainer (Debian bookworm,
+where `apt install chromium` works) and CI render with the same
+toolchain — bumping one means bumping the other.
+
+**Settled design choices** (from issue #38's "Open questions"):
+
+- *Trigger filter for PR runs.* Path-filtered to the asset / source
+  files that actually affect the demos. Saves CI minutes on docs-only
+  and unrelated-source PRs while still catching every CLI-rename-
+  broke-the-demo case.
+- *ABS cache strategy.* No `actions/cache` for the ABS data. Each
+  run re-fetches; an ABS upstream change becomes a CI signal rather
+  than going silently stale behind a cached layer. Whole render is
+  ~5-7 min — well within reason.
+- *`demo-publish.yml` push mechanics.* Default `GITHUB_TOKEN` with
+  `contents: write` scoped only to the publish workflow. No PAT, no
+  GitHub App. Bot author keeps the audit trail clean. Workflow
+  guards on `github.ref == 'refs/heads/main'` so it can't render an
+  unmerged branch onto `main`.
+- *Schedule.* None. Manual `workflow_dispatch` is the only trigger
+  for publish — refreshes happen when a maintainer explicitly asks
+  for them.
+
 ### Tier 3 tidy-up
 
 Three independent chores bundled into one PR:

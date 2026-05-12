@@ -1,0 +1,73 @@
+# Composite action: install the runtime deps `tools/demo/render.sh --local`
+# needs (ffmpeg + bsdmainutils + chromium + chromium-sandbox via apt;
+# ttyd + vhs from GitHub releases). Shared between `demo-render.yml`
+# and `demo-publish.yml`.
+#
+# Versions are pinned to match `.devcontainer/post-create.sh` so the
+# devcontainer and CI render with the same toolchain — bumping either
+# means bumping both.
+#
+# Designed for ubuntu-latest x86_64. arm64 needs different ttyd/vhs
+# asset names; we don't run CI on arm64 today so that branch is
+# omitted.
+
+name: Install render deps
+description: Install ffmpeg, chromium, ttyd, and vhs for `render.sh --local`.
+
+inputs:
+  ttyd-version:
+    description: ttyd release tag (e.g. "1.7.7")
+    required: false
+    default: "1.7.7"
+  vhs-version:
+    description: vhs release version (e.g. "0.11.0")
+    required: false
+    default: "0.11.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Install apt deps (ffmpeg, chromium, sandbox helper, column)
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        # ffmpeg              — vhs encodes captured frames to GIF.
+        # bsdmainutils        — provides `column`, used by demo tapes.
+        # chromium            — installs the runtime shared libs that
+        #                       vhs's bundled (go-rod) chromium needs
+        #                       (libatk, libnss, libgbm, libgtk, ...).
+        # chromium-sandbox    — setuid sandbox helper; chromium uses
+        #                       it as a fallback when unprivileged
+        #                       user namespaces aren't available.
+        #                       GHA ubuntu-latest does have userns
+        #                       enabled, but installing the helper
+        #                       costs nothing and makes the workflow
+        #                       robust to changes in runner image
+        #                       defaults.
+        sudo apt-get install -y --no-install-recommends \
+            ffmpeg bsdmainutils chromium chromium-sandbox
+
+    - name: Install ttyd ${{ inputs.ttyd-version }}
+      shell: bash
+      run: |
+        TTYD_VERSION="${{ inputs.ttyd-version }}"
+        # ttyd ships a single static binary per arch on each GitHub
+        # release. Not in Debian/Ubuntu apt — that's the entire reason
+        # we curl it.
+        curl -fsSL \
+            "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
+            -o /tmp/ttyd
+        sudo install -m 0755 /tmp/ttyd /usr/local/bin/ttyd
+        ttyd --version
+
+    - name: Install vhs ${{ inputs.vhs-version }}
+      shell: bash
+      run: |
+        VHS_VERSION="${{ inputs.vhs-version }}"
+        # vhs is a tarball with the binary inside. Same GitHub-release
+        # pattern as ttyd.
+        curl -fsSL \
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz" \
+            | tar xz -C /tmp
+        sudo install -m 0755 /tmp/vhs_*/vhs /usr/local/bin/vhs
+        vhs --version
