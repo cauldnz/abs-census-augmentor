@@ -13,6 +13,14 @@ from ._base import _AbsZipDataSource
 
 _log = logging.getLogger(__name__)
 
+# Feather sidecar next to the .shp. Reading the 50 MB ASGS SA2
+# shapefile via geopandas/pyogrio takes ~1.3 s on a fast NVMe and
+# proportionally more under bind-mounted filesystems (issue #43).
+# Reading the same GeoDataFrame back from feather is ~10x faster.
+# Keyed on the .shp mtime — refreshing the source bumps the mtime
+# and invalidates the cache automatically.
+_BOUNDARIES_FEATHER_SUFFIX = ".feather"
+
 
 class BoundariesDataSource(_AbsZipDataSource):
     """Download, extract, and load the ASGS boundary Shapefile.
@@ -89,6 +97,54 @@ class BoundariesDataSource(_AbsZipDataSource):
         return shp
 
     def load(self, refresh: bool = False) -> gpd.GeoDataFrame:
-        """Fetch (if needed) and load as a GeoDataFrame."""
+        """Fetch (if needed) and load as a GeoDataFrame.
+
+        Caches the loaded GeoDataFrame as a feather sidecar next to the
+        .shp on first call (see :data:`_BOUNDARIES_FEATHER_SUFFIX`).
+        Subsequent calls read the much-faster feather. The .shp mtime
+        is the cache key — ``refresh=True`` triggers re-extract, which
+        bumps the mtime and so invalidates the cache.
+        """
         shp = self.fetch(refresh=refresh)
-        return gpd.read_file(shp)
+        feather_path = shp.with_suffix(_BOUNDARIES_FEATHER_SUFFIX)
+        cached = _try_read_feather_cache(feather_path, shp)
+        if cached is not None:
+            return cached
+        gdf = gpd.read_file(shp)
+        _try_write_feather_cache(feather_path, gdf)
+        return gdf
+
+
+def _try_read_feather_cache(feather_path: Path, shp: Path) -> gpd.GeoDataFrame | None:
+    """Return the cached GeoDataFrame if newer than ``shp``; else ``None``.
+
+    Silent failure on any read error — fall back to reading the .shp.
+    """
+    if not feather_path.exists():
+        return None
+    try:
+        if feather_path.stat().st_mtime < shp.stat().st_mtime:
+            return None
+        return gpd.read_feather(feather_path)
+    except (OSError, Exception) as e:  # noqa: BLE001 — feather/pyarrow can raise many things
+        _log.debug("Ignoring boundary feather cache at %s: %s", feather_path, e)
+        return None
+
+
+def _try_write_feather_cache(feather_path: Path, gdf: gpd.GeoDataFrame) -> None:
+    """Atomically write the feather sidecar.
+
+    Silent on any write failure — caching is an optimisation, not a
+    correctness requirement. Atomic-rename so a partial write never
+    gets read back as valid.
+    """
+    tmp_path = feather_path.with_suffix(feather_path.suffix + ".tmp")
+    try:
+        gdf.to_feather(tmp_path)
+        tmp_path.replace(feather_path)
+    except (OSError, Exception) as e:  # noqa: BLE001 — feather/pyarrow can raise many things
+        _log.debug("Could not write boundary feather cache to %s: %s", feather_path, e)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
