@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -15,6 +16,15 @@ from ..config import CensusConfig
 from ._base import _AbsZipDataSource
 
 _log = logging.getLogger(__name__)
+
+# Pickle suffix for the per-xlsx parsed-metadata cache.
+# Parsing the 119-table descriptor sheet via openpyxl takes ~1.8 s on a
+# fast NVMe and proportionally more under bind-mounted filesystems
+# (issue #43). The parsed result is a small (~6 kB) dict of dataclasses
+# that pickles in ~50 ms, so we cache it next to the xlsx and re-use on
+# any subsequent load. The xlsx mtime is the cache key — bumping it
+# (via `fetch(refresh=True)`) invalidates the cache automatically.
+_METADATA_CACHE_SUFFIX = ".parsed.pkl"
 
 # Filename pattern matchers for table CSVs (e.g. G01, G02, G09A)
 _TABLE_ID_PATTERN = re.compile(r"^G\d+[A-Z]?$")
@@ -184,6 +194,12 @@ class DataPacksDataSource(_AbsZipDataSource):
 
         Uses the descriptor mode from ``self._census.descriptor`` to choose
         which descriptor-sheet column maps to the user-facing code.
+
+        Caches the parsed result to ``<xlsx>.parsed.pkl`` next to the
+        descriptor xlsx so subsequent loads skip the openpyxl parse — see
+        :data:`_METADATA_CACHE_SUFFIX` for the rationale. ``refresh=True``
+        re-runs ``fetch`` which bumps the xlsx mtime and so invalidates
+        the cache.
         """
         self.fetch(refresh=refresh)
         xlsx = self._metadata_xlsx()
@@ -192,7 +208,13 @@ class DataPacksDataSource(_AbsZipDataSource):
                 f"No metadata .xlsx file (matching {_METADATA_FILENAME_PATTERN.pattern}) "
                 f"found in {self.extract_dir}; DataPack layout may have changed."
             )
-        return _parse_metadata_xlsx(xlsx, descriptor=self._census.descriptor)
+        descriptor = self._census.descriptor
+        cached = _load_metadata_cache(xlsx, descriptor=descriptor)
+        if cached is not None:
+            return cached
+        metadata = _parse_metadata_xlsx(xlsx, descriptor=descriptor)
+        _save_metadata_cache(xlsx, descriptor=descriptor, metadata=metadata)
+        return metadata
 
     # ---- internals -------------------------------------------------------
 
@@ -287,6 +309,69 @@ def _parse_metadata_xlsx(xlsx: Path, descriptor: str) -> DataPackMetadata:
             for tid, cols in tables_cols.items()
         }
     )
+
+
+def _metadata_cache_path(xlsx: Path, descriptor: str) -> Path:
+    """Pickle cache path next to the descriptor xlsx.
+
+    Keyed by descriptor mode in the filename — switching from
+    ``short-header`` to ``long-header`` picks a different code column,
+    so the parsed result is mode-specific. Keeping the mode in the
+    cache filename means each mode gets its own cache and we never
+    have to worry about cross-mode invalidation.
+    """
+    return xlsx.with_name(xlsx.name + f".{descriptor}{_METADATA_CACHE_SUFFIX}")
+
+
+def _load_metadata_cache(xlsx: Path, *, descriptor: str) -> DataPackMetadata | None:
+    """Return cached metadata if newer than ``xlsx``; else ``None``.
+
+    Silent failure: a corrupt pickle, a pickle from an older incompatible
+    schema, or any unpickling error just returns ``None`` and lets the
+    caller re-parse from xlsx. The cache is regenerated lazily.
+    """
+    cache_path = _metadata_cache_path(xlsx, descriptor)
+    if not cache_path.exists():
+        return None
+    try:
+        if cache_path.stat().st_mtime < xlsx.stat().st_mtime:
+            # xlsx newer than cache — cache is stale, ignore.
+            return None
+        with cache_path.open("rb") as fh:
+            obj = pickle.load(fh)
+    except (OSError, pickle.UnpicklingError, EOFError, AttributeError) as e:
+        _log.debug("Ignoring corrupt metadata cache at %s: %s", cache_path, e)
+        return None
+    if not isinstance(obj, DataPackMetadata):
+        _log.debug(
+            "Ignoring metadata cache at %s: expected DataPackMetadata, got %s",
+            cache_path,
+            type(obj).__name__,
+        )
+        return None
+    return obj
+
+
+def _save_metadata_cache(xlsx: Path, *, descriptor: str, metadata: DataPackMetadata) -> None:
+    """Atomically write the metadata cache next to ``xlsx``.
+
+    Atomic-rename so a partially written cache never gets read back as
+    valid. Silent on any write failure — the cache is an optimisation,
+    not a correctness requirement.
+    """
+    cache_path = _metadata_cache_path(xlsx, descriptor)
+    tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    try:
+        with tmp_path.open("wb") as fh:
+            pickle.dump(metadata, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp_path.replace(cache_path)
+    except OSError as e:
+        _log.debug("Could not write metadata cache to %s: %s", cache_path, e)
+        # Best-effort cleanup of the tmp file.
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _select_sheet(

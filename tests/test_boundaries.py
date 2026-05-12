@@ -186,3 +186,103 @@ def test_no_tmp_file_remains_after_successful_fetch(
 
     leftover = list(ds._root.glob("*.tmp"))
     assert leftover == []
+
+
+# ---------- feather cache (issue #43) ----------
+
+
+@responses.activate
+def test_load_writes_feather_cache(tmp_path: Path, fake_boundary_zip_bytes: bytes) -> None:
+    """First load writes a `<shp>.feather` sidecar next to the .shp."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    ds.load()
+
+    shp = ds.shapefile_path
+    assert shp is not None
+    feather = shp.with_suffix(".feather")
+    assert feather.exists(), "Feather sidecar should have been written"
+    # Sanity: feather round-trips to a usable GeoDataFrame.
+    cached = gpd.read_feather(feather)
+    assert len(cached) == 3
+    assert "SA2_CODE21" in cached.columns
+
+
+@responses.activate
+def test_load_uses_feather_cache_on_second_call(
+    tmp_path: Path, fake_boundary_zip_bytes: bytes
+) -> None:
+    """Second load reads from the feather, not the .shp."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    first = ds.load()
+    shp = ds.shapefile_path
+    assert shp is not None
+
+    # Corrupt the .shp. If the second load went back to the shapefile,
+    # it would fail; using the feather cache keeps it working.
+    shp.write_bytes(b"not a real shp")
+    # Make sure the feather is still newer than the (just-touched) .shp.
+    feather = shp.with_suffix(".feather")
+    import os
+
+    os.utime(feather, None)
+
+    second = ds.load()
+    assert len(second) == len(first)
+    assert list(second.columns) == list(first.columns)
+
+
+@responses.activate
+def test_feather_cache_invalidated_when_shp_newer(
+    tmp_path: Path, fake_boundary_zip_bytes: bytes
+) -> None:
+    """When the .shp is newer than the cache, we ignore the cache."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    ds.load()  # populates cache
+
+    shp = ds.shapefile_path
+    assert shp is not None
+    feather = shp.with_suffix(".feather")
+
+    # Backdate the feather so the .shp is "newer".
+    import os
+
+    old_mtime = shp.stat().st_mtime - 60
+    os.utime(feather, (old_mtime, old_mtime))
+
+    # Corrupt the cache content too — it should never be read.
+    feather.write_bytes(b"corrupt")
+    os.utime(feather, (old_mtime, old_mtime))
+
+    gdf = ds.load()  # re-reads from .shp, doesn't raise
+    assert len(gdf) == 3
+    assert "SA2_CODE21" in gdf.columns
+
+
+@responses.activate
+def test_feather_cache_corrupt_falls_back_to_shp(
+    tmp_path: Path, fake_boundary_zip_bytes: bytes
+) -> None:
+    """Garbage feather is silently ignored; we fall back to the .shp."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    ds.load()  # populates cache
+    shp = ds.shapefile_path
+    assert shp is not None
+    feather = shp.with_suffix(".feather")
+
+    # Corrupt the feather but keep it newer than the .shp. The only
+    # invalidation signal should be the read failure.
+    feather.write_bytes(b"\x00not-real-feather-bytes")
+    import os
+
+    os.utime(feather, None)
+
+    gdf = ds.load()  # falls back to read_file, doesn't raise
+    assert len(gdf) == 3

@@ -9,6 +9,46 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Performance — Parsed-result caches collapse warm-cache run from 5.4s to 2.2s (closes #43)
+
+Two sidecar caches now sit next to the heaviest parsed artefacts and
+short-circuit subsequent loads:
+
+- **`<metadata-xlsx>.<descriptor>.parsed.pkl`** next to the DataPack
+  metadata Excel. The descriptor sheet's 119-table walk via openpyxl
+  takes ~1.8 s on a fast NVMe and proportionally more under
+  bind-mounted filesystems. The parsed result is a small (~6 kB)
+  dict-of-dataclasses that pickles in ~50 ms.
+- **`<boundary>.feather`** next to the ASGS SA2 `.shp`. Reading the
+  ~50 MB shapefile via geopandas/pyogrio takes ~1.3 s on Windows
+  native; reading the GeoDataFrame back from feather is ~6x faster.
+
+Both caches are keyed on the source file's mtime — `fetch(refresh=True)`
+re-extracts the underlying ZIPs, bumps the source mtimes, and the
+caches invalidate automatically. Corrupt or schema-mismatched caches
+are silently ignored; the parser falls back to the canonical source
+and overwrites the cache.
+
+**Measured warm-cache `census-augment run` on Windows (`tools/demo/config.yaml`):**
+
+| Phase | Before | After (warm cache) |
+|---|---|---|
+| import | 2.05 s | 1.74 s |
+| boundaries.load | 1.28 s | 0.20 s (-84%) |
+| datapacks.metadata | 1.82 s | 0.10 s (-94%) |
+| augment | 0.22 s | 0.10 s |
+| **TOTAL** | **5.40 s** | **2.15 s (-60%)** |
+
+In the dev container's bind-mounted workspace (where the original
+35 s symptom was measured) the same proportional drops apply to the
+two file-reading phases, so the run time should fall by ~10-15 s.
+Demo tape Sleeps can drop accordingly on the next render. The
+remaining floor (`import` + irreducible parquet/feather I/O) is
+~2 s — dominated by Python's pandas/geopandas/shapely import cost.
+
+`tools/profile_run.py` is a small per-phase profiler that produced
+these numbers; check it in for future perf regressions.
+
 ### Added — CI demo rendering (closes #38)
 
 Two new GitHub Actions workflows under `.github/workflows/`:

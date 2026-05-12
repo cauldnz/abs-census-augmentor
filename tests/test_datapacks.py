@@ -465,3 +465,122 @@ def test_zip_with_no_csvs_raises(tmp_path: Path) -> None:
     ds = _make_data_source(tmp_path)
     with pytest.raises(RuntimeError, match="No table CSVs"):
         ds.fetch()
+
+
+# ---------- metadata cache (issue #43) ----------
+
+
+@responses.activate
+def test_load_metadata_writes_pickle_cache(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
+    """First load_metadata writes a `<xlsx>.<mode>.parsed.pkl` sidecar."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    metadata = ds.load_metadata()
+
+    xlsx = ds._metadata_xlsx()
+    assert xlsx is not None
+    cache_path = xlsx.with_name(xlsx.name + ".short-header.parsed.pkl")
+    assert cache_path.exists(), "Cache sidecar should have been written"
+    # Cache should round-trip to the same DataPackMetadata.
+    import pickle
+
+    with cache_path.open("rb") as fh:
+        cached = pickle.load(fh)
+    assert isinstance(cached, DataPackMetadata)
+    assert set(cached.tables.keys()) == set(metadata.tables.keys())
+
+
+@responses.activate
+def test_load_metadata_uses_cache_on_second_call(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """Second load_metadata reads from the pickle, not the xlsx."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    first = ds.load_metadata()
+
+    # Sentinel: replace the xlsx with garbage. If the cache is actually
+    # used, the second call still succeeds. If we fell through to the
+    # xlsx parser, this would raise.
+    xlsx = ds._metadata_xlsx()
+    assert xlsx is not None
+    xlsx.write_bytes(b"not a real xlsx")
+    # Restore the cache's mtime so it stays newer than the (just-touched)
+    # xlsx — emulates the natural case where the cache was written after
+    # the xlsx was extracted.
+    cache_path = xlsx.with_name(xlsx.name + ".short-header.parsed.pkl")
+    import os
+
+    os.utime(cache_path, None)  # bump to now, which is >= xlsx's mtime
+
+    second = ds.load_metadata()
+    assert set(second.tables.keys()) == set(first.tables.keys())
+
+
+@responses.activate
+def test_metadata_cache_invalidated_when_xlsx_newer(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """If the xlsx mtime is newer than the cache, the cache is ignored."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    ds.load_metadata()  # populates cache
+
+    xlsx = ds._metadata_xlsx()
+    assert xlsx is not None
+    cache_path = xlsx.with_name(xlsx.name + ".short-header.parsed.pkl")
+
+    # Backdate the cache so the xlsx is "newer".
+    import os
+
+    old_mtime = xlsx.stat().st_mtime - 60
+    os.utime(cache_path, (old_mtime, old_mtime))
+
+    # Corrupt the cache file content too — it should never be read.
+    cache_path.write_bytes(b"corrupt")
+
+    # Should not raise; re-parses from xlsx.
+    metadata = ds.load_metadata()
+    assert "G01" in metadata.tables
+
+
+@responses.activate
+def test_metadata_cache_corrupt_pickle_falls_back_to_xlsx(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """A garbage pickle is silently ignored and the xlsx is re-parsed."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
+    ds = _make_data_source(tmp_path)
+
+    ds.load_metadata()  # populates cache
+    xlsx = ds._metadata_xlsx()
+    assert xlsx is not None
+    cache_path = xlsx.with_name(xlsx.name + ".short-header.parsed.pkl")
+
+    # Corrupt the cache but keep it newer than the xlsx — the only
+    # signal that should invalidate it is the unpickle failure.
+    cache_path.write_bytes(b"\x80\x04not-real-pickle-bytes")
+
+    metadata = ds.load_metadata()
+    assert "G01" in metadata.tables  # re-parsed from xlsx, didn't raise
+
+
+@responses.activate
+def test_metadata_cache_keyed_by_descriptor_mode(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """Switching descriptor mode uses a separate cache file."""
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
+
+    short_ds = _make_data_source(tmp_path, descriptor="short-header")
+    short_ds.load_metadata()
+
+    xlsx = short_ds._metadata_xlsx()
+    assert xlsx is not None
+    short_cache = xlsx.with_name(xlsx.name + ".short-header.parsed.pkl")
+    long_cache = xlsx.with_name(xlsx.name + ".long-header.parsed.pkl")
+    assert short_cache.exists()
+    assert not long_cache.exists(), "long-header cache shouldn't exist yet"
