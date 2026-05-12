@@ -4,10 +4,10 @@
 //   * Debian/Linux Python 3.11 sandbox (so Windows path / venv / shell
 //     friction goes away — same env as CI).
 //   * `uv`, `gh`, `git`, `make` pre-installed.
-//   * Host Docker available inside the container (via the
-//     docker-outside-of-docker feature) so `tools/demo/render.sh`
-//     works without extra setup. The host's Docker socket is mounted;
-//     `docker build` / `docker run` reach out to Docker Desktop.
+//   * Native VHS / ttyd / ffmpeg installed by post-create.sh so
+//     `tools/demo/render.sh` renders demos natively inside the
+//     container. No host-Docker bind is needed for the default
+//     workflow.
 //   * VSCode extensions: Python, Pylance, Ruff, GitHub PR, GitLens.
 //   * `postCreateCommand` syncs the project's dev deps so `pytest`,
 //     `ruff`, `mypy`, `census-augment` all work the moment the
@@ -15,6 +15,18 @@
 //
 // First run takes ~3-5 minutes (image build + uv sync + dep install).
 // Subsequent attaches are seconds.
+//
+// Container-runtime portability: this devcontainer is host-runtime
+// agnostic — Docker Desktop, Podman Desktop, Colima, anything VSCode's
+// Dev Containers extension can talk to. The previous version mounted
+// the host Docker socket via the `docker-outside-of-docker` feature so
+// `render.sh --docker` was usable from inside the container; that
+// feature was dropped because (a) nothing in src/, tests/, or CI talks
+// to the Docker socket, (b) `render.sh`'s default path inside the dev
+// container is `--local` (vhs is installed natively), and (c) the
+// `--docker` escape hatch is a maintainer-only diagnostic that's
+// easier to run from the host where the runtime CLI lives. See
+// spec.md §14 #33 for the rationale.
 {
     "name": "abs-census-augmentor",
     "build": {
@@ -22,13 +34,6 @@
     },
 
     "features": {
-        // Docker access for VHS demo rendering. "outside-of-docker"
-        // mounts the host's docker.sock and installs the docker CLI
-        // inside the container — `docker build` / `docker run` from
-        // inside the devcontainer talk to the host's Docker Desktop.
-        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-            "moby": false
-        },
         // GitHub CLI — used heavily for PR / issue workflows in this
         // repo's dev loop.
         "ghcr.io/devcontainers/features/github-cli:1": {},
