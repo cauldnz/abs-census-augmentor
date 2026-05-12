@@ -72,9 +72,7 @@ def fake_sa2_gdf() -> gpd.GeoDataFrame:
 
 
 @pytest.fixture
-def fake_boundary_zip_bytes(
-    tmp_path: Path, fake_sa2_gdf: gpd.GeoDataFrame
-) -> bytes:
+def fake_boundary_zip_bytes(tmp_path: Path, fake_sa2_gdf: gpd.GeoDataFrame) -> bytes:
     """In-memory ZIP containing fake SA2 shapefile + sidecars (.shp/.dbf/.prj/.shx).
 
     Mirrors the real ABS layout: filename inside the ZIP is the bare
@@ -132,12 +130,16 @@ _FAKE_DESCRIPTOR_ROWS = [
     ("G1", "Tot_P_M", "Total_Persons_Male", "G01", "G01", "Males"),
     ("G2", "Tot_P_F", "Total_Persons_Female", "G01", "G01", "Females"),
     ("G3", "Tot_P_P", "Total_Persons_Persons", "G01", "G01", "Persons"),
-    ("G109", "Median_age_persons", "Median_age_of_persons",
-     "G02", "G02", "Median age of persons"),
-    ("G115", "Median_tot_hhd_inc_weekly", "Median_total_household_income_weekly",
-     "G02", "G02", "Median total household income ($/weekly)"),
-    ("G112", "Median_rent_weekly", "Median_rent_weekly",
-     "G02", "G02", "Median rent ($/weekly)"),
+    ("G109", "Median_age_persons", "Median_age_of_persons", "G02", "G02", "Median age of persons"),
+    (
+        "G115",
+        "Median_tot_hhd_inc_weekly",
+        "Median_total_household_income_weekly",
+        "G02",
+        "G02",
+        "Median total household income ($/weekly)",
+    ),
+    ("G112", "Median_rent_weekly", "Median_rent_weekly", "G02", "G02", "Median rent ($/weekly)"),
 ]
 
 # Real ABS Table-Number sheet rows: (Table Number, Table Name, Table population)
@@ -263,9 +265,7 @@ def fake_datapack_zip_bytes(
             "Metadata/Metadata_2021_GCP_DataPack_R1_R2.xlsx",
             fake_metadata_xlsx_bytes,
         )
-        zf.writestr(
-            "Metadata/2021Census_geog_desc_test.xlsx", _empty_xlsx_bytes()
-        )
+        zf.writestr("Metadata/2021Census_geog_desc_test.xlsx", _empty_xlsx_bytes())
         zf.writestr(
             "Metadata/2021_GCP_Sequential_Template_Test.xlsx",
             _empty_xlsx_bytes(),
@@ -359,9 +359,7 @@ def fake_gnaf_parquet_bytes() -> bytes:
 
 
 @pytest.fixture
-def fake_gnaf_data_dir(
-    tmp_path: Path, fake_gnaf_parquet_bytes: bytes
-) -> Path:
+def fake_gnaf_data_dir(tmp_path: Path, fake_gnaf_parquet_bytes: bytes) -> Path:
     """Set up a tmp data_dir with one G-NAF release cached.
 
     Creates ``<tmp>/data/gnaf/202602/addresses.parquet`` and returns
@@ -375,9 +373,7 @@ def fake_gnaf_data_dir(
 
 
 @pytest.fixture
-def fake_gnaf_data_dir_with_two_releases(
-    tmp_path: Path, fake_gnaf_parquet_bytes: bytes
-) -> Path:
+def fake_gnaf_data_dir_with_two_releases(tmp_path: Path, fake_gnaf_parquet_bytes: bytes) -> Path:
     """A data_dir with two cached releases — useful for testing
     ``release='latest'`` resolution."""
     data_dir = tmp_path / "data"
@@ -443,9 +439,7 @@ def fake_mb_gdf() -> gpd.GeoDataFrame:
 
 
 @pytest.fixture
-def fake_mb_correspondence_zip_bytes(
-    tmp_path: Path, fake_mb_gdf: gpd.GeoDataFrame
-) -> bytes:
+def fake_mb_correspondence_zip_bytes(tmp_path: Path, fake_mb_gdf: gpd.GeoDataFrame) -> bytes:
     """In-memory ZIP containing the synthetic Mesh Block shapefile.
 
     Filename inside the ZIP follows the ABS convention:
@@ -463,4 +457,3 @@ def fake_mb_correspondence_zip_bytes(
         for sidecar in work_dir.iterdir():
             zf.write(sidecar, arcname=sidecar.name)
     return buf.getvalue()
-

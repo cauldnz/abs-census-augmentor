@@ -51,9 +51,7 @@ class _AbsZipDataSource:
     @property
     def filename(self) -> str:
         """Subclass must override with the deterministic ZIP filename."""
-        raise NotImplementedError(
-            "subclasses must override `filename` (see spec §4.1, §4.2)"
-        )
+        raise NotImplementedError("subclasses must override `filename` (see spec §4.1, §4.2)")
 
     @property
     def url(self) -> str:
@@ -71,9 +69,7 @@ class _AbsZipDataSource:
         """Stream-download to a ``.tmp`` file then atomically rename."""
         self._root.mkdir(parents=True, exist_ok=True)
         _log.info("Downloading %s from %s", self._label, self.url)
-        with self._session.get(
-            self.url, stream=True, timeout=self._timeout
-        ) as response:
+        with self._session.get(self.url, stream=True, timeout=self._timeout) as response:
             response.raise_for_status()
             tmp = self._root / (self.filename + ".tmp")
             with tmp.open("wb") as f:

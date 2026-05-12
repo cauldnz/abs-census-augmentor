@@ -9,6 +9,40 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Tier 3 tidy-up
+
+Three independent chores bundled into one PR:
+
+- **`ruff format` applied repo-wide.** 44 files reformatted to match
+  ruff's current default style. The lint suite passed before and after
+  (no rule changes), and the full test suite (517 / 1 skipped) still
+  passes. CI gains `uv run ruff format --check .` as a step so
+  format drift never lands again.
+
+- **`mypy tests/` clean and wired into CI.** The `tests/` tree was
+  previously ungated: 62 errors lurking. Fixed by stripping 23
+  no-longer-relevant `# type: ignore` comments (mypy got better at
+  inference since they were written) and adding a
+  `[[tool.mypy.overrides]]` block scoped to `tests.*` that disables a
+  handful of test-only noisy error codes (`no-untyped-call` from
+  `pyarrow.parquet`, `union-attr` / `arg-type` from Pydantic Optional
+  fields in test fixtures, `dict-item` from heterogeneous-value
+  fixture dicts, etc.). Source tree stays under `strict = true`.
+  CI now runs `mypy src/ tools/ tests/` (was `src/ tools/`).
+  `Makefile`'s `make typecheck` target updated to match.
+
+- **`_template.md` wheel exclusion deferred to BACKLOG.** Hatchling's
+  `force-include` (used to bundle dataset / feature specs into the
+  wheel) bypasses both per-target `exclude` and the build-global
+  `[tool.hatch.build] exclude`, so the obvious one-liner doesn't take
+  effect. Two viable approaches (move templates to a separate
+  directory, or write a custom build hook) are both bigger than a
+  typical tidy-up. The runtime loaders already skip `_template.md`
+  regardless of where it lives, so the cost of NOT doing this is
+  ~4 KB of wheel space. Captured in `BACKLOG.md`.
+
+No behavioural changes anywhere — pure tooling.
+
 ### Added — Demo GIFs + scene strips embedded in README (closes #40)
 
 The README now embeds all three demo GIFs at sensible places —

@@ -128,9 +128,7 @@ class SeifaDataSource:
         self._release = release
         self._root = Path(root)
         self._url = url or DEFAULT_SEIFA_2021_URL
-        self._session = (
-            session if session is not None else requests.Session()
-        )
+        self._session = session if session is not None else requests.Session()
         self._chunk_size = chunk_size
         self._timeout = timeout
 
@@ -164,14 +162,10 @@ class SeifaDataSource:
         self._root.mkdir(parents=True, exist_ok=True)
         tmp = self._xlsx_path.with_suffix(self._xlsx_path.suffix + ".tmp")
         _log.info("Downloading %s from %s", self._label, self._url)
-        with self._session.get(
-            self._url, stream=True, timeout=self._timeout
-        ) as response:
+        with self._session.get(self._url, stream=True, timeout=self._timeout) as response:
             response.raise_for_status()
             with tmp.open("wb") as f:
-                for chunk in response.iter_content(
-                    chunk_size=self._chunk_size
-                ):
+                for chunk in response.iter_content(chunk_size=self._chunk_size):
                     if chunk:
                         f.write(chunk)
         tmp.replace(self._xlsx_path)
@@ -186,9 +180,7 @@ class SeifaDataSource:
         instant).
         """
         if self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index(
-                "sa2_code_2021"
-            )
+            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
 
         xlsx = self.fetch()
         df = self._parse_xlsx(xlsx)
@@ -213,9 +205,7 @@ class SeifaDataSource:
         """
         import openpyxl  # noqa: PLC0415 — lazy import keeps cold start cheap
 
-        wb = openpyxl.load_workbook(
-            xlsx_path, read_only=True, data_only=True
-        )
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
 
         per_index_dfs: list[pd.DataFrame] = []
         sheet_names = set(wb.sheetnames)
@@ -234,9 +224,7 @@ class SeifaDataSource:
 
         if not per_index_dfs:
             wb.close()
-            raise RuntimeError(
-                f"No SEIFA index sheets (Tables 2-5) found in {xlsx_path}"
-            )
+            raise RuntimeError(f"No SEIFA index sheets (Tables 2-5) found in {xlsx_path}")
 
         wb.close()
 
@@ -248,11 +236,7 @@ class SeifaDataSource:
         for df_more in per_index_dfs[1:]:
             # Drop the duplicate URP / state cols from the joiner.
             df_more = df_more.drop(
-                columns=[
-                    c
-                    for c in ("urp", "state_abbreviation")
-                    if c in df_more.columns
-                ],
+                columns=[c for c in ("urp", "state_abbreviation") if c in df_more.columns],
                 errors="ignore",
             )
             merged = merged.join(df_more, how="outer")
@@ -301,8 +285,7 @@ class SeifaDataSource:
 
         if not records:
             raise RuntimeError(
-                f"No data rows found below the header in sheet for "
-                f"prefix {prefix!r}"
+                f"No data rows found below the header in sheet for prefix {prefix!r}"
             )
 
         df = pd.DataFrame.from_records(records)
@@ -317,9 +300,7 @@ class SeifaDataSource:
         a row or two).
         """
         for i in range(min(15, len(raw))):
-            row_text = " ".join(
-                "" if c is None else str(c) for c in raw[i]
-            )
+            row_text = " ".join("" if c is None else str(c) for c in raw[i])
             for fragment in _SA2_CODE_HEADER_FRAGMENTS:
                 if fragment in row_text:
                     return i
@@ -341,9 +322,7 @@ class SeifaDataSource:
         if isinstance(cell, (int, float)):
             return cell
         s = str(cell).strip()
-        if not s or s.lower() in (
-            "np", "na", "n/a", "-", "nan", "null", "..", "."
-        ):
+        if not s or s.lower() in ("np", "na", "n/a", "-", "nan", "null", "..", "."):
             return None
         # Int?
         if re.fullmatch(r"-?\d+", s):

@@ -38,10 +38,22 @@ def _index_sheet_rows(prefix: str, sa2_records: list[tuple[str, str, dict]]) -> 
         # Group row (top of header) — we don't actually use it but
         # mirror the real layout.
         [
-            "", "", "", "", "",
-            "Ranking within Australia", "", "", "",
-            "Ranking within State or Territory", "", "", "",
-            "", "", "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "Ranking within Australia",
+            "",
+            "",
+            "",
+            "Ranking within State or Territory",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
         ],
         # Header row.
         [
@@ -64,24 +76,26 @@ def _index_sheet_rows(prefix: str, sa2_records: list[tuple[str, str, dict]]) -> 
         ],
     ]
     for sa2_code, sa2_name, f in sa2_records:
-        rows.append([
-            sa2_code,
-            sa2_name,
-            f["urp"],
-            f["score"],
-            "",
-            f["aus_rank"],
-            f["aus_decile"],
-            f["aus_percentile"],
-            "",
-            f["state"],
-            f["state_rank"],
-            f["state_decile"],
-            f["state_percentile"],
-            f.get("sa1_min", 0),
-            f.get("sa1_max", 0),
-            f.get("pct_urp_no_score", 0),
-        ])
+        rows.append(
+            [
+                sa2_code,
+                sa2_name,
+                f["urp"],
+                f["score"],
+                "",
+                f["aus_rank"],
+                f["aus_decile"],
+                f["aus_percentile"],
+                "",
+                f["state"],
+                f["state_rank"],
+                f["state_decile"],
+                f["state_percentile"],
+                f.get("sa1_min", 0),
+                f.get("sa1_max", 0),
+                f.get("pct_urp_no_score", 0),
+            ]
+        )
     return rows
 
 
@@ -105,19 +119,21 @@ def _build_synthetic_seifa_xlsx() -> bytes:
     summary.append([])
     summary.append([])
     summary.append([])
-    summary.append([
-        "2021 Statistical Area Level 2 (SA2) 9-Digit Code",
-        "2021 Statistical Area Level 2 (SA2) Name",
-        "Score",
-        "Decile",
-        "Score",
-        "Decile",
-        "Score",
-        "Decile",
-        "Score",
-        "Decile",
-        "Usual Resident Population",
-    ])
+    summary.append(
+        [
+            "2021 Statistical Area Level 2 (SA2) 9-Digit Code",
+            "2021 Statistical Area Level 2 (SA2) Name",
+            "Score",
+            "Decile",
+            "Score",
+            "Decile",
+            "Score",
+            "Decile",
+            "Score",
+            "Decile",
+            "Usual Resident Population",
+        ]
+    )
     summary.append(["117011326", "Sydney CBD", 1042, 8, 1080, 9, 1010, 7, 1100, 9, 12000])
 
     sa2_a = {
@@ -260,9 +276,7 @@ def test_fetch_refresh_redownloads(
 
 @responses.activate
 def test_fetch_404_raises(seifa_data_dir: Path) -> None:
-    responses.add(
-        responses.GET, DEFAULT_SEIFA_2021_URL, status=404
-    )
+    responses.add(responses.GET, DEFAULT_SEIFA_2021_URL, status=404)
     ds = SeifaDataSource(root=seifa_data_dir)
     with pytest.raises(requests.HTTPError):
         ds.fetch()
@@ -421,20 +435,42 @@ def test_load_handles_suppressed_cells_as_null(
     rows = _index_sheet_rows(
         "irsd",
         [
-            ("117011326", "Sydney CBD", {
-                "urp": "np", "score": "np", "aus_rank": "np",
-                "aus_decile": "np", "aus_percentile": "np",
-                "state": "NSW", "state_rank": "np",
-                "state_decile": "np", "state_percentile": "np",
-                "sa1_min": "np", "sa1_max": "np", "pct_urp_no_score": "np",
-            }),
-            ("117011327", "North Sydney", {
-                "urp": 9500, "score": 950, "aus_rank": 7000,
-                "aus_decile": 5, "aus_percentile": 50,
-                "state": "NSW", "state_rank": 3000,
-                "state_decile": 5, "state_percentile": 50,
-                "sa1_min": 920, "sa1_max": 985, "pct_urp_no_score": 0,
-            }),
+            (
+                "117011326",
+                "Sydney CBD",
+                {
+                    "urp": "np",
+                    "score": "np",
+                    "aus_rank": "np",
+                    "aus_decile": "np",
+                    "aus_percentile": "np",
+                    "state": "NSW",
+                    "state_rank": "np",
+                    "state_decile": "np",
+                    "state_percentile": "np",
+                    "sa1_min": "np",
+                    "sa1_max": "np",
+                    "pct_urp_no_score": "np",
+                },
+            ),
+            (
+                "117011327",
+                "North Sydney",
+                {
+                    "urp": 9500,
+                    "score": 950,
+                    "aus_rank": 7000,
+                    "aus_decile": 5,
+                    "aus_percentile": 50,
+                    "state": "NSW",
+                    "state_rank": 3000,
+                    "state_decile": 5,
+                    "state_percentile": 50,
+                    "sa1_min": 920,
+                    "sa1_max": 985,
+                    "pct_urp_no_score": 0,
+                },
+            ),
         ],
     )
     for row in rows:

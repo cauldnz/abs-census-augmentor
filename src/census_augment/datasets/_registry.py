@@ -73,9 +73,7 @@ class Registry:
 
     def __init__(self) -> None:
         self._by_id: dict[str, DatasetSpec] = {}
-        self._fetcher_factories: dict[
-            str, Callable[..., "DatasetFetcher"]
-        ] = {}
+        self._fetcher_factories: dict[str, Callable[..., "DatasetFetcher"]] = {}
 
     # ---- construction ---------------------------------------------------
 
@@ -95,9 +93,7 @@ class Registry:
                 try:
                     spec = parse_dataset_spec(spec_path)
                 except ValueError:
-                    _log.exception(
-                        "Skipping invalid dataset spec at %s", spec_path
-                    )
+                    _log.exception("Skipping invalid dataset spec at %s", spec_path)
                     continue
                 registry.register_spec(spec)
         else:
@@ -113,8 +109,7 @@ class Registry:
         """
         if spec.id in self._by_id:
             _log.info(
-                "Replacing existing dataset spec %r in registry "
-                "(was: %s; new: %s)",
+                "Replacing existing dataset spec %r in registry (was: %s; new: %s)",
                 spec.id,
                 self._by_id[spec.id].source_path,
                 spec.source_path,
@@ -158,8 +153,7 @@ class Registry:
             return self._by_id[dataset_id]
         except KeyError as e:
             raise RegistryError(
-                f"No dataset registered with id {dataset_id!r}. "
-                f"Known: {sorted(self._by_id)}"
+                f"No dataset registered with id {dataset_id!r}. Known: {sorted(self._by_id)}"
             ) from e
 
     def resolve_variable(self, ref: str) -> tuple[DatasetSpec, str]:
@@ -182,14 +176,11 @@ class Registry:
         """
         if "." not in ref:
             raise RegistryError(
-                f"Variable reference {ref!r} has no namespace; "
-                "expected '<NAMESPACE>.<field>' form."
+                f"Variable reference {ref!r} has no namespace; expected '<NAMESPACE>.<field>' form."
             )
         namespace, _, field = ref.partition(".")
         if not namespace or not field:
-            raise RegistryError(
-                f"Variable reference {ref!r} has empty namespace or field."
-            )
+            raise RegistryError(f"Variable reference {ref!r} has empty namespace or field.")
 
         # Direct namespace match (SEIFA, ERP, DSS, ATO, PRESET, ...).
         for spec in self._by_id.values():
@@ -214,9 +205,7 @@ class Registry:
 
     # ---- fetcher access -------------------------------------------------
 
-    def make_fetcher(
-        self, dataset_id: str, **kwargs: Any
-    ) -> "DatasetFetcher":
+    def make_fetcher(self, dataset_id: str, **kwargs: Any) -> "DatasetFetcher":
         """Construct a fetcher for ``dataset_id`` via its registered
         factory. ``**kwargs`` are passed through to the factory.
 

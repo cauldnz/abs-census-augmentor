@@ -35,9 +35,7 @@ def main() -> None:
 
         seifa = SeifaDataSource(root=root / "seifa")
         df_seifa = seifa.load()
-        print(
-            f"SEIFA 2021: {len(df_seifa):,} SA2s × {len(df_seifa.columns)} cols"
-        )
+        print(f"SEIFA 2021: {len(df_seifa):,} SA2s × {len(df_seifa.columns)} cols")
         print(df_seifa.head(2).to_string())
         print()
 
@@ -53,10 +51,7 @@ def main() -> None:
 
         dss = DssDataSource(root=root / "dss")
         df_dss = dss.load()
-        print(
-            f"DSS {dss.resolved_release}: {len(df_dss):,} SA2s × "
-            f"{len(df_dss.columns)} cols"
-        )
+        print(f"DSS {dss.resolved_release}: {len(df_dss):,} SA2s × {len(df_dss.columns)} cols")
         # Show a couple of payment-type columns.
         cols = [c for c in df_dss.columns if "age_pension" in c or "jobseeker" in c][:2]
         print(df_dss[cols].head(2).to_string())
@@ -64,10 +59,7 @@ def main() -> None:
 
         ato = AtoDataSource(root=root / "ato")
         df_ato = ato.load()
-        print(
-            f"ATO {ato.resolved_release}: {len(df_ato):,} SA2s × "
-            f"{len(df_ato.columns)} cols"
-        )
+        print(f"ATO {ato.resolved_release}: {len(df_ato):,} SA2s × {len(df_ato.columns)} cols")
         print(
             df_ato[["median_total_income", "mean_total_income", "income_earners_count"]]
             .head(2)

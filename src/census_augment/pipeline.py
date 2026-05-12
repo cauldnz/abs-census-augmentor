@@ -148,10 +148,7 @@ class RunSummary:
                 if count == 0:
                     continue
                 body += f"    {tier:<20} {count}\n"
-        body += (
-            "  SA2 lookup:\n"
-            f"    Outside any SA2:    {self.sa2_unmatched}\n"
-        )
+        body += f"  SA2 lookup:\n    Outside any SA2:    {self.sa2_unmatched}\n"
         if self.sa2_resolution_counts:
             body += "  SA2 resolution path:\n"
             for path in (_SA2_RES_MB_CODE, _SA2_RES_SPATIAL, _SA2_RES_UNMATCHED):
@@ -303,9 +300,7 @@ class Pipeline:
         # PRESET) are validated lazily when the enricher hits each
         # dataset's fetcher; the registry surfaces clear errors then.
         gcp_variables = {
-            friendly: ref
-            for friendly, ref in config.variables.items()
-            if _is_gcp_variable_ref(ref)
+            friendly: ref for friendly, ref in config.variables.items() if _is_gcp_variable_ref(ref)
         }
         catalog.validate_variables(gcp_variables)
         enricher = CensusEnricher(
@@ -370,9 +365,7 @@ class Pipeline:
                     NominatimGeocoder(
                         user_agent=nominatim_cfg.user_agent,
                         cache=cache,
-                        rate_limit_per_second=(
-                            nominatim_cfg.rate_limit_per_second
-                        ),
+                        rate_limit_per_second=(nominatim_cfg.rate_limit_per_second),
                     )
                 )
 
@@ -483,18 +476,12 @@ class Pipeline:
         proceeds with the remaining locators rather than failing. If no
         usable locator remains, ``ValueError`` is raised.
         """
-        addr_col = self._resolve_override(
-            address_column, self._config.input.address_column
-        )
-        lat_col = self._resolve_override(
-            latitude_column, self._config.input.latitude_column
-        )
-        lon_col = self._resolve_override(
-            longitude_column, self._config.input.longitude_column
-        )
+        addr_col = self._resolve_override(address_column, self._config.input.address_column)
+        lat_col = self._resolve_override(latitude_column, self._config.input.latitude_column)
+        lon_col = self._resolve_override(longitude_column, self._config.input.longitude_column)
 
-        addr_col, lat_col, lon_col, unused_configured_columns = (
-            self._lenient_drop_absent_columns(df, addr_col, lat_col, lon_col)
+        addr_col, lat_col, lon_col, unused_configured_columns = self._lenient_drop_absent_columns(
+            df, addr_col, lat_col, lon_col
         )
 
         if not self._has_locator(addr_col, lat_col, lon_col):
@@ -518,16 +505,12 @@ class Pipeline:
         df_out[_GEO_SOURCE_COL] = sources
         df_out[_GEO_MATCH_SCORE_COL] = match_scores
 
-        codes, names, sa2_resolution = self._resolve_sa2(
-            lats=lats, lons=lons, mb_codes=mb_codes
-        )
+        codes, names, sa2_resolution = self._resolve_sa2(lats=lats, lons=lons, mb_codes=mb_codes)
         df_out[_SA2_CODE_COL] = codes
         df_out[_SA2_NAME_COL] = names
         df_out[_SA2_RESOLUTION_COL] = sa2_resolution
 
-        df_out = self._enricher.add_enrichment_columns(
-            df_out, sa2_code_col=_SA2_CODE_COL
-        )
+        df_out = self._enricher.add_enrichment_columns(df_out, sa2_code_col=_SA2_CODE_COL)
         df_out = self._reorder_output_columns(df_out, original_cols)
 
         summary = self._build_summary(df_out, sources, sa2_resolution)
@@ -545,18 +528,13 @@ class Pipeline:
         sa2_unmatched = (has_coords & ~has_sa2).rename("sa2_unmatched")
 
         prefix = self._config.output.prefix
-        enrichment_cols = [
-            f"{prefix}{name}" for name in self._config.variables
-        ]
+        enrichment_cols = [f"{prefix}{name}" for name in self._config.variables]
         # Same defensive check as _build_summary: handle the case where
         # the enricher didn't populate the expected columns (e.g. when a
         # test injects a stub enricher with variables={}).
         if enrichment_cols and all(c in df_out.columns for c in enrichment_cols):
             is_fully_enriched = (
-                df_out[enrichment_cols]
-                .notna()
-                .all(axis=1)
-                .rename("is_fully_enriched")
+                df_out[enrichment_cols].notna().all(axis=1).rename("is_fully_enriched")
             )
         else:
             is_fully_enriched = pd.Series(
@@ -586,9 +564,7 @@ class Pipeline:
 
     def _validate_no_column_collisions(self) -> None:
         prefix = self._config.output.prefix
-        enrichment_columns = {
-            f"{prefix}{name}" for name in self._config.variables
-        }
+        enrichment_columns = {f"{prefix}{name}" for name in self._config.variables}
         collisions = enrichment_columns & _RESERVED_OUTPUT_COLS
         if collisions:
             raise ValueError(
@@ -602,14 +578,10 @@ class Pipeline:
         lat_col: str | None,
         lon_col: str | None,
     ) -> bool:
-        return addr_col is not None or (
-            lat_col is not None and lon_col is not None
-        )
+        return addr_col is not None or (lat_col is not None and lon_col is not None)
 
     @staticmethod
-    def _resolve_override(
-        override: str | None | _UnsetType, configured: str | None
-    ) -> str | None:
+    def _resolve_override(override: str | None | _UnsetType, configured: str | None) -> str | None:
         """Apply a per-call kwarg override against the config default.
 
         Sentinel ``_UNSET`` means "use the configured default";
@@ -826,9 +798,7 @@ class Pipeline:
                 spatial_lons.append(lons[i])
 
         if spatial_indices:
-            sj_codes, sj_names = self._spatial.lookup_many(
-                spatial_lats, spatial_lons
-            )
+            sj_codes, sj_names = self._spatial.lookup_many(spatial_lats, spatial_lons)
             for offset, orig_idx in enumerate(spatial_indices):
                 code = sj_codes[offset]
                 name = sj_names[offset]
@@ -841,9 +811,7 @@ class Pipeline:
 
         return codes_out, names_out, resolutions
 
-    def _reorder_output_columns(
-        self, df: pd.DataFrame, original_cols: list[str]
-    ) -> pd.DataFrame:
+    def _reorder_output_columns(self, df: pd.DataFrame, original_cols: list[str]) -> pd.DataFrame:
         prefix = self._config.output.prefix
         desired = (
             original_cols
@@ -888,18 +856,14 @@ class Pipeline:
         for res in sa2_resolution:
             if res is None:
                 continue
-            sa2_resolution_counts[res] = (
-                sa2_resolution_counts.get(res, 0) + 1
-            )
+            sa2_resolution_counts[res] = sa2_resolution_counts.get(res, 0) + 1
 
         has_coords = df[_GEO_LAT_COL].notna() & df[_GEO_LON_COL].notna()
         has_sa2 = df[_SA2_CODE_COL].notna()
         sa2_unmatched = int((has_coords & ~has_sa2).sum())
 
         prefix = self._config.output.prefix
-        enrichment_cols = [
-            f"{prefix}{name}" for name in self._config.variables
-        ]
+        enrichment_cols = [f"{prefix}{name}" for name in self._config.variables]
         if enrichment_cols and all(c in df.columns for c in enrichment_cols):
             all_enriched = df[enrichment_cols].notna().all(axis=1)
             fully_enriched = int((has_sa2 & all_enriched).sum())

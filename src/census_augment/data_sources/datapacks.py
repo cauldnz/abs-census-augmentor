@@ -23,9 +23,7 @@ _TABLE_ID_PATTERN = re.compile(r"^G\d+[A-Z]?$")
 _SA2_CODE_CANDIDATES = ("SA2_CODE_2021", "SA2_CODE21", "SA2_MAINCODE_2021")
 
 # Pattern matching the descriptor xlsx among the ~3 metadata files in the ZIP
-_METADATA_FILENAME_PATTERN = re.compile(
-    r"Metadata.*GCP.*DataPack.*\.xlsx$", re.IGNORECASE
-)
+_METADATA_FILENAME_PATTERN = re.compile(r"Metadata.*GCP.*DataPack.*\.xlsx$", re.IGNORECASE)
 
 # Real ABS sheet names — match case- and whitespace-insensitively
 _DESCRIPTOR_SHEET_CANDIDATES = (
@@ -175,8 +173,7 @@ class DataPacksDataSource(_AbsZipDataSource):
         csvs = self._table_csvs()
         if table_id not in csvs:
             raise KeyError(
-                f"Table {table_id!r} not found in DataPack; "
-                f"available: {sorted(csvs.keys())}"
+                f"Table {table_id!r} not found in DataPack; available: {sorted(csvs.keys())}"
             )
         df = pd.read_csv(csvs[table_id], dtype={c: str for c in _SA2_CODE_CANDIDATES})
         sa2_col = self._detect_sa2_column(df)
@@ -245,13 +242,9 @@ def _parse_metadata_xlsx(xlsx: Path, descriptor: str) -> DataPackMetadata:
     descriptor_raw = _select_sheet(
         all_sheets, _DESCRIPTOR_SHEET_CANDIDATES, label="descriptor", xlsx=xlsx
     )
-    descriptor_df = _slice_at_header(
-        descriptor_raw, _DESCRIPTOR_HEADER_MARKERS, xlsx=xlsx
-    )
+    descriptor_df = _slice_at_header(descriptor_raw, _DESCRIPTOR_HEADER_MARKERS, xlsx=xlsx)
 
-    col_lookup = {
-        _norm(str(col)): col for col in descriptor_df.columns if pd.notna(col)
-    }
+    col_lookup = {_norm(str(col)): col for col in descriptor_df.columns if pd.notna(col)}
     code_col = col_lookup.get(_norm(code_column_name))
     desc_col = col_lookup.get(_norm(_DESCRIPTION_COLUMN))
     table_col = col_lookup.get(_norm(_DATAPACKFILE_COLUMN))
@@ -322,16 +315,9 @@ def _slice_at_header(
     names and contains only the rows below it.
     """
     for i in range(len(df)):
-        values = {
-            _norm(str(v))
-            for v in df.iloc[i].tolist()
-            if pd.notna(v)
-        }
+        values = {_norm(str(v)) for v in df.iloc[i].tolist() if pd.notna(v)}
         if required_markers.issubset(values):
-            headers = [
-                str(v).strip() if pd.notna(v) else ""
-                for v in df.iloc[i].tolist()
-            ]
+            headers = [str(v).strip() if pd.notna(v) else "" for v in df.iloc[i].tolist()]
             body = df.iloc[i + 1 :].copy()
             body.columns = pd.Index(headers)
             return body
@@ -362,9 +348,7 @@ def _try_read_table_names(all_sheets: dict[str, pd.DataFrame]) -> dict[str, str]
     except RuntimeError:
         return {}
 
-    col_lookup = {
-        _norm(str(c)): c for c in body.columns if pd.notna(c)
-    }
+    col_lookup = {_norm(str(c)): c for c in body.columns if pd.notna(c)}
     num_col = col_lookup.get("tablenumber")
     name_col = col_lookup.get("tablename")
     if num_col is None or name_col is None:

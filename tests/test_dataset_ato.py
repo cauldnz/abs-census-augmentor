@@ -21,7 +21,7 @@ def _make_landing_html(periods: list[str]) -> str:
     for period in periods:
         body.append(
             f'<a href="/statistics/labour/earnings-and-working-conditions/'
-            f'personal-income-australia/{period}/'
+            f"personal-income-australia/{period}/"
             f'Table%201%20-%20Total%20income.xlsx">Table 1</a>'
         )
     body.append("</body></html>")
@@ -138,22 +138,30 @@ def test_resolve_no_links_raises(ato_data_dir: Path) -> None:
 
 @responses.activate
 def test_load_returns_sa2_indexed_dataframe(ato_data_dir: Path) -> None:
-    fake_xlsx = _make_ato_xlsx([
-        ("117011326", {
-            "income_earners_count": 8500,
-            "median_age_of_earners": 38,
-            "sum_total_income": 850_000_000,
-            "median_total_income": 75_000,
-            "mean_total_income": 100_000,
-        }),
-        ("117011327", {
-            "income_earners_count": 6200,
-            "median_age_of_earners": 42,
-            "sum_total_income": 520_000_000,
-            "median_total_income": 65_000,
-            "mean_total_income": 84_000,
-        }),
-    ])
+    fake_xlsx = _make_ato_xlsx(
+        [
+            (
+                "117011326",
+                {
+                    "income_earners_count": 8500,
+                    "median_age_of_earners": 38,
+                    "sum_total_income": 850_000_000,
+                    "median_total_income": 75_000,
+                    "mean_total_income": 100_000,
+                },
+            ),
+            (
+                "117011327",
+                {
+                    "income_earners_count": 6200,
+                    "median_age_of_earners": 42,
+                    "sum_total_income": 520_000_000,
+                    "median_total_income": 65_000,
+                    "mean_total_income": 84_000,
+                },
+            ),
+        ]
+    )
     download_url = (
         "https://www.abs.gov.au/statistics/labour/earnings-and-working-conditions/"
         "personal-income-australia/2022-23/Table%201%20-%20Total%20income.xlsx"
@@ -189,15 +197,20 @@ def test_load_returns_sa2_indexed_dataframe(ato_data_dir: Path) -> None:
 
 @responses.activate
 def test_load_handles_suppressed_cells(ato_data_dir: Path) -> None:
-    fake_xlsx = _make_ato_xlsx([
-        ("117011326", {
-            "income_earners_count": 8500,
-            "median_age_of_earners": "np",
-            "sum_total_income": "np",
-            "median_total_income": "np",
-            "mean_total_income": "np",
-        }),
-    ])
+    fake_xlsx = _make_ato_xlsx(
+        [
+            (
+                "117011326",
+                {
+                    "income_earners_count": 8500,
+                    "median_age_of_earners": "np",
+                    "sum_total_income": "np",
+                    "median_total_income": "np",
+                    "mean_total_income": "np",
+                },
+            ),
+        ]
+    )
     responses.add(
         responses.GET,
         ATO_LANDING_URL,

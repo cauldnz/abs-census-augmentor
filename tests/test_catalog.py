@@ -260,17 +260,11 @@ def test_suggest_codes_in_table_unknown_table_returns_empty() -> None:
 
 
 @responses.activate
-def test_from_data_source_loads_metadata(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
+def test_from_data_source_loads_metadata(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     """End-to-end: factory reads metadata from a DataPacksDataSource."""
     base_url = "https://abs.test/datapacks"
-    expected_url = (
-        f"{base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
-    )
-    responses.add(
-        responses.GET, expected_url, body=fake_datapack_zip_bytes, status=200
-    )
+    expected_url = f"{base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
+    responses.add(responses.GET, expected_url, body=fake_datapack_zip_bytes, status=200)
 
     ds = DataPacksDataSource(
         census=CensusConfig(),

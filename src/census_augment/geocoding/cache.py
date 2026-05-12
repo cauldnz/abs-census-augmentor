@@ -66,9 +66,7 @@ class GeocodeCache:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            _log.warning(
-                "Corrupt geocode cache file %s (%s); treating as miss", path, exc
-            )
+            _log.warning("Corrupt geocode cache file %s (%s); treating as miss", path, exc)
             return None
         try:
             # v1.0: source is provider-prefixed. v1 only Nominatim caches
@@ -86,9 +84,7 @@ class GeocodeCache:
                 raw_response=data.get("raw_response"),
             )
         except (KeyError, TypeError, ValueError) as exc:
-            _log.warning(
-                "Malformed geocode cache file %s (%s); treating as miss", path, exc
-            )
+            _log.warning("Malformed geocode cache file %s (%s); treating as miss", path, exc)
             return None
 
     def set(self, result: GeocodeResult) -> None:

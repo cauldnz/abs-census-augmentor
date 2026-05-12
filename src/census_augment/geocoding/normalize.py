@@ -103,9 +103,7 @@ _STATE_NAMES_TO_ABBREVIATIONS: dict[str, str] = {
     "AUSTRALIAN CAPITAL TERRITORY": "ACT",
 }
 
-_VALID_STATE_ABBREVIATIONS: frozenset[str] = frozenset(
-    _STATE_NAMES_TO_ABBREVIATIONS.values()
-)
+_VALID_STATE_ABBREVIATIONS: frozenset[str] = frozenset(_STATE_NAMES_TO_ABBREVIATIONS.values())
 
 # AU postcodes are 4 digits.
 _POSTCODE_AT_END = re.compile(r"\b(\d{4})\s*$")
@@ -251,9 +249,6 @@ def parse_address(address: str) -> AddressComponents | None:
         state=state,
         postcode=postcode,
     )
-    if all(
-        v is None
-        for v in (street_number, street_name, locality, postcode)
-    ):
+    if all(v is None for v in (street_number, street_name, locality, postcode)):
         return None
     return components

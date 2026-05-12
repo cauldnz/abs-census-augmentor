@@ -27,8 +27,7 @@ import requests
 _log = logging.getLogger(__name__)
 
 CKAN_PACKAGE_URL = (
-    "https://data.gov.au/data/api/3/action/package_show"
-    "?id=dss-payment-demographic-data"
+    "https://data.gov.au/data/api/3/action/package_show?id=dss-payment-demographic-data"
 )
 
 
@@ -78,9 +77,7 @@ class DssDataSource:
         self._release_request = release
         self._root = Path(root)
         self._ckan_url = ckan_url
-        self._session = (
-            session if session is not None else requests.Session()
-        )
+        self._session = session if session is not None else requests.Session()
         self._chunk_size = chunk_size
         self._timeout = timeout
         self._resolved_release: str | None = None
@@ -101,9 +98,7 @@ class DssDataSource:
         # specific one without resolving release first.
         if self._resolved_release is not None:
             return self._xlsx_path.exists()
-        return self._root.exists() and any(
-            self._root.glob("dss-*.xlsx")
-        )
+        return self._root.exists() and any(self._root.glob("dss-*.xlsx"))
 
     @property
     def _xlsx_path(self) -> Path:
@@ -132,14 +127,10 @@ class DssDataSource:
             self.resolved_release,
             url,
         )
-        with self._session.get(
-            url, stream=True, timeout=self._timeout
-        ) as response:
+        with self._session.get(url, stream=True, timeout=self._timeout) as response:
             response.raise_for_status()
             with tmp.open("wb") as f:
-                for chunk in response.iter_content(
-                    chunk_size=self._chunk_size
-                ):
+                for chunk in response.iter_content(chunk_size=self._chunk_size):
                     if chunk:
                         f.write(chunk)
         tmp.replace(self._xlsx_path)
@@ -155,9 +146,7 @@ class DssDataSource:
         looking at.
         """
         if self._resolved_release is not None and self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index(
-                "sa2_code_2021"
-            )
+            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
 
         xlsx = self.fetch()
         df = self._parse_xlsx(xlsx)
@@ -176,14 +165,11 @@ class DssDataSource:
         resp.raise_for_status()
         payload = resp.json()
         if not payload.get("success"):
-            raise RuntimeError(
-                f"CKAN package_show returned success=false: {payload}"
-            )
+            raise RuntimeError(f"CKAN package_show returned success=false: {payload}")
         resources = payload.get("result", {}).get("resources", [])
         if not resources:
             raise RuntimeError(
-                "No resources listed in the DSS CKAN package — has the "
-                "dataset moved?"
+                "No resources listed in the DSS CKAN package — has the dataset moved?"
             )
 
         # Build (release_id, last_modified, url) tuples for every
@@ -238,14 +224,11 @@ class DssDataSource:
     def _parse_xlsx(self, xlsx_path: Path) -> pd.DataFrame:
         import openpyxl  # noqa: PLC0415
 
-        wb = openpyxl.load_workbook(
-            xlsx_path, read_only=True, data_only=True
-        )
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
         if "SA2" not in wb.sheetnames:
             wb.close()
             raise RuntimeError(
-                f"DSS workbook at {xlsx_path} has no 'SA2' sheet. "
-                f"Sheets: {wb.sheetnames}"
+                f"DSS workbook at {xlsx_path} has no 'SA2' sheet. Sheets: {wb.sheetnames}"
             )
 
         sa2 = wb["SA2"]
@@ -269,14 +252,9 @@ class DssDataSource:
 
         if header_idx < 0:
             wb.close()
-            raise RuntimeError(
-                f"Could not find SA2 header row in {xlsx_path}"
-            )
+            raise RuntimeError(f"Could not find SA2 header row in {xlsx_path}")
 
-        header = [
-            "" if c is None else str(c).strip()
-            for c in rows[header_idx]
-        ]
+        header = ["" if c is None else str(c).strip() for c in rows[header_idx]]
         # Normalise payment-type column names to snake_case + suffix.
         col_names: list[str | None] = ["sa2_code_2021", None]  # name slot
         for raw in header[2:]:
@@ -286,7 +264,7 @@ class DssDataSource:
             col_names.append(_payment_column_name(raw))
 
         records: list[dict[str, object]] = []
-        for row in rows[header_idx + 1:]:
+        for row in rows[header_idx + 1 :]:
             if len(row) < 2:
                 continue
             sa2_raw = row[0]
@@ -305,9 +283,7 @@ class DssDataSource:
 
         wb.close()
         if not records:
-            raise RuntimeError(
-                f"No SA2 data rows in {xlsx_path}"
-            )
+            raise RuntimeError(f"No SA2 data rows in {xlsx_path}")
 
         df = pd.DataFrame.from_records(records)
         return df.set_index("sa2_code_2021")
@@ -359,9 +335,7 @@ def _coerce_dss_cell(cell: object) -> object:
     if isinstance(cell, (int, float)):
         return cell
     s = str(cell).strip()
-    if not s or s.lower() in (
-        "np", "na", "n/a", "-", "..", ".", "<20", "nan", "null"
-    ):
+    if not s or s.lower() in ("np", "na", "n/a", "-", "..", ".", "<20", "nan", "null"):
         return None
     if re.fullmatch(r"-?\d+", s):
         return int(s)

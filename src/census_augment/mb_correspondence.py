@@ -86,9 +86,7 @@ class MbCorrespondenceDataSource(_AbsZipDataSource):
         timeout: float = 600.0,  # MB shapefile is bigger than SA2
     ) -> None:
         if datum not in ("GDA2020", "GDA94"):
-            raise ValueError(
-                f"datum must be 'GDA2020' or 'GDA94'; got {datum!r}"
-            )
+            raise ValueError(f"datum must be 'GDA2020' or 'GDA94'; got {datum!r}")
         super().__init__(
             base_url=base_url,
             root=root,
@@ -132,9 +130,7 @@ class MbCorrespondenceDataSource(_AbsZipDataSource):
             )
         return shp
 
-    def load_correspondence(
-        self, refresh: bool = False
-    ) -> dict[str, MbInfo]:
+    def load_correspondence(self, refresh: bool = False) -> dict[str, MbInfo]:
         """Build and return the ``MB_CODE → MbInfo`` dict.
 
         Reads only the .dbf columns we need (no geometry). The first call
@@ -161,16 +157,10 @@ class MbCorrespondenceDataSource(_AbsZipDataSource):
         )
 
     @classmethod
-    def _build_lookup(
-        cls, df: pd.DataFrame, *, source: Any
-    ) -> dict[str, MbInfo]:
+    def _build_lookup(cls, df: pd.DataFrame, *, source: Any) -> dict[str, MbInfo]:
         mb_col = cls._detect_column(df.columns, _MB_CODE_PATTERNS, source)
-        sa2_code_col = cls._detect_column(
-            df.columns, _SA2_CODE_PATTERNS, source
-        )
-        sa2_name_col = cls._detect_column(
-            df.columns, _SA2_NAME_PATTERNS, source
-        )
+        sa2_code_col = cls._detect_column(df.columns, _SA2_CODE_PATTERNS, source)
+        sa2_name_col = cls._detect_column(df.columns, _SA2_NAME_PATTERNS, source)
 
         lookup: dict[str, MbInfo] = {}
         for mb_code, sa2_code, sa2_name in zip(
@@ -179,9 +169,7 @@ class MbCorrespondenceDataSource(_AbsZipDataSource):
             df[sa2_name_col].astype(str),
             strict=True,
         ):
-            lookup[mb_code] = MbInfo(
-                mb_code=mb_code, sa2_code=sa2_code, sa2_name=sa2_name
-            )
+            lookup[mb_code] = MbInfo(mb_code=mb_code, sa2_code=sa2_code, sa2_name=sa2_name)
         _log.info(
             "Loaded MB→SA2 correspondence: %d mesh blocks from %s",
             len(lookup),
@@ -190,9 +178,7 @@ class MbCorrespondenceDataSource(_AbsZipDataSource):
         return lookup
 
     @staticmethod
-    def _detect_column(
-        columns: Any, patterns: list[str], source: Any
-    ) -> str:
+    def _detect_column(columns: Any, patterns: list[str], source: Any) -> str:
         """Pick the highest-year-suffixed column matching any pattern.
 
         ABS column names carry an explicit year suffix (e.g. ``SA2_NAME_2021``).

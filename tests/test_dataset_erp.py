@@ -52,22 +52,33 @@ def _make_erp_xlsx(
     t1.append([])
     # Row 5 (header) — ABS uses cols 0-7 for the geography hierarchy
     # (state code/name, GCCSA, SA4, SA3) and cols 8-9 for SA2.
-    years_in_data = sorted(
-        {y for *_, year_dict in sa2_records for y in year_dict}
-    )
-    header = (
-        ["S/T code", "S/T name", "GCCSA code", "GCCSA name",
-         "SA4 code", "SA4 name", "SA3 code", "SA3 name",
-         "SA2 code", "SA2 name"]
-        + list(years_in_data)
-    )
+    years_in_data = sorted({y for *_, year_dict in sa2_records for y in year_dict})
+    header = [
+        "S/T code",
+        "S/T name",
+        "GCCSA code",
+        "GCCSA name",
+        "SA4 code",
+        "SA4 name",
+        "SA3 code",
+        "SA3 name",
+        "SA2 code",
+        "SA2 name",
+    ] + list(years_in_data)
     t1.append(header)
 
     for sa2_code, sa2_name, state_name, populations in sa2_records:
         row: list[object] = [
-            "1", state_name, "1RNSW", "Rest of NSW",
-            "101", "Capital Region", "10102", "Queanbeyan",
-            sa2_code, sa2_name,
+            "1",
+            state_name,
+            "1RNSW",
+            "Rest of NSW",
+            "101",
+            "Capital Region",
+            "10102",
+            "Queanbeyan",
+            sa2_code,
+            sa2_name,
         ]
         for year in years_in_data:
             row.append(populations.get(year, None))
@@ -155,15 +166,14 @@ def test_resolve_no_links_raises(erp_data_dir: Path) -> None:
 
 @responses.activate
 def test_load_returns_sa2_indexed_dataframe(erp_data_dir: Path) -> None:
-    fake_xlsx = _make_erp_xlsx([
-        ("117011326", "Sydney CBD", "New South Wales",
-         {2001: 5000, 2010: 7500, 2024: 12000}),
-        ("117011327", "North Sydney", "New South Wales",
-         {2001: 4500, 2010: 6800, 2024: 9500}),
-        # Aggregate row that should be skipped.
-        ("Australia", "Australia", "Australia",
-         {2001: 19000000, 2024: 27000000}),
-    ])
+    fake_xlsx = _make_erp_xlsx(
+        [
+            ("117011326", "Sydney CBD", "New South Wales", {2001: 5000, 2010: 7500, 2024: 12000}),
+            ("117011327", "North Sydney", "New South Wales", {2001: 4500, 2010: 6800, 2024: 9500}),
+            # Aggregate row that should be skipped.
+            ("Australia", "Australia", "Australia", {2001: 19000000, 2024: 27000000}),
+        ]
+    )
     responses.add(
         responses.GET,
         ERP_LANDING_URL,
@@ -193,10 +203,11 @@ def test_load_returns_sa2_indexed_dataframe(erp_data_dir: Path) -> None:
 
 @responses.activate
 def test_load_handles_suppressed_cells(erp_data_dir: Path) -> None:
-    fake_xlsx = _make_erp_xlsx([
-        ("117011326", "Sydney CBD", "New South Wales",
-         {2001: "np", 2024: 12000}),
-    ])
+    fake_xlsx = _make_erp_xlsx(
+        [
+            ("117011326", "Sydney CBD", "New South Wales", {2001: "np", 2024: 12000}),
+        ]
+    )
     responses.add(
         responses.GET,
         ERP_LANDING_URL,
@@ -217,9 +228,11 @@ def test_load_handles_suppressed_cells(erp_data_dir: Path) -> None:
 
 @responses.activate
 def test_load_caches_parquet(erp_data_dir: Path) -> None:
-    fake_xlsx = _make_erp_xlsx([
-        ("117011326", "Sydney CBD", "New South Wales", {2024: 12000}),
-    ])
+    fake_xlsx = _make_erp_xlsx(
+        [
+            ("117011326", "Sydney CBD", "New South Wales", {2024: 12000}),
+        ]
+    )
     responses.add(
         responses.GET,
         ERP_LANDING_URL,

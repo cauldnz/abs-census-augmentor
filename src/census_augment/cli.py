@@ -39,9 +39,7 @@ _log = logging.getLogger(__name__)
 
 @app.callback()
 def _main(
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Verbose logging (DEBUG level)."
-    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging (DEBUG level)."),
 ) -> None:
     """Configure logging once for the whole command."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -69,13 +67,9 @@ _GNAF_ATTRIBUTION = (
 
 @app.command()
 def run(
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
-    ),
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
     data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
-    cache_dir: Path | None = typer.Option(
-        None, "--cache-dir", help=_CACHE_DIR_HELP
-    ),
+    cache_dir: Path | None = typer.Option(None, "--cache-dir", help=_CACHE_DIR_HELP),
 ) -> None:
     """Run the augmentation pipeline (input CSV -> enriched output CSV)."""
     cfg = load_config(config)
@@ -86,8 +80,7 @@ def run(
         if cfg.output.path is None:
             missing.append("output.path")
         typer.echo(
-            f"Error: the run command requires {' and '.join(missing)} "
-            f"to be set in {config}.",
+            f"Error: the run command requires {' and '.join(missing)} to be set in {config}.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -99,9 +92,7 @@ def run(
 
 @app.command()
 def discover(
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
-    ),
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
     data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
     search: str | None = typer.Option(
         None, "--search", help="Substring to search in column codes / descriptions."
@@ -155,9 +146,7 @@ def discover(
         if spec.variables:
             typer.echo(f"  Variables ({len(spec.variables)}):")
             for v in spec.variables:
-                typer.echo(
-                    f"    {spec.namespace}.{v.field}\t{v.type}\t{v.description}"
-                )
+                typer.echo(f"    {spec.namespace}.{v.field}\t{v.type}\t{v.description}")
         return
 
     # ---- v1.3: feature listing (spec §21) ----
@@ -170,9 +159,7 @@ def discover(
             return
         for fspec in feature_specs:
             datasets_used = (
-                fspec.dataset
-                if isinstance(fspec.dataset, str)
-                else "+".join(fspec.dataset)
+                fspec.dataset if isinstance(fspec.dataset, str) else "+".join(fspec.dataset)
             )
             typer.echo(
                 f"PRESET.{fspec.id}\tkind={fspec.output_kind}\t"
@@ -182,8 +169,7 @@ def discover(
 
     if search is None and table is None:
         typer.echo(
-            "Error: provide --search, --table, --datasets, --dataset, "
-            "or --features.",
+            "Error: provide --search, --table, --datasets, --dataset, or --features.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -223,16 +209,12 @@ def discover(
 
 @app.command()
 def fetch(
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
-    ),
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
     data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
     boundaries: bool = typer.Option(
         False, "--boundaries", help="Pre-fetch the SA2 boundary shapefile."
     ),
-    census: bool = typer.Option(
-        False, "--census", help="Pre-fetch the Census DataPack."
-    ),
+    census: bool = typer.Option(False, "--census", help="Pre-fetch the Census DataPack."),
     gnaf: bool = typer.Option(
         False,
         "--gnaf",
@@ -244,9 +226,7 @@ def fetch(
             "Idempotent — re-running is cheap when the cache is warm."
         ),
     ),
-    refresh: bool = typer.Option(
-        False, "--refresh", help="Force re-download even if cached."
-    ),
+    refresh: bool = typer.Option(False, "--refresh", help="Force re-download even if cached."),
 ) -> None:
     """Pre-fetch ABS data (saves the first --run from doing the download)."""
     if not (boundaries or census or gnaf):
@@ -319,9 +299,7 @@ def fetch(
 
 @app.command(name="gnaf-info")
 def gnaf_info(
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
-    ),
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
     data_dir: Path | None = typer.Option(None, "--data-dir", help=_DATA_DIR_HELP),
 ) -> None:
     """Show the resolved G-NAF release, mode, on-disk path, and size."""
@@ -359,10 +337,7 @@ def gnaf_info(
             typer.echo(f"Resolved release: <unresolved> ({e})", err=True)
             raise typer.Exit(code=1) from e
         typer.echo(f"Resolved release: {resolved} (S3)")
-        endpoint = (
-            cfg.data_sources.gnaf_s3_https_endpoint
-            or "https://{bucket}.s3.amazonaws.com"
-        )
+        endpoint = cfg.data_sources.gnaf_s3_https_endpoint or "https://{bucket}.s3.amazonaws.com"
         typer.echo(f"Endpoint:       {endpoint}")
         typer.echo(f"S3 base:        {cfg.data_sources.gnaf_s3_base_url}")
         typer.echo(
@@ -387,9 +362,7 @@ def gnaf_info(
         )
     else:
         typer.echo("Resolved release: <not cached>")
-        typer.echo(
-            f"Path:           {gnaf_ds.gnaf_root}/{{YYYYMM}}/ (none yet)"
-        )
+        typer.echo(f"Path:           {gnaf_ds.gnaf_root}/{{YYYYMM}}/ (none yet)")
         typer.echo(
             "Hint: run `census-augment fetch --gnaf` (or populate "
             f"{gnaf_ds.gnaf_root}/{{YYYYMM}}/ manually) to enable G-NAF."
@@ -398,9 +371,7 @@ def gnaf_info(
 
 @app.command()
 def validate(
-    config: Path = typer.Option(
-        ..., "--config", "-c", exists=True, dir_okay=False, readable=True
-    ),
+    config: Path = typer.Option(..., "--config", "-c", exists=True, dir_okay=False, readable=True),
     full: bool = typer.Option(
         False,
         "--full",

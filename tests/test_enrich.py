@@ -50,13 +50,9 @@ def _make_enricher(
 
 
 @responses.activate
-def test_build_lookup_single_variable(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
+def test_build_lookup_single_variable(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"median_age": "G02.Median_age_persons"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"median_age": "G02.Median_age_persons"})
     lookup = enricher.build_lookup()
 
     assert list(lookup.columns) == ["sa2_median_age"]
@@ -130,9 +126,7 @@ def test_build_lookup_empty_variables_returns_empty(tmp_path: Path) -> None:
     """No HTTP needed — empty variables short-circuits before any IO."""
     ds = _make_data_source(tmp_path)
     catalog = VariableCatalog(DataPackMetadata(tables={}))
-    enricher = CensusEnricher(
-        datapacks=ds, catalog=catalog, variables={}
-    )
+    enricher = CensusEnricher(datapacks=ds, catalog=catalog, variables={})
     lookup = enricher.build_lookup()
 
     assert lookup.empty
@@ -143,9 +137,7 @@ def test_build_lookup_unknown_table_raises_catalog_error(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"bad_variable": "G99.does_not_exist"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"bad_variable": "G99.does_not_exist"})
     with pytest.raises(CatalogError, match="G99"):
         enricher.build_lookup()
 
@@ -188,9 +180,7 @@ def test_add_enrichment_columns_preserves_input_row_order(
 ) -> None:
     """Input order must be preserved across the merge — pipeline relies on it."""
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"total_pop": "G01.Tot_P_P"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"total_pop": "G01.Tot_P_P"})
     df_in = pd.DataFrame(
         {
             "address": ["A", "B", "C"],
@@ -209,9 +199,7 @@ def test_add_enrichment_columns_preserves_existing_input_columns(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"median_age": "G02.Median_age_persons"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"median_age": "G02.Median_age_persons"})
     df_in = pd.DataFrame(
         {
             "address": ["Sydney"],
@@ -236,9 +224,7 @@ def test_add_enrichment_columns_with_null_sa2_yields_null_enrichment(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"median_age": "G02.Median_age_persons"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"median_age": "G02.Median_age_persons"})
     df_in = pd.DataFrame(
         {
             "address": ["Geocoded fine", "Geocode failed"],
@@ -259,9 +245,7 @@ def test_add_enrichment_columns_with_unmatched_sa2_yields_null_enrichment(
     """SA2 code that's not in the DataPack (e.g. a real code outside the
     fixture's 3-row slice) gets null enrichment, not an error."""
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"median_age": "G02.Median_age_persons"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"median_age": "G02.Median_age_persons"})
     df_in = pd.DataFrame(
         {
             "address": ["Known", "Unknown"],
@@ -301,9 +285,7 @@ def test_add_enrichment_columns_custom_sa2_code_column(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
-    enricher, _ = _make_enricher(
-        tmp_path, {"pop": "G01.Tot_P_P"}
-    )
+    enricher, _ = _make_enricher(tmp_path, {"pop": "G01.Tot_P_P"})
     df_in = pd.DataFrame({"my_sa2": ["117011326"]})
 
     df_out = enricher.add_enrichment_columns(df_in, sa2_code_col="my_sa2")
@@ -317,9 +299,7 @@ def test_add_enrichment_columns_missing_sa2_code_col_raises(
     """No HTTP needed — we fail before touching the data source."""
     ds = _make_data_source(tmp_path)
     catalog = VariableCatalog(DataPackMetadata(tables={}))
-    enricher = CensusEnricher(
-        datapacks=ds, catalog=catalog, variables={}
-    )
+    enricher = CensusEnricher(datapacks=ds, catalog=catalog, variables={})
     df = pd.DataFrame({"address": ["x"]})
 
     with pytest.raises(ValueError, match="sa2_code_col"):
@@ -333,12 +313,8 @@ def test_add_enrichment_columns_empty_variables_is_no_op(
     """No HTTP needed — empty variables means no DataPack work."""
     ds = _make_data_source(tmp_path)
     catalog = VariableCatalog(DataPackMetadata(tables={}))
-    enricher = CensusEnricher(
-        datapacks=ds, catalog=catalog, variables={}
-    )
-    df_in = pd.DataFrame(
-        {"address": ["x", "y"], "sa2_code": ["117011326", "117011327"]}
-    )
+    enricher = CensusEnricher(datapacks=ds, catalog=catalog, variables={})
+    df_in = pd.DataFrame({"address": ["x", "y"], "sa2_code": ["117011326", "117011327"]})
 
     df_out = enricher.add_enrichment_columns(df_in)
 

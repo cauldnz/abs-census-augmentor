@@ -63,9 +63,7 @@ class SpatialIndex:
         self._name_col = name_column
         self._input_crs = input_crs
 
-    def lookup_one(
-        self, lat: float | None, lon: float | None
-    ) -> tuple[str | None, str | None]:
+    def lookup_one(self, lat: float | None, lon: float | None) -> tuple[str | None, str | None]:
         """Single-point lookup. Returns ``(None, None)`` for null inputs or
         points outside any SA2."""
         codes, names = self.lookup_many([lat], [lon])
@@ -84,8 +82,7 @@ class SpatialIndex:
         """
         if len(lats) != len(lons):
             raise ValueError(
-                f"lats and lons must have equal length; "
-                f"got {len(lats)} and {len(lons)}"
+                f"lats and lons must have equal length; got {len(lats)} and {len(lons)}"
             )
 
         n = len(lats)
@@ -116,9 +113,7 @@ class SpatialIndex:
         ).to_crs(self._boundaries.crs)
 
         joined = (
-            points_gdf.sjoin(
-                self._boundaries, how="left", predicate="within"
-            )
+            points_gdf.sjoin(self._boundaries, how="left", predicate="within")
             # SA2s are non-overlapping, but a point on a shared edge could
             # in principle match both — keep the first deterministically.
             .drop_duplicates(subset="_idx", keep="first")

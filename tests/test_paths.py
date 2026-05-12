@@ -27,16 +27,12 @@ def test_default_cache_dir_contains_app_name(monkeypatch: pytest.MonkeyPatch) ->
     assert p.name == "cache"
 
 
-def test_data_dir_env_var_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_data_dir_env_var_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CENSUS_AUGMENT_DATA_DIR", str(tmp_path / "custom_data"))
     assert default_data_dir() == tmp_path / "custom_data"
 
 
-def test_cache_dir_env_var_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cache_dir_env_var_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CENSUS_AUGMENT_CACHE_DIR", str(tmp_path / "custom_cache"))
     assert default_cache_dir() == tmp_path / "custom_cache"
 

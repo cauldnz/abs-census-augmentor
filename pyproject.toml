@@ -60,7 +60,10 @@ packages = ["src/census_augment"]
 # Without these, both registries return empty lists on a real wheel
 # install, breaking the pluggable framework end-to-end (issue #19).
 # Templates (leading-underscore files) are silently skipped by both
-# loaders, so including the whole directory is harmless.
+# loaders, so including the whole directory is harmless. Excluding
+# them properly from `force-include` is non-trivial — see BACKLOG.md
+# "Exclude `_template.md` from the built wheel" for the design notes
+# if someone wants to chase the ~4 KB of wheel space.
 [tool.hatch.build.targets.wheel.force-include]
 "datasets" = "census_augment/datasets/_specs"
 "features" = "census_augment/_features"
@@ -111,3 +114,35 @@ module = [
     "openpyxl.*",
 ]
 ignore_missing_imports = true
+
+# Test-only relaxations. The tests/ tree exercises plenty of code
+# paths that mypy can't reason about cleanly (fixture write helpers
+# constructing fake Pydantic / pyarrow / pandas state), and chasing
+# every error there has a poor cost-benefit ratio relative to keeping
+# the test code readable. The source tree (src/, tools/) stays under
+# `strict = true`.
+#
+# - `no-untyped-call`: pyarrow.parquet.write_table and a handful of
+#   other community-shipped helpers don't ship type stubs for some
+#   functions. Calling them from tests is fine.
+# - `union-attr` / `arg-type`: tests construct fully-populated Config
+#   instances where `Optional` fields are known-set; threading
+#   asserts through every test for mypy's benefit is noise.
+# - `operator` / `type-arg` / `attr-defined`: small dataset-fixture
+#   conveniences in test files (e.g. summing across an `object`-typed
+#   column, parametrising over heterogeneous dicts).
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disable_error_code = [
+    "no-untyped-call",
+    "union-attr",
+    "arg-type",
+    "operator",
+    "type-arg",
+    "attr-defined",
+    # Dataset fixture builders use heterogeneous dicts to model
+    # real ABS data (e.g. "np" sentinel for suppressed cells
+    # alongside numeric values). The factory's typed signature
+    # widens at runtime; mypy can't see that.
+    "dict-item",
+]

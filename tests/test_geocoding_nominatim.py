@@ -84,9 +84,7 @@ def test_constructor_rejects_empty_user_agent(tmp_path: Path) -> None:
 def test_constructor_rejects_non_positive_rate(tmp_path: Path) -> None:
     cache = GeocodeCache(tmp_path)
     with pytest.raises(ValueError, match="rate_limit"):
-        NominatimGeocoder(
-            user_agent="x/1 (a@b.c)", cache=cache, rate_limit_per_second=0
-        )
+        NominatimGeocoder(user_agent="x/1 (a@b.c)", cache=cache, rate_limit_per_second=0)
 
 
 # ---------- happy path ----------
@@ -144,11 +142,7 @@ def test_query_parameters_sent(tmp_path: Path) -> None:
         SEARCH_URL,
         json=_ok_payload(),
         status=200,
-        match=[
-            matchers.query_param_matcher(
-                {"q": "1 Main St", "format": "json", "limit": "1"}
-            )
-        ],
+        match=[matchers.query_param_matcher({"q": "1 Main St", "format": "json", "limit": "1"})],
     )
     geocoder = _make_geocoder(tmp_path)
     geocoder.geocode("1 Main St")
@@ -250,9 +244,7 @@ def test_400_treated_as_failed(tmp_path: Path) -> None:
 
 @responses.activate
 def test_non_json_response_treated_as_failed(tmp_path: Path) -> None:
-    responses.add(
-        responses.GET, SEARCH_URL, body="not json at all", status=200
-    )
+    responses.add(responses.GET, SEARCH_URL, body="not json at all", status=200)
     geocoder = _make_geocoder(tmp_path)
     result = geocoder.geocode("anywhere")
     assert result.source == "failed"
@@ -324,9 +316,7 @@ def test_persistent_429_exhausts_retries_and_fails(tmp_path: Path) -> None:
     # High rate-limit so per-request rate-limiter sleeps don't pollute the
     # back-off counting. Back-off should be 1.0, 2.0, 4.0 between the three
     # retries.
-    geocoder = _make_geocoder(
-        tmp_path, sleeps=sleeps, max_retries=3, rate_limit_per_second=1000.0
-    )
+    geocoder = _make_geocoder(tmp_path, sleeps=sleeps, max_retries=3, rate_limit_per_second=1000.0)
     result = geocoder.geocode("rate-limited address")
 
     assert result.source == "failed"
@@ -389,9 +379,7 @@ def test_rate_limiter_sleeps_between_requests(tmp_path: Path) -> None:
 
     sleeps: list[float] = []
     # Clock fixed at 0 so back-to-back calls always look "0s elapsed"
-    geocoder = _make_geocoder(
-        tmp_path, sleeps=sleeps, monotonic=_FakeClock(0.0)
-    )
+    geocoder = _make_geocoder(tmp_path, sleeps=sleeps, monotonic=_FakeClock(0.0))
     geocoder.geocode("a")
     geocoder.geocode("b")
 

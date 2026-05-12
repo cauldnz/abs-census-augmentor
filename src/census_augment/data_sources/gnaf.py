@@ -183,28 +183,20 @@ class GnafDataSource:
         official_base_url: str = DEFAULT_GNAF_OFFICIAL_BASE_URL,
     ) -> None:
         if datum not in ("GDA2020", "GDA94"):
-            raise ValueError(
-                f"datum must be 'GDA2020' or 'GDA94'; got {datum!r}"
-            )
+            raise ValueError(f"datum must be 'GDA2020' or 'GDA94'; got {datum!r}")
         if mode not in ("remote", "cache", "official"):
-            raise ValueError(
-                f"mode must be 'remote', 'cache', or 'official'; got {mode!r}"
-            )
+            raise ValueError(f"mode must be 'remote', 'cache', or 'official'; got {mode!r}")
         if release != "latest":
             self._validate_release_format(release)
         if not (1900 <= census_year <= 2100):
-            raise ValueError(
-                f"census_year must be a plausible year; got {census_year!r}"
-            )
+            raise ValueError(f"census_year must be a plausible year; got {census_year!r}")
 
         self._release_request = release
         self._datum = datum
         self._mode = mode
         self._data_dir = Path(data_dir)
         self._s3_base_url = s3_base_url.rstrip("/")
-        self._s3_https_endpoint = (
-            s3_https_endpoint.rstrip("/") if s3_https_endpoint else None
-        )
+        self._s3_https_endpoint = s3_https_endpoint.rstrip("/") if s3_https_endpoint else None
         self._parquet_filter: re.Pattern[str] | None = (
             re.compile(parquet_filter) if parquet_filter else None
         )
@@ -352,8 +344,7 @@ class GnafDataSource:
             on_s3 = self._list_releases_on_s3()
             if not on_s3:
                 raise RuntimeError(
-                    f"refresh requested but no geoscape-*/ releases "
-                    f"found at {self._s3_base_url}."
+                    f"refresh requested but no geoscape-*/ releases found at {self._s3_base_url}."
                 )
             self._resolved_release = on_s3[-1]
             _log.info(
@@ -473,8 +464,7 @@ class GnafDataSource:
         self._validate_schema_post_view(con)
 
         _log.info(
-            "Opened G-NAF remote connection: release=%s, layout=%s, "
-            "files=%d, endpoint=%s",
+            "Opened G-NAF remote connection: release=%s, layout=%s, files=%d, endpoint=%s",
             release,
             layout.style,
             len(layout.parquet_locators),
@@ -499,13 +489,10 @@ class GnafDataSource:
         # SQL list literal of locators (URLs for remote, file paths for cache).
         # Forward-slash paths for cache mode so Windows backslashes don't
         # break DuckDB's parser.
-        items = [
-            self._locator_to_sql_string(loc) for loc in layout.parquet_locators
-        ]
+        items = [self._locator_to_sql_string(loc) for loc in layout.parquet_locators]
         list_sql = "[" + ", ".join(items) + "]"
         con.execute(
-            f"CREATE VIEW gnaf AS SELECT {layout.view_select_clause} "
-            f"FROM read_parquet({list_sql})"
+            f"CREATE VIEW gnaf AS SELECT {layout.view_select_clause} FROM read_parquet({list_sql})"
         )
 
     @staticmethod
@@ -572,9 +559,7 @@ class GnafDataSource:
             )
 
         picked = on_s3[-1]
-        _log.info(
-            "Resolved release='latest' from S3: %s (S3: %s)", picked, on_s3
-        )
+        _log.info("Resolved release='latest' from S3: %s (S3: %s)", picked, on_s3)
         return picked
 
     def _find_cached_releases(self) -> list[str]:
@@ -685,9 +670,11 @@ class GnafDataSource:
             response = client.head_bucket(Bucket=bucket)
             region = response.get("BucketRegion")
             if not region:
-                region = response.get("ResponseMetadata", {}).get(
-                    "HTTPHeaders", {}
-                ).get("x-amz-bucket-region")
+                region = (
+                    response.get("ResponseMetadata", {})
+                    .get("HTTPHeaders", {})
+                    .get("x-amz-bucket-region")
+                )
         except Exception as exc:  # noqa: BLE001 — we extract from the exception
             # ClientError stashes response headers on the exception.
             response_attr = getattr(exc, "response", {}) or {}
@@ -728,14 +715,12 @@ class GnafDataSource:
         paginator = s3.get_paginator("list_objects_v2")
 
         releases: set[str] = set()
-        for page in paginator.paginate(
-            Bucket=bucket, Prefix=list_prefix, Delimiter="/"
-        ):
+        for page in paginator.paginate(Bucket=bucket, Prefix=list_prefix, Delimiter="/"):
             for cp in page.get("CommonPrefixes", []) or []:
                 # Strip the base prefix to get just "geoscape-{YYYYMM}/"
                 full = cp["Prefix"]
                 if list_prefix and full.startswith(list_prefix):
-                    suffix = full[len(list_prefix):]
+                    suffix = full[len(list_prefix) :]
                 else:
                     suffix = full
                 m = _RELEASE_DIR_RE.match(suffix)
@@ -767,17 +752,11 @@ class GnafDataSource:
         """
         bucket, base_prefix = _parse_s3_url(self._s3_base_url)
         prefix = (base_prefix + "/") if base_prefix else ""
-        release_prefix = (
-            f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
-        )
+        release_prefix = f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
 
         # gnaf-loader: try the year-specific boundaries subdirectory first.
-        loader_subdir_prefix = (
-            f"{release_prefix}{self._gnaf_loader_subdir}/"
-        )
-        loader_objs = self._list_parquets_under_prefix(
-            bucket, loader_subdir_prefix
-        )
+        loader_subdir_prefix = f"{release_prefix}{self._gnaf_loader_subdir}/"
+        loader_objs = self._list_parquets_under_prefix(bucket, loader_subdir_prefix)
         if loader_objs:
             return loader_objs
 
@@ -795,30 +774,20 @@ class GnafDataSource:
         # ``custom/addresses.parquet``).
         legacy_objs: list[tuple[str, int]] = []
         has_explicit_filter = self._parquet_filter is not None
-        for key, size in self._list_parquets_under_prefix(
-            bucket, release_prefix
-        ):
-            relative = (
-                key[len(release_prefix):]
-                if key.startswith(release_prefix)
-                else key
-            )
+        for key, size in self._list_parquets_under_prefix(bucket, release_prefix):
+            relative = key[len(release_prefix) :] if key.startswith(release_prefix) else key
             if "/" in relative and not has_explicit_filter:
                 # Subdirectory parquet without explicit user opt-in —
                 # skip. Avoids picking up abs_2016_gccsa/,
                 # osm_amenities/, etc.
                 continue
             if not self._matches_legacy_filter(relative):
-                _log.debug(
-                    "Skipping legacy parquet (filter excluded): %s", key
-                )
+                _log.debug("Skipping legacy parquet (filter excluded): %s", key)
                 continue
             legacy_objs.append((key, size))
         return legacy_objs
 
-    def _list_parquets_under_prefix(
-        self, bucket: str, list_prefix: str
-    ) -> list[tuple[str, int]]:
+    def _list_parquets_under_prefix(self, bucket: str, list_prefix: str) -> list[tuple[str, int]]:
         """Return ``[(key, size_bytes), ...]`` for every ``*.parquet``
         anywhere under ``list_prefix`` (recursive)."""
         s3 = self._make_s3_client()
@@ -848,16 +817,12 @@ class GnafDataSource:
         """
         bucket, base_prefix = _parse_s3_url(self._s3_base_url)
         prefix = (base_prefix + "/") if base_prefix else ""
-        release_prefix = (
-            f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
-        )
+        release_prefix = f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
         loader_prefix = f"{release_prefix}{self._gnaf_loader_subdir}/"
 
         loader_objs = self._list_parquets_under_prefix(bucket, loader_prefix)
         if loader_objs:
-            urls = [
-                self._build_object_url(bucket, key) for key, _ in loader_objs
-            ]
+            urls = [self._build_object_url(bucket, key) for key, _ in loader_objs]
             return _GnafLayout(
                 style="gnaf-loader",
                 parquet_locators=urls,
@@ -867,9 +832,7 @@ class GnafDataSource:
         # Legacy: same listing semantics as cache mode.
         legacy_objs = self._list_parquet_objects_on_s3(release)
         if legacy_objs:
-            urls = [
-                self._build_object_url(bucket, key) for key, _ in legacy_objs
-            ]
+            urls = [self._build_object_url(bucket, key) for key, _ in legacy_objs]
             return _GnafLayout(
                 style="legacy",
                 parquet_locators=urls,
@@ -932,9 +895,7 @@ class GnafDataSource:
         """
         bucket, base_prefix = _parse_s3_url(self._s3_base_url)
         prefix = (base_prefix + "/") if base_prefix else ""
-        release_prefix = (
-            f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
-        )
+        release_prefix = f"{prefix}geoscape-{release}/{_RELEASE_PARQUET_SUBDIR}/"
 
         parquet_objects = self._list_parquet_objects_on_s3(release)
 
@@ -952,8 +913,7 @@ class GnafDataSource:
 
         total_bytes = sum(size for _, size in parquet_objects)
         _log.info(
-            "Downloading %d parquet file(s) for G-NAF release %s "
-            "(%.1f MB total) from s3://%s/%s",
+            "Downloading %d parquet file(s) for G-NAF release %s (%.1f MB total) from s3://%s/%s",
             len(parquet_objects),
             release,
             total_bytes / (1024 * 1024),
@@ -969,7 +929,7 @@ class GnafDataSource:
             # ``<release_dir>/address_principal_census_{year}_boundaries/``
             # — exactly what _detect_local_layout expects to find.
             relative = (
-                key[len(release_prefix):]
+                key[len(release_prefix) :]
                 if key.startswith(release_prefix)
                 else key.rsplit("/", 1)[-1]
             )
@@ -978,9 +938,7 @@ class GnafDataSource:
             dest.parent.mkdir(parents=True, exist_ok=True)
 
             if dest.exists() and dest.stat().st_size == size:
-                _log.debug(
-                    "Skipping %s: already present (%d bytes)", relative, size
-                )
+                _log.debug("Skipping %s: already present (%d bytes)", relative, size)
                 continue
 
             # Clean up any leftover .tmp from a previous interrupted run.

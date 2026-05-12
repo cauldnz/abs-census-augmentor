@@ -35,8 +35,11 @@ jobs:
       - name: Lint with ruff
         run: uv run ruff check .
 
+      - name: Verify ruff format
+        run: uv run ruff format --check .
+
       - name: Type-check with mypy
-        run: uv run mypy src/ tools/
+        run: uv run mypy src/ tools/ tests/
 
       - name: Run pytest
         run: uv run pytest tests/ -q
