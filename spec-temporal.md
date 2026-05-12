@@ -1,37 +1,36 @@
 # Temporal-Spatial Capability — Design Specification
 
-> **Status:** Draft for review (2026-05-12). Not yet implemented.
+> **Status:** Approved 2026-05-13 (reviewer feedback applied). Implementation in progress.
 >
-> **Relationship to main spec:** This document supplements [`spec.md`](spec.md) — it does not replace any section. The main spec describes the cross-sectional baseline (v1.0 → v1.4.2); this document describes the additions that turn the tool into a *temporal-spatial* augmentor. Once approved and partially implemented (Level 1 / Level 2), the relevant decisions will be merged into the main spec's §14 (Resolved Decisions) log.
+> **Relationship to main spec:** This document supplements [`spec.md`](spec.md) — it does not replace any section. The main spec describes the cross-sectional baseline (v1.0 → v1.4.2); this document describes the additions that turn the tool into a *temporal-spatial* augmentor. Decisions land in this document first; once implemented they get summarised into `spec.md` §14 (Resolved Decisions).
 >
 > **Companion artefacts:**
 > - [`BACKLOG.md`](BACKLOG.md) "Temporal + spatial augmentation" entry — the higher-level framing this document expands.
-> - PR #53 — the original backlog entry's PR. This document supersedes that entry's design sketch.
 
 ---
 
 ## Table of Contents
 
 1. [Purpose](#1-purpose)
-2. [The gap today](#2-the-gap-today)
+2. [The core semantic](#2-the-core-semantic)
 3. [Use cases](#3-use-cases)
 4. [Design principles](#4-design-principles)
 5. [Definitions](#5-definitions)
 6. [Per-dataset temporal semantics](#6-per-dataset-temporal-semantics)
-7. [ABS correspondence tables (boundary edition migration)](#7-abs-correspondence-tables-boundary-edition-migration)
+7. [ABS correspondence tables (deferred)](#7-abs-correspondence-tables-deferred)
 8. [Level 1 — Document the limitation](#8-level-1--document-the-limitation)
-9. [Level 2 — `input.date_column` + per-bucket runs](#9-level-2--inputdate_column--per-bucket-runs)
-10. [Level 3 — Correspondence-based boundary migration](#10-level-3--correspondence-based-boundary-migration)
-11. [Output schema additions](#11-output-schema-additions)
+9. [Level 2 — Temporal mode](#9-level-2--temporal-mode)
+10. [Level 3 — Cross-edition aggregation (deferred)](#10-level-3--cross-edition-aggregation-deferred)
+11. [Output schema](#11-output-schema)
 12. [G-NAF temporal handling](#12-g-naf-temporal-handling)
 13. [Caching strategy](#13-caching-strategy)
-14. [Error cases and edge conditions](#14-error-cases-and-edge-conditions)
+14. [Error cases](#14-error-cases)
 15. [Real-data verification additions](#15-real-data-verification-additions)
 16. [Backward compatibility](#16-backward-compatibility)
 17. [Out of scope](#17-out-of-scope)
-18. [Open questions for review](#18-open-questions-for-review)
+18. [Resolved decisions](#18-resolved-decisions)
 19. [Implementation roadmap](#19-implementation-roadmap)
-20. [Side-quest: `ato_personal_income` is misnamed](#20-side-quest-ato_personal_income-is-misnamed)
+20. [Side-quest: `ato_personal_income` → `abs_personal_income`](#20-side-quest-ato_personal_income--abs_personal_income)
 
 ---
 
@@ -39,257 +38,239 @@
 
 Add **per-row temporal selection** to `census-augment` so that each input row picks the dataset snapshot appropriate for *its* timestamp, rather than the entire input receiving one global snapshot determined by config.
 
-Three motivating workflows:
+The headline workflow: *for each transaction row with a date, give me the demographic snapshot closest to its timestamp — including using the SA2 boundaries that the dataset release was actually compiled against.*
 
-- **Longitudinal analysis** — "How did SA2-level income change between 2011 / 2016 / 2021 at this location?"
-- **Historical augmentation** — "I have 5 years of transaction logs; augment each row with the demographic snapshot closest to its date."
-- **Boundary-stable comparisons** — "ERP 2018 vs ERP 2023, joined on SA2." SA2 codes don't match 1:1 across ASGS editions; correspondence tables fix that.
-
-Today none of these workflows are supported in-tool. Users have to bucket data externally, run the pipeline N times with N configs, and join the results — a meaningful friction point flagged as "somewhat urgent" by the project owner.
+Today this is impossible — the tool is cross-sectional and treats all rows uniformly.
 
 ---
 
-## 2. The gap today
+## 2. The core semantic
 
-The tool is cross-sectional: **one run = one snapshot of every dataset for every row**. Spec.md §3's architecture diagram has no notion of time; spec.md §8's output schema doesn't track which release a value came from.
+Single most important sentence in this document — everything else follows from it:
 
-| Dimension | Locked to |
-|---|---|
-| ASGS boundary edition | `CensusConfig.year: Literal[2021]`, `CensusConfig.asgs_edition: Literal[3]` |
-| Census GCP DataPack | 2021 |
-| SEIFA | One edition per run (`seifa.release: 2021`) |
-| ERP | One yearly release per run (`erp.release: "latest"` or `"2024"`) |
-| DSS Payments | One quarterly release per run |
-| ABS Personal Income | One financial-year release per run |
-| Input rows | No date column. Same lat/lon at different timestamps → identical augmentation |
-| Boundary-edition migration | Not handled. We don't read ABS's correspondence tables |
-| G-NAF release | One per run (`gnaf.release: "latest"` or `"202506"`) |
+> **The SA2 (mesh block) boundaries used for a row's enrichment lookup must match the boundary edition the dataset release was originally compiled against.**
 
-The G-NAF address-lifecycle problem is a related concern: a 2010 row's address might not exist in the 2025 G-NAF release. Today we'd silently fail to geocode it; with temporal capability we should use the release closest to the row's date.
+Concretely:
+
+- A row dated 2017-06-01 needs SEIFA 2016 values (closest available release).
+- SEIFA 2016 was compiled against **ASGS Edition 2** (the 2016 SA2 boundaries).
+- So the spatial lookup for that row's SEIFA enrichment must use the **2016 SA2 boundary file**, not the 2021 one.
+- The 2016 spatial lookup gives a 2016 SA2 code — exactly the key SEIFA 2016 was indexed by.
+
+This propagates: a single row can pull values from multiple datasets, each potentially compiled against a different ASGS edition. The pipeline does **one spatial lookup per ASGS edition** referenced by that row's dataset bucket, not just one against the latest edition.
+
+The reference SA2 code reported in output (the row's *canonical identity*) is per the user-configured `temporal.reference_edition` (default: latest known, currently ASGS Edition 3 / 2021). This is a separate lookup from the per-dataset value lookups.
+
+Why this matters:
+
+- A 2016 SA2 boundary may have split into multiple 2021 SA2s in a growth corridor. Using the 2021 boundary to look up SEIFA 2016 values would pick the wrong SA2 — the lat/lon falls in a 2021 SA2 that didn't exist in 2016.
+- The reverse — using a 2016 boundary file to look up a 2021-edition release — would give a stale SA2 code that's not a key in the 2021 release.
+- The correct answer is: *look up at the boundary edition the release was actually keyed by*.
 
 ---
 
 ## 3. Use cases
 
-### UC-1 — Longitudinal augmentation (same row, multiple snapshots side-by-side)
-
-> "Show me median household income for this address in 2011, 2016, and 2021."
-
-**Today:** Three Pipeline runs with three different `census.year` configs; manual join.
-
-**Target:** One run, output columns `sa2_median_income_2011`, `sa2_median_income_2016`, `sa2_median_income_2021`.
-
-**Out of scope for Level 2.** This needs explicit multi-snapshot output, not per-row temporal selection. See §17.
-
-### UC-2 — Per-row temporal augmentation
+### UC-1 — Per-row temporal augmentation
 
 > "For each transaction row with a date, give me the snapshot closest to its timestamp."
 
 **Today:** Hand-bucket input by year, run N times, concat.
 
-**Target:** Set `input.date_column: transaction_date`; each row is augmented against the closest-available snapshot per registered dataset. The output gains `<dataset>_release` columns naming which snapshot was used.
+**Target:** Set `input.date_column: transaction_date`. Each row is augmented against the closest-available snapshot per registered dataset, with the spatial lookup happening at the *release's* boundary edition.
 
-**The headline use case for Level 2.**
+**The headline use case for v1 of temporal capability.**
 
-### UC-3 — Boundary-stable comparisons
+### UC-2 — Cross-edition transaction logs
 
-> "Compare ERP 2018 vs ERP 2023 at the SA2 level."
+> "I have 5 years of transactions spanning 2018-2024. Datasets across that span shifted from ASGS 2016 to ASGS 2021. I want each row enriched correctly with the right-edition spatial lookup."
 
-**Today:** Not supported in a way that produces correct values. ERP 2018 uses ASGS 2016 SA2 codes; ERP 2023 uses ASGS 2021 codes. They don't align 1:1. ~8% of SA2s changed between editions.
+UC-1 plus the additional constraint that **the row's `sa2_code` in output should be in a single consistent edition** (the configured `reference_edition`), so downstream consumers can groupby cleanly.
 
-**Target:** Configure a reference ASGS edition. The pipeline reads the ABS correspondence tables and migrates each row's enrichment values to the reference edition's SA2 code using population-weighted ratios. Output is on a single consistent geography even when the source rows spanned editions.
+The pipeline performs:
 
-**The headline use case for Level 3.**
+- Per-bucket per-edition spatial lookups (might be 2 editions: 2016 + 2021).
+- Per-dataset value lookups at each dataset's release edition.
+- Single canonical `sa2_code` per row in the reference edition.
+
+No value migration via correspondences needed for this use case — each enrichment value is correctly the value at that lat/lon in that dataset's release.
+
+### UC-3 — Longitudinal SA2-level aggregation (deferred)
+
+> "Aggregate ERP 2018 vs ERP 2023 at the SA2 level."
+
+For each row this produces one ERP 2018 value (looked up at ASGS 2016 SA2) and one ERP 2023 value (looked up at ASGS 2021 SA2). For per-row analysis this is fine.
+
+For **groupby canonical SA2 across rows**: SA2 codes split/merged between editions; SUM(ERP 2018 by canonical SA2) needs the correspondence ratios to redistribute values. This is the part Level 3 (deferred) handles.
+
+For point-based enrichment (the tool's primary use case), Level 3 is not needed.
 
 ### UC-4 — Within-year granularity
 
-> "I have monthly transaction data. The DSS dataset is quarterly. Pick the nearest DSS release per row."
+> "I have monthly transaction data; DSS is quarterly; pick the nearest DSS release per row."
 
-Same Level 2 mechanic — DSS has its own per-release cadence and the resolver respects it.
+Same UC-1 mechanic. The resolution rule (`closest` vs `closest_at_or_before`) is configurable.
 
 ---
 
 ## 4. Design principles
 
-1. **Cross-sectional default unchanged.** When `input.date_column` is unset (today's behaviour), every code path produces bit-identical output to v1.4.x. No silent migration of existing configs.
+1. **Boundary correctness.** The §2 invariant — boundary edition for the spatial lookup matches the dataset release's compiled edition. Not row-date-derived; release-derived.
 
-2. **Opt-in via a single config field.** Users add `input.date_column: <colname>` to turn temporal mode on. Per-dataset release resolution rules are derived from sensible defaults that can be overridden if needed.
+2. **Cross-sectional default unchanged.** A config without `input.date_column` runs cross-sectionally with the exact same code path it does today. Bit-identical output for v1.4.x configs.
 
-3. **Levels ship independently.** Level 1 (docs) lands first. Level 2 (`date_column` + per-bucket fan-out) lands second. Level 3 (correspondence-based boundary migration) lands later — and crucially, doesn't block Level 2 from being useful. Level 2 users with rows that span ASGS editions get a warning + per-row code-edition tagging, not a silent miscompare.
+3. **Opt-in via a single config field.** Users add `input.date_column: <colname>` to turn temporal mode on. Per-dataset release resolution rules derive from sensible defaults.
 
-4. **Per-row resolution, per-bucket execution.** The pipeline conceptually resolves a release per row, but actually fans out *per bucket* (rows with the same release-tuple) for fetcher / cache efficiency. With most workloads bucketing aggressively to a few releases, this avoids loading every release for every row.
+4. **Per-row resolution, per-bucket execution.** The pipeline conceptually resolves a release per row; physically it fans out per-bucket (rows sharing the same release-tuple) for cache / fetcher efficiency. Most workloads bucket aggressively to a small number of (release_per_dataset) tuples.
 
-5. **Datasets opt in.** A registered dataset declares its temporal capability via its spec markdown. Datasets that haven't declared it fall back to a single "latest" release for the whole run (same as today). User-added third-party datasets keep working without modification.
+5. **Datasets opt in.** A registered dataset declares its temporal capability via its spec markdown (`temporal:` block with `cadence`, `cover_basis`, `asgs_edition_by_release`). Datasets without it run cross-sectionally even in temporal mode (graceful degradation).
 
-6. **Real Data First (CLAUDE.md).** Every URL / filename / column-name claim in this document is verified against a live ABS / data.gov.au fetch before any parsing code lands. The Section 15 verification additions enforce this.
+6. **Open horizon, dataset-specific cadence.** No upper / lower bound on supported date range. Each dataset declares the releases it covers; the tool resolves per row against that. SEIFA's earliest is 2001; ATO PIA's is 2010-11; DSS's is 2014. They don't have to agree.
 
-7. **Output schema additions are additive.** New columns (`<dataset>_release`, etc.) appear only in temporal mode. Cross-sectional output is unchanged. This preserves spec.md §8 as the single source of truth for cross-sectional users.
+7. **Real Data First (CLAUDE.md).** Every URL, filename, column-name claim in this document is verified against a live ABS / data.gov.au fetch before parsing code lands. Section 15 enumerates the new probes.
+
+8. **Output additions are additive in temporal mode only.** Cross-sectional output is unchanged. New columns (`<dataset>_release`, `sa2_code_source` etc.) appear only when `input.date_column` is set.
 
 ---
 
 ## 5. Definitions
 
-The temporal vocabulary used throughout this document. Some terms are ABS-canonical; others are project-specific.
-
-- **Release.** A specific published instance of a dataset. SEIFA 2021. ERP 2023-24. DSS Payments June 2024. ATO PIA 2022-23. The dataset module's existing `resolved_release` attribute names it.
-- **Cadence.** How frequently a dataset publishes new releases. Per-Census (SEIFA, GCP), annual (ERP, ATO PIA), quarterly (DSS), continuous (G-NAF quarterly snapshots).
-- **Snapshot.** Equivalent to a release. We use "snapshot" when emphasising the time-frozen aspect ("the snapshot for this row's date") and "release" when emphasising the publication aspect ("the 2022-23 release").
-- **Release window.** The time period a release "covers" or applies to. ERP 2023 covers calendar year 2023. ATO PIA 2022-23 covers financial year 2022-23. DSS June 2024 quarter covers Apr-Jun 2024.
-- **ASGS edition.** A Statistical Geography Standard issue: Edition 3 (Jul 2021 – Jun 2026), Edition 4 (from Jul 2026). Each edition has its own SA2 boundaries; codes change between editions.
-- **Correspondence (or correspondence table).** ABS's canonical term for the table mapping one ASGS edition's regions to another's. Confirmed terminology — ABS does *not* use "concordance" despite some third-party docs doing so. CSV format with `RATIO_FROM_TO` weighted columns.
-- **Reference edition (or reference frame).** The user-chosen ASGS edition that all output SA2 codes get migrated to. Configurable; default = the latest edition the tool knows about (currently 2021).
-- **Release resolution rule.** How the pipeline picks the right release for a given input-row date. Default: `closest_at_or_before` (the most recent release whose window starts no later than the row's date).
-- **Bucket.** A group of input rows that share the same release-per-dataset tuple. The pipeline fans out per bucket for fetcher / cache efficiency.
-- **Temporal mode.** A pipeline run with `input.date_column` set. Contrast with **cross-sectional mode** (no `date_column`; today's behaviour).
+- **Release.** A specific published instance of a dataset. SEIFA 2021. ERP 2023-24. DSS Payments June 2024.
+- **Cadence.** How frequently a dataset publishes new releases. Per-Census, annual, quarterly, continuous.
+- **Snapshot.** Equivalent to a release. We use "snapshot" when emphasising the time-frozen aspect.
+- **Release window.** The time period a release "covers". ERP 2023-24 covers calendar year 1 Jul 2023 – 30 Jun 2024. ATO PIA 2022-23 covers financial year 2022-23. DSS June 2024 quarter covers calendar Q2 2024.
+- **ASGS edition.** A Statistical Geography Standard issue: Edition 1 (2011), Edition 2 (Jul 2016 – Jun 2021), Edition 3 (Jul 2021 – Jun 2026), Edition 4 (from Jul 2026). Each edition has its own SA2 boundaries; codes change between editions.
+- **Source ASGS edition (per release).** The edition the dataset release was originally compiled against. Stored per-release because some datasets (DSS, ERP, ATO PIA) transitioned mid-history — e.g. DSS uses ASGS 2016 for Q2-2015 through Q1-2023, ASGS 2021 from Q2-2023 onwards.
+- **Reference ASGS edition (configurable).** The edition all output `sa2_code` values are reported in. Defaults to the latest the tool knows about (currently Edition 3 / 2021).
+- **Release resolution rule.** How the pipeline picks the right release for a given row date. Two supported: `closest_at_or_before` (default) and `closest`.
+- **Bucket.** A group of input rows that share the same per-dataset release tuple.
+- **Temporal mode.** A pipeline run with `input.date_column` set. Contrast with **cross-sectional mode** (no `date_column`).
 
 ---
 
 ## 6. Per-dataset temporal semantics
 
-What each currently-registered dataset publishes, the time windows each release covers, and which ASGS edition each is on. Source-of-truth for the per-dataset metadata Level 2 will encode.
+What each currently-registered dataset publishes, the time windows each release covers, and which ASGS edition each is on. This drives the per-dataset `temporal:` metadata block.
 
-### 6.1 GCP DataPack (2021)
+### 6.1 GCP DataPack
 
-- **Cadence:** per-Census (5-yearly). 2011, 2016, 2021 published; 2026 due roughly Jun 2027.
-- **Coverage:** the Census reference date. 2021 = 10 Aug 2021. 2016 = 9 Aug 2016. 2011 = 9 Aug 2011.
-- **Earlier editions:** exist; on older geographies (Indigenous structure differs across editions; CCD / SLA pre-ASGS). Out of scope for v1.
-- **ASGS edition:** GCP 2011 / 2016 / 2021 each coded against contemporaneous ASGS edition.
+- **Cadence:** per-Census (5-yearly). 2011, 2016, 2021 published.
+- **Coverage:** Census reference date. 2021 = 10 Aug 2021. 2016 = 9 Aug 2016. 2011 = 9 Aug 2011.
+- **Source ASGS edition:** GCP 2011 → Edition 1; GCP 2016 → Edition 2; GCP 2021 → Edition 3.
+- **Current state in the tool:** GCP 2021 only. Adding 2016 and 2011 requires per-edition fetcher parameterisation (the existing one is templated on `census.year` already — the rest is URL bookkeeping and ASGS-edition-specific boundary support).
 
 ### 6.2 SEIFA
 
-- **Cadence:** per-Census. **2001 / 2006 / 2011 / 2016 / 2021** all have IRSAD / IRSD / IEO / IER published.
-- **Coverage:** the Census reference date.
-- **ASGS edition:** each SEIFA release is on its contemporaneous ASGS edition (2021 on Edition 3, 2016 on Edition 2, etc.).
-- **URLs:** 2021 has a predictable URL under `/statistics/people/people-and-communities/socio-economic-indexes-areas-seifa-australia/2021/`. 2011 and 2016 live in the legacy `abs@.nsf/mf/2033.0.55.001` archive — URLs less predictable, will need a real-fetch + URL-lock-down per edition. **2001 / 2006 not recommended for Level 2 scope** (CCD-coded; geography-shift work bigger than the dataset's value).
-- **Suggested registry split:** `seifa_2021` (current) + `seifa_2016` + `seifa_2011` as separate dataset specs sharing a common base. SEIFA-the-concept is what the user thinks about; the dataset-id is the implementation.
+- **Cadence:** per-Census. 2001, 2006, 2011, 2016, 2021 all have IRSAD/IRSD/IEO/IER published.
+- **Coverage:** Census reference date.
+- **Source ASGS edition:** each SEIFA release is on its contemporaneous edition.
+- **Current state:** `seifa_2021` only. `seifa_2016` and `seifa_2011` are tractable additions; older (2006, 2001) are on pre-ASGS geographies (CCD / SLA) — out of scope.
+- **URLs:** 2021 has a predictable URL. 2011 / 2016 live in the legacy `abs@.nsf/mf/2033.0.55.001` archive — URLs need per-edition lookup + real-fetch verify before each lands.
 
 ### 6.3 ERP (Regional Population, catalogue 3218.0)
 
 - **Cadence:** annual; 30 June snapshot.
-- **Coverage:** calendar year ending 30 June. ERP 2023-24 = 30 Jun 2024 snapshot, covers period 1 Jul 2023 – 30 Jun 2024.
-- **Historical depth:** 2001 onwards at SA2 level. 12+ years on the live ABS site; older years via AURIN mirror.
-- **ASGS edition:** **per-release.** The 2001–2021 series is published on ASGS 2016 boundaries. Releases from ~2021–22 onwards are on ASGS 2021. ABS back-restates one or two years on the new geography when transitioning. Encode as a per-release attribute, not a single global one.
+- **Coverage:** financial year ending 30 June.
+- **Historical depth:** 2001 onwards at SA2.
+- **Source ASGS edition: per-release.** 2001-2021 series on Edition 2; 2021-22 onwards on Edition 3. ABS back-restates 1-2 years on the new geography at edition transitions.
 
 ### 6.4 DSS Payment Demographic Data
 
 - **Cadence:** quarterly (Mar / Jun / Sep / Dec). Annual prior to mid-2014.
-- **Coverage:** quarter-end date. Sep 2025 quarter covers calendar Q3 2025.
-- **Historical depth:** SA2-coded data from **2015 onwards**. Earlier quarters have state / electorate / postcode / LGA only — not registerable at SA2 without losing the granularity.
-- **ASGS edition:** SA2 2016 from 2015-Q3 through 2023-Q1. **SA2 2021 from 2023-Q2 onwards.** Real boundary transition mid-dataset — Level 3 territory.
-- **URLs:** CKAN package `dss-payment-demographic-data` at data.gov.au; resources have UUIDs, resolve via `package_show`.
+- **Coverage:** quarter-end date. Sep 2025 quarter covers Jul-Sep 2025.
+- **Historical depth:** SA2-coded from 2015 onwards. Earlier quarters at state / postcode / LGA only — out of scope.
+- **Source ASGS edition:** Q3-2015 through Q1-2023 on Edition 2; Q2-2023 onwards on Edition 3.
 
 ### 6.5 ABS Personal Income in Australia (catalogue 6524.0.55.002)
 
-(See §20 — the `ato_personal_income` dataset-id is a misnomer.)
+(See §20 — what we currently call `ato_personal_income` is actually ABS Personal Income in Australia, not ATO Taxation Statistics. Rename is part of this work.)
 
-- **Cadence:** annual, by financial year (1 Jul – 30 Jun).
-- **Coverage:** the financial year. 2022-23 release covers 1 Jul 2022 – 30 Jun 2023.
-- **Historical depth:** 2010-11 through 2022-23 at SA2 on the live ABS site. Earlier via the predecessor catalogue 6524.0 ("Estimates of Personal Income for Small Areas"), 2001-02 onwards, on older geographies.
-- **ASGS edition:** **per-release.** Latest release (2022-23) explicitly on SA2 2021. The 2010-11 to ~2015-16 vintage was on SA2 2016; transition to SA2 2021 around 2019-20 or 2020-21.
+- **Cadence:** annual financial-year.
+- **Coverage:** financial year. 2022-23 release covers 1 Jul 2022 – 30 Jun 2023.
+- **Historical depth:** 2010-11 through 2022-23 at SA2 on live ABS. Earlier vintages on predecessor catalogue with older geographies — out of scope.
+- **Source ASGS edition:** per-release. 2010-11 through ~2018-19 on Edition 2; 2019-20 onwards on Edition 3.
 
-### 6.6 Cross-dataset temporal alignment table
+### 6.6 G-NAF
 
-For a row dated 2018-06-15, a `closest_at_or_before` resolver picks:
+- **Cadence:** quarterly via gnaf-loader (since 2014).
+- **Coverage:** the quarter-end snapshot. Addresses created / retired between releases.
+- **Source ASGS edition:** the MB_CODE in each G-NAF release is per-release; gnaf-loader names directories `address_principal_census_{year}_boundaries` for each ASGS edition (2016, 2021) and the data source already supports both via the `census_year` parameter.
 
-| Dataset | Resolved release | ASGS edition |
+### 6.7 Worked example — row dated 2019-06-01
+
+A `closest_at_or_before` resolver picks:
+
+| Dataset | Resolved release | Source ASGS edition |
 |---|---|---|
-| GCP DataPack | 2016 | 2016 |
-| SEIFA | 2016 | 2016 |
-| ERP | 2017-18 (snapshot 30 Jun 2018) | 2016 |
-| DSS | 2018-Q2 (June 2018 quarter) | 2016 |
-| ABS PIA | 2017-18 | 2016 |
-| G-NAF | ~202206 (the quarterly nearest before 2018-06-15) | 2016 |
+| GCP DataPack | 2016 | 2 |
+| SEIFA | 2016 | 2 |
+| ERP | 2018-19 | 2 |
+| DSS | 2019-Q2 | 2 |
+| ABS PIA | 2018-19 | 2 |
+| G-NAF | latest quarterly ≤ 2019-06-01 | 2 (via census_year=2016) |
 
-For a row dated 2024-09-01:
+All on ASGS Edition 2. **One** spatial lookup against the 2016 boundary file for the whole row. Output `sa2_code` is in reference edition (default 3 / 2021); per-dataset value columns are sourced from the 2016 lookup.
 
-| Dataset | Resolved release | ASGS edition |
+### 6.8 Worked example — row dated 2023-09-01
+
+| Dataset | Resolved release | Source ASGS edition |
 |---|---|---|
-| GCP DataPack | 2021 | 2021 |
-| SEIFA | 2021 | 2021 |
-| ERP | 2023-24 | 2021 |
-| DSS | 2024-Q3 (Sep 2024 quarter) | 2021 |
-| ABS PIA | 2022-23 | 2021 |
-| G-NAF | latest available quarterly < 2024-09-01 | 2021 |
+| GCP DataPack | 2021 | 3 |
+| SEIFA | 2021 | 3 |
+| ERP | 2022-23 | 3 |
+| DSS | 2023-Q3 | 3 |
+| ABS PIA | 2022-23 | 3 |
+| G-NAF | latest quarterly ≤ 2023-09-01 | 3 |
 
-So a row dated 2018 lands entirely on ASGS 2016 codes; a row dated 2024 entirely on 2021. A row dated 2021-08-01 straddles the transition (some datasets on 2016, others on 2021) — this is the canonical Level 3 use case.
+All on Edition 3. One spatial lookup against the 2021 boundary file. Output `sa2_code` matches the lookup.
+
+### 6.9 Worked example — row dated 2022-06-01 (transition straddle)
+
+| Dataset | Resolved release | Source ASGS edition |
+|---|---|---|
+| GCP DataPack | 2021 | 3 |
+| SEIFA | 2021 | 3 |
+| ERP | 2021-22 | 3 |
+| DSS | 2022-Q2 | **2** (transition not complete) |
+| ABS PIA | 2021-22 | 3 |
+
+**Mixed editions.** Two spatial lookups required for this row's bucket: one against 2016 boundaries (for DSS) and one against 2021 (everything else). The row gets DSS values from the 2016 lookup; the other datasets from the 2021 lookup; the canonical `sa2_code` from the reference-edition lookup.
+
+This is correct behaviour — DSS Q2-2022 was indexed by ASGS 2016 SA2 codes, so we must look up at that edition's boundaries.
 
 ---
 
-## 7. ABS correspondence tables (boundary edition migration)
+## 7. ABS correspondence tables (deferred)
 
-ABS publishes per-level correspondence files on the ASGS Edition page.
+ABS publishes per-level correspondence tables (`CG_<from-level>_<from-year>_<to-level>_<to-year>.csv`) for migrating values across ASGS editions. Confirmed by research:
 
-### 7.1 Available correspondences (ASGS 2016 → 2021)
+- URL pattern: `https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/correspondences/<filename>`
+- CSV format with `RATIO_FROM_TO` population-weighted shares.
+- SA2 2016 → 2021 file ~170 KB; MB 2016 → 2021 file ~14 MB.
 
-| Level | Filename | Size |
-|---|---|---|
-| Mesh Block | `CG_MB_2016_MB_2021.csv` | ~14 MB |
-| SA1 | `CG_SA1_2016_SA1_2021.csv` | ~2.4 MB |
-| SA2 | `CG_SA2_2016_SA2_2021.csv` | ~170 KB |
-| SA3 | `CG_SA3_2016_SA3_2021.csv` | ~21 KB |
-| SA4 | `CG_SA4_2016_SA4_2021.csv` | ~7 KB |
-| GCCSA | `CG_GCCSA_2016_GCCSA_2021.csv` | ~3 KB |
+**Status:** Not needed for the headline use case (point-based per-row enrichment — §2 invariant handles correctness via per-edition spatial lookups). Required only for SA2-level cross-edition aggregation (UC-3) and for value migration when downstream consumers need a single canonical SA2-edition coding for *aggregated* values.
 
-Plus several non-ABS-structure correspondences (LGA, SED, CED, POA) that we do not need for v1.
-
-URL base: `https://www.abs.gov.au/statistics/standards/australian-statistical-geography-standard-asgs-edition-3/jul2021-jun2026/access-and-downloads/correspondences/<FILENAME>`
-
-Filename convention: `CG_<FROM_LEVEL>_<FROM_YEAR>_<TO_LEVEL>_<TO_YEAR>.csv`.
-
-### 7.2 Schema
-
-Confirmed columns for `CG_SA2_2016_SA2_2021.csv` (verify against live file before parser lands):
-
-- `SA2_MAINCODE_2016` (9-digit string)
-- `SA2_NAME_2016`
-- `SA2_MAINCODE_2021`
-- `SA2_NAME_2021`
-- `RATIO_FROM_TO` (float in [0, 1])
-
-For each FROM region, the rows naming it sum (in `RATIO_FROM_TO`) to approximately 1. This represents the share of the FROM region's *population* that lands in each TO region.
-
-### 7.3 Edge cases
-
-- **One-to-one passthrough:** ~92% of SA2 2016 codes appear in exactly one row with `RATIO_FROM_TO ≈ 1` and a different `SA2_MAINCODE_2021`. Most boundaries don't change.
-- **Splits:** one SA2 2016 → N SA2 2021 codes. Each row's ratio < 1; sum ≈ 1.
-- **Merges:** N SA2 2016 codes → one SA2 2021 code. Each row's ratio ≈ 1 against the same destination.
-- **Brand-new SA2s:** SA2 2021 codes with no 2016 ancestor. These appear as the TO side of one or more rows where the FROM side is a partial donor — i.e. they're not "new" in the sense of being unjoinable, but in the sense of being a destination only.
-- **Retired SA2s:** SA2 2016 codes that don't appear as a FROM at all (very rare; mostly happens at higher levels like LGA).
-- **Encoding of "no concordance":** when one side is unmapped, ABS uses a placeholder code. Convention TBD — **verify against the actual file before parser lands** (CLAUDE.md Real Data First).
-
-### 7.4 Weighting basis
-
-Population-weighted. ABS docs: "As most ABS data relates to population, standard correspondences have a weighting calculated on the location of the population." No area-weighted alternative is published. For value migration we just multiply: `migrated_value = sum over donor rows of (donor_value * RATIO_FROM_TO)`.
-
-This is correct for **count / sum / average** statistics. For **rank / decile / percentile** statistics (SEIFA scores, AusRank, etc.) the population-weighted migration produces meaningful but not strictly correct values — a percentile is a function of the whole population's distribution, not of individual SA2 values. Level 3 should warn about this; the alternative ("just don't migrate; preserve the source edition's code") is exposed via the reference-edition config.
-
-### 7.5 SA2 2021 → 2026 (ASGS Edition 4)
-
-ASGS Edition 4 lands progressively from Jul 2026 — Main Structure (including SA2) in Jul 2026, ready for the 2026 Census. Correspondence files will follow the same `CG_*` filename convention at the Edition 4 equivalent URL. **Not actionable yet** — register at the Edition 4 page when ABS publishes it; the only architectural change needed is parameterising the FROM/TO years in the URL/filename.
+**Deferred** to a future PR. Spec sections that previously described Level 3 mechanics are retained in §10 as a forward-pointing sketch.
 
 ---
 
 ## 8. Level 1 — Document the limitation
 
-**Scope:** Add `docs/temporal-data.md` (~150 lines) covering:
+**Status before any code: ship a documentation note explaining the current limitation and forward-pointing to the planned capability.**
 
-- The current limitation in plain English ("the tool is cross-sectional").
-- The current workaround pattern (bucket by date → N runs with N configs → concat).
-- Forward reference to this spec for the planned escape hatches.
+- New file: `docs/temporal-data.md` (~120 lines).
+- Cross-linked from `docs/index.md` and `docs/usage-library.md`.
+- Covers: what cross-sectional means, the workaround pattern (bucket externally + run N times), forward reference to this spec.
 
-**Effort:** ~30 minutes. **Worth doing now** regardless of whether Level 2 / 3 land — so users hitting the tool with time-series data don't file the gap as a bug.
-
-**Deliverable:** one markdown file, cross-linked from `docs/index.md` and `docs/usage-library.md`.
-
-**No code changes.**
+Lands first; small standalone PR; not blocked on the rest.
 
 ---
 
-## 9. Level 2 — `input.date_column` + per-bucket runs
+## 9. Level 2 — Temporal mode
 
-The headline temporal capability. Per-row release selection; per-bucket execution; output gains release-tracking columns. **No** boundary migration — that's Level 3.
+The headline implementation: per-row temporal selection, per-bucket execution, per-edition spatial lookups, single canonical SA2-edition output.
 
-### 9.1 Config schema additions
+### 9.1 Config additions
 
 ```yaml
 input:
@@ -297,101 +278,110 @@ input:
   date_column: transaction_date     # NEW. Optional. ISO 8601 dates.
 
 temporal:                            # NEW. Optional block.
-  resolution: closest_at_or_before   # closest_at_or_before | closest | strict
-  out_of_range: fail                 # fail | nearest | drop
-  per_dataset:                        # optional per-dataset overrides
+  resolution: closest_at_or_before   # closest_at_or_before (default) | closest
+  out_of_range: fail                  # fail (default) | nearest
+  reference_edition: 3                # NEW. Default: latest known ASGS edition.
+  per_dataset:                        # optional per-dataset resolution overrides
     dss_payments:
-      resolution: closest             # DSS is quarterly; default to nearest
+      resolution: closest
 ```
 
 **`input.date_column` semantics:**
 
 - Must reference a column in the input DataFrame.
-- Parsed via `pd.to_datetime(..., errors="raise")`. Bad rows fail the run with a clear "row N has invalid date" error.
-- Timezone-naive dates assumed UTC. Timezone-aware dates honoured.
+- Parsed via `pd.to_datetime(..., errors="raise")`. Bad rows fail the run with a clear message.
 - Absent → cross-sectional mode (today's behaviour).
 
 **`temporal.resolution` values:**
 
-- `closest_at_or_before` (default) — picks the most recent release whose coverage window starts ≤ the row's date. Sensible for cause-and-effect analysis ("what was the SA2 demographic at the time of this transaction?").
-- `closest` — picks the release whose midpoint is nearest to the row's date. Sensible for granular datasets like DSS where Q1 2024 covers Jan-Mar but the row might be at Apr 1 — `closest` picks Q1, not Q2.
-- `strict` — fail the row if no release window exactly contains the date.
+- `closest_at_or_before` (default) — picks the most recent release whose coverage-window start ≤ row date.
+- `closest` — picks the release whose coverage-window midpoint is nearest the row date. Useful for granular quarterly/monthly datasets.
 
-**`temporal.out_of_range` values:**
+**`temporal.out_of_range`:**
 
-- `fail` (default) — abort the run on the first row whose date predates the earliest release of any dataset that gets touched.
-- `nearest` — fall back to the earliest release, with a WARNING log per affected row.
-- `drop` — silently drop the row from output, with a count in the summary.
+- `fail` (default) — abort if any row's date predates the earliest release of any touched dataset.
+- `nearest` — clamp to the earliest available; one WARNING per affected row.
 
-### 9.2 Algorithm
+**`temporal.reference_edition`:**
 
-```
-1. Validate input.date_column exists; parse to datetime.
-2. For each registered dataset in config.variables:
-     determine the set of releases needed across all rows.
-     (most workloads bucket to 1-3 releases per dataset)
-3. Bucket rows by the *tuple* of per-dataset releases.
-   Most rows fall into a small number of buckets even
-   for wide date ranges.
-4. For each bucket:
-     a. Build a per-bucket Pipeline with the bucket's release tuple.
-     b. Run augment() on the bucket's rows.
-5. Concat the per-bucket outputs.
-6. Restore the original row order (the input's index).
-7. Append per-dataset release columns (see §11).
-```
+- The ASGS edition all output `sa2_code` values get reported in. Default: latest known (currently 3).
+- Pipeline does one lookup per row against the reference edition for the canonical `sa2_code`.
+- Per-dataset value lookups happen against each release's source edition (which may differ from reference).
 
-**Example.** Input: 1000 rows spanning Jan 2018 – Dec 2024. Variables: `seifa_irsd`, `erp_population`, `gcp_median_age`.
+### 9.2 Per-dataset `temporal:` metadata block
 
-- SEIFA: rows pre-2021 use 2016; rows post-2021 use 2021. 2 buckets.
-- GCP: same split. 2 buckets.
-- ERP: yearly releases. Up to 7 buckets (2018, 2019, …, 2024).
-
-Bucket tuple per row = `(seifa_release, erp_release, gcp_release)`. Total distinct buckets ≤ 7. Each bucket gets one Pipeline instance, one set of fetcher calls, one cache-load round-trip.
-
-Critically: **per-bucket Pipeline reuses the existing `Pipeline.augment(df)` machinery unchanged.** Bucketing is a higher-level orchestrator. This keeps the core pipeline simple and avoids invasive changes to spec.md §3's architecture.
-
-### 9.3 Per-dataset capability declaration
-
-Each registered dataset's spec markdown gains a `temporal:` block (default = absent → cross-sectional, "latest" release):
+Each registered dataset's spec markdown gains a temporal declaration:
 
 ```yaml
 ---
 id: erp_by_sa2
 namespace: ERP
-status: active
 fetcher: census_augment.datasets._erp:ErpDataSource
 
-# NEW
 temporal:
   cadence: annual
-  cover_basis: financial_year_end   # how to compute coverage window
+  cover_basis: financial_year_ending      # how to compute window from release id
+  release_id_format: "YYYY-YY"            # e.g. "2022-23"
+  available_releases:                      # may be a function instead of static
+    - "2018-19"
+    - "2019-20"
+    - "2020-21"
+    - "2021-22"
+    - "2022-23"
   asgs_edition_by_release:
-    "2001": 2     # ASGS Edition 2 (older era; pre-2016)
-    "2016": 2     # Edition 2
-    "2021": 3     # Edition 3
+    "2018-19": 2
+    "2019-20": 2
+    "2020-21": 2
+    "2021-22": 3                          # transition
     "2022-23": 3
-    "2023-24": 3
+---
 ```
 
-- `cadence` is purely informational (drives default `resolution`).
-- `cover_basis` tells the pipeline how to compute each release's coverage window from its release identifier.
-- `asgs_edition_by_release` tells Level 3 which edition a value comes from. Optional for Level 2; **required** for Level 3.
+`cover_basis` enumerable values:
 
-Datasets without a `temporal:` block stay cross-sectional. A temporal-mode run touching such a dataset uses its single configured release for every row — same as today.
+- `census_reference_date` — for per-Census datasets (GCP, SEIFA). Window: instant.
+- `financial_year_ending` — window: 1 Jul prior year through 30 Jun release year.
+- `calendar_year_ending` — window: 1 Jan through 31 Dec.
+- `quarter_ending` — window: the 3 calendar months ending at the quarter date.
 
-### 9.4 New library API
+Datasets without a `temporal:` block fall back to their configured `release` for every row in temporal mode — with a WARNING log on first use.
 
-`Pipeline.augment(df)` already exists. **No new public method** is needed — the existing one delegates to the new bucketing orchestrator internally:
+### 9.3 Algorithm
+
+```
+1. Validate input.date_column exists; parse to datetime.
+2. For each registered dataset in config.variables:
+     Get its temporal metadata + resolution rule.
+     For each row, resolve a release using the rule.
+3. Bucket rows by the per-dataset release tuple.
+4. For each bucket:
+     a. Collect the set of ASGS editions referenced by the bucket's datasets.
+     b. For each edition E in that set:
+          Spatial-lookup all the bucket's rows against E's boundaries.
+          Row gains an {edition: sa2_code_E} mapping.
+     c. Also spatial-lookup all rows against the reference edition's
+        boundaries → canonical `sa2_code`.
+     d. For each (dataset, release) in the bucket:
+          source_edition = release's edition
+          source_sa2 = row's sa2_code in source_edition
+          look up the enrichment value at that SA2 in that release
+5. Concat per-bucket outputs; restore original row order; emit augmented df.
+```
+
+Critically: step 4d **respects the §2 invariant** — values come from the lookup at the right boundary edition for each release. Per-edition spatial lookups within a bucket are how this is mechanically achieved.
+
+### 9.4 Pipeline API surface
+
+`Pipeline.augment(df)` keeps its public signature. Internally it branches:
 
 ```python
-def augment(self, df, *, ...):
+def augment(self, df, *, address_column=_UNSET, ...):
     if self._config.input.date_column is None:
         return self._augment_cross_sectional(df, ...)
     return self._augment_temporal(df, ...)
 ```
 
-The `AugmentResult` dataclass gains optional fields:
+`AugmentResult` gains optional fields:
 
 ```python
 @dataclass
@@ -402,157 +392,89 @@ class AugmentResult:
     is_fully_enriched: pd.Series
     geocoding_failed: pd.Series
     sa2_unmatched: pd.Series
-    # NEW
-    releases_used: dict[str, set[str]] | None = None  # {"erp_by_sa2": {"2022-23", "2023-24"}, ...}
-    out_of_range_rows: pd.Series | None = None        # bool per row, only set in temporal mode
+    # NEW (None in cross-sectional mode):
+    releases_used: dict[str, set[str]] | None = None
+    out_of_range_rows: pd.Series | None = None
 ```
 
-### 9.5 New CLI behaviour
+`releases_used` is the per-dataset set of releases actually touched: `{"erp_by_sa2": {"2021-22", "2022-23"}, ...}`.
 
-`census-augment run --config config.yaml` runs in temporal mode automatically when `input.date_column` is set. The human-readable summary gains a "Per-dataset releases used" section.
+### 9.5 Caching strategy
 
-A new `census-augment validate --config config.yaml --temporal` check exercises the temporal config without doing a real run (parses dates, computes bucket count, summarises).
+The existing per-release cache layout already supports multiple releases per dataset. The new requirement is **per-edition boundary caches**:
 
-### 9.6 Caching strategy at Level 2
+```
+<data_dir>/
+├── boundaries/
+│   ├── 2016/
+│   │   ├── SA2_2016_AUST_SHP_GDA94.zip
+│   │   └── SA2_2016_AUST_SHP_GDA94/{shp,dbf,prj,shx,feather}
+│   └── 2021/
+│       ├── SA2_2021_AUST_SHP_GDA2020.zip
+│       └── SA2_2021_AUST_SHP_GDA2020/{shp,dbf,prj,shx,feather}
+├── census/
+│   ├── 2016/
+│   └── 2021/
+├── mb/
+│   ├── 2016/
+│   └── 2021/
+└── ...
+```
 
-The existing per-release cache layout (`<data_dir>/<dataset_id>/<release>/...`) already supports multiple releases coexisting — the v1.3 dataset modules just don't load multiple at once. Level 2 changes the *loading* logic, not the *layout*.
+This is a **breaking change** to cache layout. Per reviewer guidance, no auto-migration: users wipe and re-download (this is the only cache requiring re-download; everything else stays put).
 
-Sidecar caches (`<metadata>.parsed.pkl`, `<shp>.feather` from PR #49) work unchanged — each release has its own.
+### 9.6 What Level 2 alone produces
 
-### 9.7 What Level 2 doesn't solve
+Per-row enrichment values come from the correct source-edition lookup. Each row's `sa2_code` is in `reference_edition`. Per-dataset `<dataset>_release` columns track which release was used.
 
-Crucially: a Level 2 run whose rows span ASGS editions produces output where **`sa2_code` for some rows is on 2016 codes and for others on 2021 codes**. These codes don't join 1:1. Downstream consumers doing `df.groupby("sa2_code")` get nonsense for the cross-edition slice.
+Cross-row aggregation by `sa2_code` works for any rows whose datasets are all on the reference edition. For rows whose dataset releases span editions, the per-dataset enrichment values are *point-correct* but **not aggregation-comparable** at SA2 level without Level 3.
 
-The Level 2 output schema flags this clearly:
-
-- New column `sa2_code_edition` per row (`"2016"` or `"2021"`).
-- WARNING log if any temporal run produces rows in multiple editions.
-- The summary names how many rows are in each edition.
-
-Users who need cross-edition joins must opt into Level 3 (or pin all their work to a single edition by filtering the input).
+The reference-edition `sa2_code` is still a valid groupby key — it just means values from different editions are pooled into the same canonical SA2 bucket. For most analysis this is what users want.
 
 ---
 
-## 10. Level 3 — Correspondence-based boundary migration
+## 10. Level 3 — Cross-edition aggregation (deferred)
 
-Level 2 picks the right snapshot per row. Level 3 puts every row's SA2 code into a single chosen **reference edition**, migrating values via correspondence-table ratios.
+**Deferred to a future PR.** Documented here as a sketch so the deferred work is captured.
 
-### 10.1 Config schema additions (on top of Level 2)
+Use case: a user with rows spanning ASGS 2016 and 2021 wants to do `df.groupby("sa2_code").agg(sum=...)` over enrichment values, and the SA2 boundary changes between editions matter.
 
-```yaml
-temporal:
-  reference_edition: 2021            # NEW. ASGS edition all SA2 codes get migrated to.
-  migration_warn_on_rank: true       # NEW. WARN when migrating rank-type values (see §7.4).
-```
+Mechanism: use ABS correspondence tables (§7) to migrate enrichment values from source edition to reference edition, weighted by population shares. Adds a new dataset registration `asgs_correspondences` with its own fetcher; adds per-field `migration_strategy` metadata to existing dataset specs; adds correspondence-based value rewriting in the per-bucket Pipeline.
 
-`reference_edition` defaults to the latest known edition (2021 today; 2026 when Edition 4 lands).
-
-### 10.2 New dataset: `asgs_correspondences`
-
-ABS correspondence tables are registered as a first-class dataset in the registry (spec.md §20), with its own fetcher pulling from the URL pattern in §7.1.
-
-- **Dataset id:** `asgs_correspondences`
-- **Namespace:** `ASGS` (but not directly exposed in `variables:`; loaded only by the migration orchestrator)
-- **Fetcher:** `CorrespondencesDataSource` — pulls the per-level CSV per edition pair (e.g. `CG_SA2_2016_SA2_2021.csv`) into a parquet sidecar
-- **Schema:** {from_code, to_code, ratio} indexed by from_code
-
-### 10.3 Migration algorithm
-
-```
-For each per-bucket Pipeline result:
-    if bucket's edition == reference_edition:
-        skip — values already on reference codes.
-    else:
-        for each enrichment column:
-            join bucket_df.sa2_code → correspondence (FROM)
-            multiply value by RATIO_FROM_TO
-            group_by(TO code), sum
-        replace bucket_df.sa2_code with TO code
-        annotate row with sa2_resolution_method = "correspondence_migrated"
-```
-
-For one-to-one passthrough rows (RATIO_FROM_TO = 1), this is a no-op except for the code renaming.
-
-For splits / merges, this is the real work. The migration is *value-preserving* in aggregate — a count of 100 persons in a 2016 SA2 that splits 60/40 across two 2021 SA2s produces values of 60 and 40 in the output, totalling 100.
-
-### 10.4 What gets migrated, what doesn't
-
-| Value type | Migration | Why |
-|---|---|---|
-| Counts (population, dwellings) | Population-weighted sum | Correct |
-| Sums (total income, total dwellings) | Population-weighted sum | Correct under the assumption that the variable is proportional to population |
-| Averages (median age) | **Not migrated** — surface the source-edition value with a warning | Average of averages is not an average; needs the underlying distribution |
-| Ratios (% renters) | Migrate numerator + denominator separately, then divide | PRESET features handle this naturally — they're already num/denom internally |
-| Ranks / deciles / percentiles | Migrate the source variable (the underlying score) but **warn** that the migrated rank isn't strictly meaningful | See §7.4 |
-
-The dataset spec markdown gains a per-field `migration_strategy` annotation:
-
-```yaml
-schema:
-  population_total:
-    type: integer
-    migration_strategy: weighted_sum
-  median_age:
-    type: float
-    migration_strategy: preserve_source_edition
-```
-
-### 10.5 Output schema additions at Level 3
-
-- `sa2_code` is the reference-edition code.
-- `sa2_code_source` is the source-edition code (the one before migration).
-- `sa2_code_edition` is the source edition (`"2016"`, `"2021"`).
-- `sa2_resolution_method` extended: existing values plus `"correspondence_migrated"`.
-
-The fully-enriched-on-reference-edition output joins cleanly on `sa2_code` across rows from any edition.
-
-### 10.6 PRESETs and migration
-
-PRESETs (`PRESET.pct_renters`, etc.) are computed *after* migration. Their numerator and denominator source columns get migrated separately; the ratio is computed on the migrated values. This is the right behaviour for percentages — fine to inherit from how PRESETs already separate num/denom in their spec.
-
-### 10.7 G-NAF at Level 3
-
-A G-NAF lookup returns an MB code. If the MB is from an older ASGS edition, the mesh-block correspondence table (`CG_MB_2016_MB_2021.csv`) migrates it to the reference edition's MB code, then the existing MB→SA2 fast path proceeds.
-
-For point-in-polygon (lat/lon inputs), the spatial index is loaded from the reference edition's SA2 boundaries — so the resolution is naturally in the reference edition.
+The §2 invariant is preserved — values are still computed at the right edition's boundary; migration is a post-processing step that re-keys them to the reference edition for aggregation.
 
 ---
 
-## 11. Output schema additions
+## 11. Output schema
 
-Cross-sectional output (today's) is unchanged. Temporal-mode output adds these columns:
+### Cross-sectional mode
 
-### Always present in temporal mode
+**Unchanged from spec.md §8.** Bit-identical for v1.4.x configs.
 
-| Column | Type | Description |
-|---|---|---|
-| `<input.date_column>` | datetime | Echoed from input (already there; no rename) |
-| `seifa_release` | str | The SEIFA release used for this row, if any SEIFA variable was requested |
-| `erp_by_sa2_release` | str | The ERP release |
-| `dss_payments_release` | str | The DSS release |
-| `ato_personal_income_release` | str | The PIA release (despite the misnomer; see §20) |
-| `gcp_2021_release` | str | The GCP DataPack release |
-| `gnaf_release` | str | The G-NAF release the address was looked up against |
+### Temporal mode additions
 
-Datasets not referenced in `variables:` don't get a release column.
-
-### Level 3 additions
+Always present in temporal mode:
 
 | Column | Type | Description |
 |---|---|---|
-| `sa2_code_source` | str | The pre-migration SA2 code |
-| `sa2_code_edition` | str | The source ASGS edition (`"2016"`, `"2021"`) |
-| `sa2_resolution_method` | str | Extended enum; gains `"correspondence_migrated"` |
+| `<input.date_column>` | datetime | Echoed from input (no rename) |
+| `<dataset_id>_release` | str | Release used for this row, per touched dataset. E.g. `seifa_2021_release`, `erp_by_sa2_release`, etc. |
+| `sa2_code_edition` | int | The reference ASGS edition the row's canonical `sa2_code` is in. Constant per run. |
 
-### Order
+Present when at least one dataset's release source edition differs from the reference edition:
 
-Per spec.md §8 column order, the new columns slot in after the existing reserved seven:
+| Column | Type | Description |
+|---|---|---|
+| `<dataset_id>_sa2_code_source` | str | Per-dataset SA2 code in the source edition. Equals the canonical `sa2_code` when source == reference. |
+
+Order: per spec.md §8, new columns slot in *after* the existing reserved seven and *before* enrichment columns. So:
 
 ```
 <input cols>, geo_lat, geo_lon, geo_source, geo_match_score,
 sa2_code, sa2_name, sa2_resolution,
-[Level 3: sa2_code_source, sa2_code_edition,]
-[temporal: <dataset>_release columns, ordered alphabetically by dataset id,]
+[sa2_code_edition,]
+[temporal: <dataset>_release columns,]
+[level-2-cross-edition: <dataset>_sa2_code_source columns,]
 <enrichment cols>
 ```
 
@@ -560,252 +482,195 @@ sa2_code, sa2_name, sa2_resolution,
 
 ## 12. G-NAF temporal handling
 
-G-NAF publishes quarterly via gnaf-loader. Addresses are *created* and *retired* between releases:
+G-NAF publishes quarterly via gnaf-loader. The data source already supports `census_year` selection (2016 vs 2021 boundaries embedded in the parquet).
 
-- New subdivisions appear as new gnaf_pids in the next release.
-- Demolished or renumbered addresses are retired (still in some prior releases; not in the latest).
+For temporal mode:
 
-A 2010 transaction at an address that was created in the 2015 G-NAF release is unmatchable with the 2010 G-NAF release. A 2024 transaction at an address that was demolished in 2020 is unmatchable with the 2024 G-NAF release.
+- `gnaf.release` becomes a per-row resolved value (closest at-or-before, same rule as datasets).
+- The bucket-orchestrator picks the right gnaf-loader directory per row (e.g. `address_principal_census_2016_boundaries` for rows pre-mid-2022, `address_principal_census_2021_boundaries` for later rows).
+- DuckDB connection per (release, census_year) bucket; closed when the bucket finishes.
 
-**Resolution rule for `gnaf.release`:**
+Special cases:
 
-- If `temporal.resolution = closest_at_or_before`: use the G-NAF quarterly nearest before the row's date.
-- If `temporal.resolution = closest`: same as `closest_at_or_before` (G-NAF doesn't have a meaningful "after" — addresses don't go back in time).
-- **Special case:** if a row's date is before the earliest G-NAF release available (2014 for gnaf-loader, earlier for the official ABS PSV), the resolver picks the earliest available and logs a WARNING.
-
-This needs:
-
-- The G-NAF data source's `available_releases()` to return the list of quarterly releases discoverable in the S3 bucket.
-- A per-quarter cache key (already in place; the cache layout uses `<data_dir>/gnaf/{YYYYMM}/`).
-
-**Per-bucket DuckDB:** running with N G-NAF releases means N DuckDB connections, each loading its release's parquet. With cache mode (~10 GB per release) this is disk-expensive; with remote mode (httpfs streaming) it's bandwidth-expensive. Mitigate with `closest` resolution + bucket-aggressive defaults (e.g. quarterly buckets, not per-row).
+- Address didn't exist yet in the row-date's release window → falls through to address-component / fuzzy / Nominatim tiers, as today.
+- Address retired after row-date but in a more recent release → not currently handled; tracked as deferred (see §17).
 
 ---
 
 ## 13. Caching strategy
 
-The existing per-release cache layout already supports multiple releases coexisting:
+Most caches are already per-release. The breaking changes in this work:
 
-```
-<data_dir>/
-├── boundaries/                    # NEW: per-edition subdirs
-│   ├── 2016/
-│   │   └── SA2_2016_AUST_SHP_GDA2020.zip (+ extracted)
-│   └── 2021/
-│       └── SA2_2021_AUST_SHP_GDA2020.zip (+ extracted)
-├── census/                        # NEW: per-edition subdirs (mirrors boundaries)
-│   ├── 2016/
-│   └── 2021/
-├── correspondences/               # NEW
-│   ├── CG_SA2_2016_SA2_2021.csv
-│   ├── CG_MB_2016_MB_2021.csv
-│   └── ...
-├── erp_by_sa2/                    # already per-release
-│   ├── erp-sa2-2017-18.xlsx (+ parquet sidecar)
-│   ├── erp-sa2-2022-23.xlsx
-│   └── ...
-├── seifa_2021/                    # already per-release
-├── seifa_2016/                    # NEW (registered as separate dataset)
-├── dss_payments/                  # already per-release
-│   ├── dss-2018-Q2.xlsx
-│   ├── dss-2024-Q3.xlsx
-│   └── ...
-├── ato_personal_income/           # already per-release
-├── gnaf/{YYYYMM}/                 # already per-release
-└── ...
-```
+| Cache | Before | After | Migration |
+|---|---|---|---|
+| `boundaries/` | Flat, single edition | `<edition-year>/` subdirs | Wipe + redownload |
+| `census/` | Flat, single edition | `<edition-year>/` subdirs | Wipe + redownload |
+| `mb/` | Flat, single edition | `<edition-year>/` subdirs | Wipe + redownload |
 
-**Boundary cache restructure** is the only invasive change. Today `boundaries/` is flat — adding edition subdirs requires migrating existing caches. Approach: on first temporal-mode run that needs multiple editions, the boundary fetcher detects the flat legacy cache + migrates it into the `2021/` subdir, leaving a `.migrated` marker so the migration runs once. Documented in CHANGELOG; transparent to the user.
+Per reviewer guidance, no auto-migration. Documented as a breaking change in CHANGELOG; users clear their cache and run `census-augment fetch ...` to repopulate.
 
-**`asgs_correspondences/` subdir** is new. ~25 MB total for all six edition-pair correspondence files; small enough to fetch eagerly on first temporal-mode run.
+Dataset-specific caches (`seifa_2021/`, `erp_by_sa2/`, `dss_payments/`, `abs_personal_income/`) already use per-release filenames and don't need restructuring. They just gain more files when historical releases are registered.
 
 ---
 
-## 14. Error cases and edge conditions
+## 14. Error cases
 
 ### 14.1 Bad date column data
 
-- Column referenced by `input.date_column` doesn't exist in input → loud `ValueError` with the column name and the available columns.
-- Some rows have unparseable dates (e.g. "N/A", "TBD", or wrong format) → fail the run with a per-row error listing the first 3 bad rows + their row indices. Don't silently coerce to NaT.
-- Column is all-null → fall back to cross-sectional mode with an INFO log? Or fail loudly? **Recommend fail loudly** — user explicitly asked for temporal mode, give them a clear error.
+- `input.date_column` references a missing column → loud `ValueError` listing columns.
+- Some dates unparseable → fail the run with the first 3 bad row indices.
+- All-null column → fail loudly (user opted into temporal; we shouldn't silently regress to cross-sectional).
 
 ### 14.2 Out-of-range dates
 
 Per `temporal.out_of_range`:
 
-- `fail` (default) — abort. The first row whose date predates *any* dataset's earliest release fails the whole run.
-- `nearest` — clamp to the earliest available release; WARN per affected row.
-- `drop` — silently drop the row; count in `RunSummary.out_of_range_dropped`.
+- `fail` (default) — abort. List of affected row indices in the error.
+- `nearest` — clamp to earliest available release; one WARNING per row, with a `RunSummary` counter of clamped rows.
 
 ### 14.3 Dataset has no temporal capability
 
-A registered dataset without a `temporal:` block in its spec markdown uses its configured `release` for every row in a temporal-mode run. This is "graceful degradation" — a custom user-added dataset doesn't break the temporal-mode run, it just produces the same value for every row (the configured release).
+A registered dataset without a `temporal:` block in its spec markdown uses its configured `release` for every row in a temporal-mode run. WARNING logged once per run. `releases_used` reflects the single release.
 
-The summary names datasets that fell back to non-temporal mode. The user can opt in by adding `temporal:` to their dataset spec.
+### 14.4 Bucketing volume
 
-### 14.4 Bucketing overflow
+Bucket count = product of per-dataset release counts that the input touches. With 5 datasets and a 7-year input span, worst case is ~7 × 5 = 35 quarters × 7 = 245 buckets — most quickly bounded by the slowest cadence (DSS quarterly). G-NAF resolution defaults to quarterly buckets too.
 
-A pathologically date-diverse input (e.g. 5 years of DSS quarters × 5 years of ERP × all SEIFA / GCP editions touched by date span) could produce a large number of buckets. With four datasets and 5 years of data, bucket count is bounded by ~5 × 20 = 100, which is fine. With G-NAF added it could be 100 × 20 = 2000 — still manageable.
+In practice: with annual cadence for most datasets and `closest_at_or_before` resolution, a 5-year input span produces ~5 unique buckets per dataset, ~25 buckets total. Each bucket is a single Pipeline run — no per-row overhead.
 
-But: **per-bucket Pipeline instances** mean per-bucket fetcher loads. With cache mode warm this is just disk reads; with remote mode it's network. Defaults should bias toward "fewer buckets":
+### 14.5 Cross-edition straddle
 
-- DSS quarterly with monthly-input data: default `closest` (not `closest_at_or_before`) so January's row picks Q1, not Q4-of-previous-year.
-- G-NAF: default resolution is per-year, not per-quarter. The cost of a slightly stale G-NAF release for a 6-month-old transaction is dwarfed by the cost of loading a different DuckDB per quarter.
-
-### 14.5 Migration produces fractional values
-
-For weighted-sum migration, a 2016 SA2 with `population_total = 100` that splits 0.6 / 0.4 produces values 60 and 40. Fine — these are still integer-like.
-
-But: `population_aged_65_plus = 13` that splits 0.6 / 0.4 produces 7.8 and 5.2 — fractional. The spec.md §8 schema doesn't say integer counts must be integer; we round to nearest integer at migration time with a one-line note in the output schema.
-
-### 14.6 Reference edition not yet supported
-
-If the user sets `temporal.reference_edition: 4` (ASGS Edition 4) before Edition 4 correspondences ship: clear `ValueError` listing the supported reference editions.
+Per §6.9 — a single row's bucket can reference multiple ASGS editions. Handled by multi-edition spatial lookup within the bucket. No special user-visible error; the per-dataset `<dataset>_sa2_code_source` column reveals when source ≠ reference.
 
 ---
 
 ## 15. Real-data verification additions
 
-Per CLAUDE.md Real Data First, every new external artefact gets a real-fetch + parser-verify step.
+Per CLAUDE.md Real Data First:
 
-`tools/verify_real_parsers.py` gains:
+- **ASGS 2016 boundary fetch.** New probe in `verify_real_parsers.py`. Verifies the 2016 boundary file's CRS (should be GDA94 / EPSG:4283 vs 2021's GDA2020 / EPSG:7844) and SA2 code schema (should be `SA2_MAIN16` vs 2021's `SA2_CODE21`).
+- **Historical SEIFA fetch.** Probe for SEIFA 2016 (and 2011 if added). Verifies the multi-sheet workbook structure matches the parser's assumptions per edition.
+- **Per-release ABS PIA fetch.** Probe for ABS PIA 2018-19 (Edition 2 era) vs 2022-23 (Edition 3 era). Verifies column schema is consistent across the edition transition.
+- **Per-release ERP fetch.** Same: probe for ERP 2017-18 vs 2022-23.
+- **G-NAF quarterly variant.** Probe for `address_principal_census_2016_boundaries` directory existence in the gnaf-loader bucket.
 
-- Fetch each of the six SA2-level / SA1 / MB correspondence CSVs (~20 MB total across all SA-level files).
-- Parse each; verify column names match §7.2.
-- Spot-check: ratios sum to ~1 per FROM region (within 0.01 tolerance for rounding).
-- Spot-check: at least one known split (e.g. a specific SA2 2016 code we know was split).
-
-For the new historical SEIFA / ERP / DSS / ATO PIA releases registered:
-
-- Fetch the earliest registered release (e.g. SEIFA 2011) + the latest (e.g. SEIFA 2021).
-- Verify the schema is consistent enough for the same parser to read both. If not, the historical-release support is per-edition (separate parser per edition).
-
-`tools/fetch_real_data.py` gains a `--correspondences` flag (defaults on) and per-historical-release flags (`--seifa-year 2016`, etc.).
-
-The new `.github/workflows/real-data-check.yml` (Phase 3, PR #57) auto-picks up the new probes via `verify_real_parsers.py`.
+`tools/fetch_real_data.py` gains `--edition` flags for boundary / census downloads (`--edition 2`, `--edition 3`, default 3).
 
 ---
 
 ## 16. Backward compatibility
 
-**Strong commitment: zero behavioural change for v1.4.x configs.**
+**Strong commitment:** zero behavioural change for v1.4.x cross-sectional configs.
 
-- A config without `input.date_column` runs cross-sectionally with the exact same code path it does today.
-- The `release` field on each dataset's config block still does what it does today (pin a specific release for a cross-sectional run).
-- Output schema for cross-sectional runs is unchanged — no new columns, no renamed columns.
-- The library `Pipeline.augment(df)` signature is unchanged in cross-sectional mode; the new fields on `AugmentResult` are `None`-valued.
+- A config without `input.date_column` runs cross-sectionally with the exact same code path.
+- Output schema for cross-sectional runs is unchanged.
+- Library `Pipeline.augment(df)` signature unchanged; new `AugmentResult` fields are `None` in cross-sectional mode.
 
-The first temporal-mode run with a 1.4.x config will fail validation at config-parse time if temporal options are mis-specified, not at runtime. This is consistent with the existing Pydantic-validates-up-front pattern.
+**Breaking changes documented:**
+
+- Boundary / census / mb cache layouts move to `<edition>/` subdirs. Users wipe cache and re-fetch.
+- `ato_personal_income` dataset renames to `abs_personal_income`; `ATO` namespace renames to `ABS_PIA`. Users with `ATO.foo` variable references update to `ABS_PIA.foo`. See §20.
 
 ---
 
 ## 17. Out of scope
 
-For this design, deliberately:
-
-- **Multi-snapshot side-by-side output (UC-1).** "Show me 2011, 2016, 2021 income for this address simultaneously" is a different operation — it's `pivot` over time, not `join_asof`. Users wanting this run the pipeline three times with three different `census.year` configs, or build their own multi-call wrapper. Could be a future `Pipeline.augment_multi_release(df, years=[2011, 2016, 2021])` API; not now.
-- **Sub-annual ABS PIA / ERP.** These are annual datasets at the source. Within-year interpolation is interpolation, not augmentation.
-- **2026 Census preview.** ASGS Edition 4 ships from Jul 2026; the 2026 Census release lands in mid-2027. We won't support either until the actual artefacts ship.
-- **Custom user correspondence tables.** A user with their own region-to-SA2 mapping (e.g. school catchments → SA2) could in principle reuse the migration infrastructure. Out of scope for v1.
+- **Multi-snapshot side-by-side output.** "Give me 2011 + 2016 + 2021 income for the same row in three columns" is a different operation (pivot, not asof-join). Out of scope.
+- **G-NAF retirement-aware lookup.** "Address X existed in 2018 but was retired in 2022; row is dated 2020; use the latest release that still had X." Tracked as a deferred refinement; today addresses missing from the resolved release fall through to fuzzy / Nominatim.
+- **Custom user correspondence tables.** A user with school-catchment → SA2 mapping could in principle reuse the Level 3 infrastructure. Future work.
+- **Level 3 cross-edition value migration** (correspondence-based). Deferred — see §7, §10.
+- **Sub-cadence interpolation.** ERP is annual; we don't interpolate to make it monthly.
+- **ASGS Edition 4 (2026).** ABS Edition 4 ships from Jul 2026. We'll register support when actual artefacts ship.
+- **Historical pre-ASGS geographies.** SEIFA 2001/2006 use CCD/SLA; out of scope.
 
 ---
 
-## 18. Open questions for review
+## 18. Resolved decisions
 
-Decisions worth your call before any code lands.
+All open questions from the v1 draft are resolved (2026-05-13):
 
-### Q1. Default resolution rule
+### Q1 — Default resolution rule: `closest_at_or_before`
 
-**Proposed:** `closest_at_or_before`. Causally correct ("what was the demographic at the time of this transaction"). Matches financial-grade "as-of" semantics.
+Both `closest_at_or_before` and `closest` supported. `closest_at_or_before` is default — causally correct for as-of analysis.
 
-**Alternative:** `closest`. Picks the release whose midpoint is nearest. Better for "what's the most representative snapshot" semantics but causally weaker.
+### Q2 — Out-of-range default: `fail`
 
-**Mixed proposal:** dataset-specific defaults — `closest_at_or_before` for annual + per-Census datasets; `closest` for DSS (quarterly, so the "wrong side" of the resolution rule misses by at most ~45 days).
+Both `fail` and `nearest` supported. `fail` is default — loud is better than silently using a wildly inappropriate release.
 
-### Q2. Out-of-range default
+### Q3 — Historical depth: open horizon
 
-**Proposed:** `fail`. Loud + actionable. User has to make an explicit decision.
+No upper / lower bound. Each dataset declares its own time range via `available_releases` in its spec metadata. Per-dataset cadence (annual / quarterly / per-Census) flows naturally from the metadata.
 
-**Alternative:** `nearest`. More forgiving; risks silently using a wildly inappropriate release (e.g. using ERP 2001 for a 1990 transaction).
+The §2 invariant — boundary edition matches the release's compiled edition — guarantees that historical datasets get spatially looked up correctly regardless of when they were published.
 
-### Q3. Historical SEIFA / ERP / PIA depth
+Initial historical scope (in this work):
 
-**Proposed:** Register **2016 onwards** for SEIFA / ERP / ATO PIA. Older releases (2011, 2006, 2001) live on different ASGS editions and the URLs are less predictable.
+- SEIFA 2016 (Edition 2)
+- GCP 2016 (Edition 2)
+- ERP back to 2016 (Edition 2 series)
+- DSS back to 2015 (the earliest SA2-coded quarter)
+- ABS PIA back to 2010-11
 
-**Alternative:** Go back further — 2011 specifically — because Level 3's correspondence support makes the geography migration tractable. Trade-off: more dataset specs to maintain.
+Pre-2011 datasets (CCD / SLA geography) remain out of scope.
 
-**Note:** GCP DataPack registration extends naturally too — `gcp_2016` and `gcp_2011` as separate datasets sharing a common base.
+### Q4 — Migration of averages/medians: preserve source value
 
-### Q4. Migration semantics for averages / medians
+**Resolved (implementer's call):** When Level 3 (cross-edition migration) is implemented, average / median / rank-type values will be **preserved at the source-edition SA2** with a WARNING. Mathematical reason: the population-weighted *average of averages* is not an average — we'd need the underlying distribution to do better. Documenting this is honest; doing it anyway and producing subtly-wrong numbers is not.
 
-**Proposed:** Preserve source-edition value; warn. Population-weighted average of medians is wrong; we don't have the underlying distribution to do better.
+For Level 2 alone (this PR), the question doesn't arise — values come from the source-edition lookup and aren't migrated.
 
-**Alternative:** Just do the weighted average anyway and let the user accept that. Faster to implement; more often subtly wrong.
+### Q5 — Level 2-only output with mixed editions: emit with per-dataset source-SA2 column
 
-### Q5. Level 2-only output without ASGS migration
+**Resolved (implementer's call):** Emit the row with both the canonical reference-edition `sa2_code` AND a per-dataset `<dataset>_sa2_code_source` column when source ≠ reference. WARNING on the run summary listing affected datasets / row counts.
 
-What happens when a Level 2 (no L3) run produces rows in mixed ASGS editions?
+Reasoning: the row's enrichment values *are* point-correct (looked up at the right boundary edition). The mixed-edition concern is only about aggregation, and surfacing the source SA2 lets downstream consumers do their own per-dataset groupby if they need to.
 
-**Proposed:** Emit the row with its source-edition SA2 code; add `sa2_code_edition` column; WARN once per run. Downstream consumers see correct codes but must handle the edition split themselves.
+Refusing-to-run would be more restrictive than the data correctness requires.
 
-**Alternative:** Refuse to run; require Level 3 to be opted in. More restrictive, fewer subtle bugs.
+### Q6 — `ato_personal_income` rename: yes, breaking
 
-### Q6. `ato_personal_income` rename
+**Resolved:** rename to `abs_personal_income`; namespace `ATO` → `ABS_PIA`. Breaking change. Documented in CHANGELOG.
 
-The dataset is misnamed (see §20). Renaming is a breaking change for users with configs using `ATO.foo`. Options:
+### Q7 — Cache directory restructure: no auto-migration
 
-a) **Leave alone, document** as a known misnomer.
-b) **Rename to `abs_personal_income`**, alias the old name in the registry for backward compatibility.
-c) **Rename in temporal-spec PR**, batch the disruption with the other config changes.
-
-**Proposed:** (b). Costs ~5 lines of code; closes the bug; no user disruption.
-
-### Q7. Cache directory restructure for boundaries
-
-**Proposed:** Auto-migrate flat `boundaries/SA2_2021_AUST_SHP_GDA2020.zip` into `boundaries/2021/SA2_2021_AUST_SHP_GDA2020.zip` on first temporal-mode run; leave a `.migrated` marker. Transparent.
-
-**Alternative:** Require user to run `census-augment clear-cache` first. Cleaner but disruptive.
+**Resolved:** wipe cache; users re-fetch. Documented in CHANGELOG.
 
 ---
 
 ## 19. Implementation roadmap
 
-| Phase | Scope | Effort | Dependencies |
-|---|---|---|---|
-| **L1** | `docs/temporal-data.md` documenting the current limitation + workaround. | ~30 min | None — ship now |
-| **L2.0** | Per-dataset `temporal:` blocks in all existing dataset spec markdown files; no pipeline change. | ~1 day | None |
-| **L2.1** | Bucketing orchestrator (`Pipeline._augment_temporal`); `input.date_column` config; per-bucket fan-out. Cross-sectional output identical. | ~3 days | L2.0 |
-| **L2.2** | Per-dataset release columns in temporal output; `AugmentResult` additions. | ~1 day | L2.1 |
-| **L2.3** | G-NAF release-per-bucket; G-NAF `available_releases()` helper. | ~2 days | L2.1 |
-| **L2.4** | Historical SEIFA / ERP / PIA / GCP registration; real-data verification. | ~3 days | L2.0 |
-| **L3.0** | `asgs_correspondences` dataset + parser + parquet cache; real-data verification against the live `CG_*` CSVs. | ~2 days | L2.0 |
-| **L3.1** | Migration orchestrator (the join + weighted-sum + groupby); per-field `migration_strategy` annotations. | ~3 days | L3.0 |
-| **L3.2** | Reference-edition config; SA2 code rewriting in output; `sa2_code_source` / `sa2_code_edition` columns. | ~1 day | L3.1 |
-| **L3.3** | Cache layout restructure (edition-subdirs for boundaries); migration helper. | ~1 day | L3.1 |
-| **L3.4** | PRESET interaction with migration; per-PRESET migration tests. | ~1 day | L3.2 |
+| Phase | Scope | Lands as |
+|---|---|---|
+| **A** | Refined spec (this document) + `docs/temporal-data.md` (Level 1) | One PR |
+| **B** | Per-dataset `temporal:` metadata blocks in all 4 spec markdown files; Pydantic schema for the metadata; no pipeline behaviour change yet | One PR |
+| **C** | `ato_personal_income` → `abs_personal_income` rename (breaking) | One PR |
+| **D** | Boundary / census / mb cache restructure to per-edition subdirs; `BoundariesDataSource` parameterised on edition | One PR |
+| **E** | `input.date_column` + `temporal` config block + Pydantic validation; pipeline branches in `augment()`; bucketing orchestrator; per-edition spatial lookups; output schema additions; `AugmentResult` additions | One PR (this is the big one — ~3 days of work) |
+| **F** | Historical dataset registrations: SEIFA 2016, GCP 2016, ERP 2016+, DSS 2015+, ABS PIA 2010+. Each lands with real-data verification | Multiple PRs (one per dataset) |
+| **G** | G-NAF release-per-bucket; quarterly resolution | One PR |
+| **H** | Examples + docs polish: `examples/temporal_augmentation.py`, `examples/historical_lookup.py`, updates to `docs/usage-*.md` | One PR |
 
-Total: **~3 weeks** for full L1 + L2 + L3. L2 alone is ~10 days and ships independently useful. L1 ships immediately.
-
-Each level lands as its own PR cluster; L2 / L3 are themselves multi-PR sequences (~5 PRs each) so review stays tractable.
+Level 3 (cross-edition value migration via correspondences) lives in its own follow-up roadmap once Level 2 is in users' hands.
 
 ---
 
-## 20. Side-quest: `ato_personal_income` is misnamed
+## 20. Side-quest: `ato_personal_income` → `abs_personal_income`
 
-While researching dataset cadences, the agent verified that what we call `ato_personal_income` (`src/census_augment/datasets/_ato.py`, namespace `ATO`) actually fetches **ABS catalogue 6524.0.55.002 "Personal Income in Australia"**, not ATO Taxation Statistics.
+What we call `ato_personal_income` is actually **ABS catalogue 6524.0.55.002 "Personal Income in Australia"** — a LEED-derived ABS product. Not ATO Taxation Statistics. The misnomer dates from v1.3 when the dataset was registered.
 
-ABS PIA is a LEED-derived ABS product (using ATO data as one input). ATO publishes its own "Individuals" tables annually but at SA4 / postcode granularity, not SA2 — so the current implementation is correct, the **name is misleading**.
+Per reviewer guidance, breaking change is acceptable:
 
-Recommended action (Q6 in §18 above):
+- Dataset id: `ato_personal_income` → `abs_personal_income`
+- Namespace: `ATO` → `ABS_PIA`
+- Module: `src/census_augment/datasets/_ato.py` → `src/census_augment/datasets/_abs_pia.py`
+- Spec file: `datasets/ato_personal_income.md` → `datasets/abs_personal_income.md`
+- Cache dir: `<data_dir>/ato_personal_income/` → `<data_dir>/abs_personal_income/`
+- All test references updated.
 
-- Add a new dataset registration `abs_personal_income` (namespace `ABS_PIA` or similar — avoiding the over-broad `ABS`).
-- Keep `ato_personal_income` / `ATO` namespace aliased for backward compatibility (`v2.0` breaking-change candidate).
-- Document in CHANGELOG + the dataset's spec markdown.
-
-Not strictly part of the temporal spec, but worth fixing in the same PR cluster since the dataset's `temporal:` block needs writing anyway.
+Configs with `ATO.foo` variable references must update to `ABS_PIA.foo`. CHANGELOG entry explicit. No alias / deprecation period.
 
 ---
 
 ## End of spec
 
-Awaiting review. Send specific feedback on §18's open questions, the level scope (L1 / L2 / L3 split), or anything else worth pushing back on.
+Implementation begins from Phase A.
