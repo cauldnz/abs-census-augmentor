@@ -49,6 +49,11 @@ class InputConfig(_StrictModel):
     address_column: str | None = None
     latitude_column: str | None = None
     longitude_column: str | None = None
+    #: Optional date column for temporal mode (see `spec-temporal.md` §9).
+    #: When set, each row picks the dataset snapshot closest to its date,
+    #: looked up at the boundary edition the release was compiled
+    #: against. When ``None`` (default) the pipeline runs cross-sectionally.
+    date_column: str | None = None
 
     @model_validator(mode="after")
     def _validate_locator_columns(self) -> InputConfig:
@@ -228,6 +233,43 @@ class GeocodingConfig(_StrictModel):
         return self
 
 
+class TemporalResolutionConfig(_StrictModel):
+    """Per-dataset resolution override (see ``TemporalConfig.per_dataset``)."""
+
+    resolution: Literal["closest_at_or_before", "closest"] | None = None
+
+
+class TemporalConfig(_StrictModel):
+    """Temporal-mode behaviour (see ``spec-temporal.md`` §9.1).
+
+    Active only when ``input.date_column`` is set. Ignored otherwise.
+
+    Fields:
+
+    - ``resolution`` — global default rule for picking a per-row release.
+      ``closest_at_or_before`` (default) → most recent release whose
+      coverage window starts ≤ row date. ``closest`` → release whose
+      coverage-window midpoint is nearest the row date.
+    - ``out_of_range`` — what to do when a row's date predates the
+      earliest known release of a touched dataset. ``fail`` (default)
+      aborts the run. ``nearest`` clamps to the earliest available
+      release with a WARNING per affected row.
+    - ``reference_edition`` — the ASGS edition all output ``sa2_code``
+      values get reported in. Defaults to the latest known (currently 3
+      / 2021). Per-dataset value lookups happen at each release's
+      source edition (which may differ from reference) and the §2
+      invariant is preserved by per-edition spatial lookups.
+    - ``per_dataset`` — overrides for specific datasets, indexed by
+      dataset id. For datasets with quarterly cadence (DSS), setting
+      ``closest`` often makes more sense than ``closest_at_or_before``.
+    """
+
+    resolution: Literal["closest_at_or_before", "closest"] = "closest_at_or_before"
+    out_of_range: Literal["fail", "nearest"] = "fail"
+    reference_edition: Literal[1, 2, 3, 4] = 3
+    per_dataset: dict[str, TemporalResolutionConfig] = Field(default_factory=dict)
+
+
 class Config(_StrictModel):
     input: InputConfig
     output: OutputConfig
@@ -235,6 +277,10 @@ class Config(_StrictModel):
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     geocoding: GeocodingConfig
     variables: dict[str, str]
+    #: Temporal-mode tuning. Ignored when ``input.date_column`` is unset.
+    #: Defaults are sensible if you just set ``input.date_column`` without
+    #: configuring this block.
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
 
     @field_validator("variables")
     @classmethod

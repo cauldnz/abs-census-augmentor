@@ -9,6 +9,30 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase E.1 — Config schema + release resolver
+
+Schema-layer additions for temporal mode. Pipeline orchestrator
+(Phase E.2) follows separately.
+
+- `InputConfig.date_column` — optional column name for temporal mode.
+- New `TemporalConfig` block (Pydantic), with `resolution`,
+  `out_of_range`, `reference_edition`, `per_dataset` overrides.
+- New `src/census_augment/_temporal.py`:
+  - `release_window(release_id, cover_basis)` — coverage-window math
+    for the four `cover_basis` values (`census_reference_date`,
+    `financial_year_ending`, `calendar_year_ending`,
+    `quarter_ending`).
+  - `resolve_release(row_date, metadata, rule, out_of_range)` —
+    the per-row resolver. `closest_at_or_before` (default) and
+    `closest` rules; `fail` (default) and `nearest` out-of-range.
+  - `OutOfRangeDateError` carries dataset id, row date, earliest
+    release, row index for actionable error messages.
+  - `to_date(value)` — coerce date / datetime / pandas.Timestamp /
+    ISO string to `datetime.date`.
+- 22 new tests in `tests/test_temporal_helpers.py`.
+
+No pipeline behaviour change yet. Phase E.2 wires bucketing through.
+
 ### Temporal Phase D — Cache restructure to per-ASGS-edition subdirs (BREAKING)
 
 The boundary, census DataPack, and Mesh Block caches now live in
