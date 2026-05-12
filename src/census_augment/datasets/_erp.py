@@ -278,8 +278,11 @@ def _coerce_number(cell: object) -> object:
 # ---- fetcher registration ------------------------------------------------
 
 
-def _build_fetcher(root: Path) -> ErpDataSource:
-    return ErpDataSource(root=root)
+def _build_fetcher(root: Path, release: str | None = None) -> ErpDataSource:
+    kwargs: dict[str, object] = {"root": root}
+    if release is not None:
+        kwargs["release"] = release
+    return ErpDataSource(**kwargs)  # type: ignore[arg-type]
 
 
 def _register() -> None:

@@ -58,12 +58,18 @@ class CensusEnricher:
         variables: dict[str, str],
         output_prefix: str = "sa2_",
         data_dir: Path | None = None,
+        dataset_release_overrides: dict[str, str] | None = None,
     ) -> None:
         self._datapacks = datapacks
         self._catalog = catalog
         self._variables = dict(variables)
         self._output_prefix = output_prefix
         self._data_dir = data_dir
+        #: Optional per-dataset release overrides (temporal mode).
+        #: When set, _make_fetcher passes the override through to the
+        #: registry's factory. Cross-sectional mode leaves this empty
+        #: and fetchers construct with their default release.
+        self._dataset_release_overrides: dict[str, str] = dict(dataset_release_overrides or {})
         self._validate_no_synthetic_prefix_collision()
 
     def build_lookup(self) -> pd.DataFrame:
@@ -192,6 +198,10 @@ class CensusEnricher:
         which dispatches to the factory each dataset module registered
         at import time. If no factory is registered the registry
         raises :class:`RegistryError` with a useful diagnostic.
+
+        When a per-dataset release override is set (temporal mode,
+        :class:`Pipeline._augment_temporal` populates this), the
+        override is passed through to the factory.
         """
         if self._data_dir is None:
             # Tests / direct callers may not have a data_dir; honour
@@ -204,7 +214,10 @@ class CensusEnricher:
 
         from .datasets import registry  # noqa: PLC0415
 
-        return registry.make_fetcher(dataset_id, root=self._data_dir / dataset_id)
+        kwargs: dict[str, Any] = {"root": self._data_dir / dataset_id}
+        if dataset_id in self._dataset_release_overrides:
+            kwargs["release"] = self._dataset_release_overrides[dataset_id]
+        return registry.make_fetcher(dataset_id, **kwargs)
 
     # ---- PRESET integration --------------------------------------------
 

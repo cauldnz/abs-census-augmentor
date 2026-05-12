@@ -289,8 +289,11 @@ def _coerce_dss_cell(cell: object) -> object:
 # ---- fetcher registration ------------------------------------------------
 
 
-def _build_fetcher(root: Path) -> DssDataSource:
-    return DssDataSource(root=root)
+def _build_fetcher(root: Path, release: str | None = None) -> DssDataSource:
+    kwargs: dict[str, object] = {"root": root}
+    if release is not None:
+        kwargs["release"] = release
+    return DssDataSource(**kwargs)  # type: ignore[arg-type]
 
 
 def _register() -> None:
