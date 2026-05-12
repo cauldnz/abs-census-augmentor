@@ -85,6 +85,36 @@ implementable end-to-end — the only remaining blocker is:
 When ERP gets age bands, cross-dataset PRESETs become a markdown-only
 authoring exercise.
 
+## Temporal mode follow-ups (deferred Phases F + G)
+
+Single-edition temporal mode shipped in v1.5 via PRs #58–63 (Phases
+A–E). Two follow-ups remain, both deliberately deferred since the
+headline use case (ASGS Edition 3 transactional data with per-row
+release selection) works end-to-end today.
+
+- **Phase F — historical datasets (pre-Edition 3).** Register SEIFA
+  2016 / SEIFA 2011, GCP 2016 / GCP 2011, ERP 2001 onwards, etc. Each
+  needs its own URL bookkeeping (the legacy `abs@.nsf` archive has
+  less predictable URLs than the current site), per-edition fetchers
+  (probably shared base class + per-edition subclass), and real-data
+  verification per `CLAUDE.md`'s Real Data First. Unblocks
+  cross-edition input spans (combined with the cross-edition spatial
+  lookups already sketched in `spec-temporal.md` §9.3 step 4b — those
+  also need implementing). Effort: ~3-5 days.
+
+- **Phase G — G-NAF release-per-row.** Currently temporal-mode uses
+  the pipeline's configured G-NAF release for every row, regardless of
+  date. Per-row G-NAF resolution needs the bucketing logic extended
+  upstream of geocoding (today it sits between geocoding and
+  enrichment). DuckDB connection-per-bucket adds memory cost; would
+  want to default to quarterly buckets to keep that bounded. Effort:
+  ~2-3 days.
+
+Both are designed in `spec-temporal.md`; the implementation is the
+pending work. When picking either up, start by reading §6 and §12
+of the spec, then walk through the Phase E.2 orchestrator in
+`pipeline.py::_enrich_temporal` to understand the pattern.
+
 ## Other deferred items
 
 - **Exclude `_template.md` from the built wheel.** Hatchling's

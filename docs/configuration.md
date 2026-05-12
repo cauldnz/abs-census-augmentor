@@ -73,3 +73,27 @@ geocoding:
 ```
 
 See [G-NAF setup](gnaf-setup.md) for cache vs remote trade-offs.
+
+## Temporal mode
+
+Set `input.date_column` to enable per-row dataset-release selection:
+
+```yaml
+input:
+  path: transactions.csv
+  latitude_column: lat
+  longitude_column: lon
+  date_column: transaction_date    # enables temporal mode
+
+temporal:                           # optional; all fields have defaults
+  resolution: closest_at_or_before  # default. Also: closest.
+  out_of_range: fail                 # default. Also: nearest.
+  reference_edition: 3                # default. ASGS edition for output sa2_code.
+  per_dataset:                        # per-dataset resolution overrides
+    dss_payments:
+      resolution: closest             # quarterly cadence — closest often
+                                       # makes more sense than at-or-before
+```
+
+See [Temporal data](temporal-data.md) for the user-facing guide. Full
+design / rationale in [`spec-temporal.md`](../spec-temporal.md).

@@ -9,6 +9,28 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase H — Examples + docs polish
+
+- New `examples/temporal_augmentation.py` — runnable 4-row script
+  showing per-row release selection across a multi-year span.
+- New `examples/temporal_quarterly_dss.py` — comparison of
+  `closest_at_or_before` vs `closest` resolution rules for the
+  quarterly DSS dataset.
+- `Pipeline.create(...)` now accepts `date_column=` for notebook
+  users (avoids having to construct a full `Config` to enable
+  temporal mode).
+- `docs/usage-library.md` mentions temporal mode + links to the
+  new examples.
+- `docs/configuration.md` adds a "Temporal mode" subsection with
+  the YAML config schema.
+- `BACKLOG.md` documents deferred Phase F (historical datasets) and
+  Phase G (G-NAF release-per-row) with effort estimates and starting
+  points so future implementers can pick them up cold.
+
+The temporal-spec work is now complete for the headline use case
+(single-edition temporal mode on ASGS Edition 3 data). Historical
+datasets and G-NAF temporal selection remain explicitly deferred.
+
 ### Temporal Phase E.2 — Pipeline orchestrator (temporal mode is live)
 
 End-to-end temporal mode lands. Setting `input.date_column` in a

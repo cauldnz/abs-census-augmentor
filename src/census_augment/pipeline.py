@@ -425,6 +425,7 @@ class Pipeline:
         address_column: str | None = None,
         latitude_column: str | None = None,
         longitude_column: str | None = None,
+        date_column: str | None = None,
         output_prefix: str = "sa2_",
         data_dir: Path | None = None,
         cache_dir: Path | None = None,
@@ -439,12 +440,19 @@ class Pipeline:
         At least one locator (``address_column`` or both
         ``latitude_column``/``longitude_column``) must be provided —
         :class:`InputConfig` enforces this.
+
+        Pass ``date_column`` to enable temporal mode (per-row release
+        selection; see ``spec-temporal.md`` §9). The default temporal
+        config is used; for non-default tuning (per-dataset resolution,
+        out-of-range behaviour) construct ``Config`` manually and call
+        ``from_config`` directly.
         """
         cfg = Config(
             input=InputConfig(
                 address_column=address_column,
                 latitude_column=latitude_column,
                 longitude_column=longitude_column,
+                date_column=date_column,
             ),
             output=OutputConfig(prefix=output_prefix),
             census=CensusConfig(),

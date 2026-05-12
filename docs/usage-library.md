@@ -57,6 +57,27 @@ To skip G-NAF entirely set `providers: [nominatim]`.
 
 See [G-NAF setup](gnaf-setup.md) for the trade-offs.
 
+## Temporal mode
+
+For time-series data where each row should pick the dataset snapshot
+closest to its own date, see [Temporal data](temporal-data.md). The
+short version: set `date_column=` when calling `Pipeline.create(...)`,
+the rest works:
+
+```python
+pipeline = Pipeline.create(
+    variables={"population": "ERP.population_total"},
+    user_agent="my-app/1.0 (me@example.com)",
+    latitude_column="lat",
+    longitude_column="lon",
+    date_column="transaction_date",   # turn on temporal mode
+)
+
+result = pipeline.augment(df)
+result.releases_used    # {"erp_by_sa2": ["2022", "2023", "2024"]}
+result.df["erp_by_sa2_release"]   # per-row release column
+```
+
 ## Examples
 
 Runnable scripts in [`examples/`](../examples/):
@@ -66,3 +87,5 @@ Runnable scripts in [`examples/`](../examples/):
 - [`examples/library_with_seifa.py`](../examples/library_with_seifa.py) — mixing Census GCP + SEIFA variables.
 - [`examples/library_with_preset_features.py`](../examples/library_with_preset_features.py) — declaring `PRESET.<id>` ratios.
 - [`examples/standalone_dataset_fetchers.py`](../examples/standalone_dataset_fetchers.py) — using individual dataset fetchers directly.
+- [`examples/temporal_augmentation.py`](../examples/temporal_augmentation.py) — temporal mode with `date_column`; per-row release selection.
+- [`examples/temporal_quarterly_dss.py`](../examples/temporal_quarterly_dss.py) — comparing `closest_at_or_before` vs `closest` for granular cadence datasets.
