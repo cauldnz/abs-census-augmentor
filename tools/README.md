@@ -33,9 +33,30 @@ Pass `--refresh` to force re-download. Pass `--skip-nominatim` to skip the geoco
 
 ## What `verify_real_parsers.py` checks
 
+Anchor sources (v1.0):
+
 - Boundary load: row count, schema, CRS.
 - DataPack list_tables / load_metadata / load_table: count + spot-check known columns.
+- Mesh Block correspondence: MB → SA2 lookup populated.
 - Nominatim sample (if present): response shape preserved.
+
+G-NAF (v1.1):
+
+- G-NAF fetch from the gnaf-loader S3 bucket.
+- Schema + view detection for both gnaf-loader and legacy layouts.
+
+Registered datasets (v1.3):
+
+- SEIFA 2021 fetch + parse: 4 indexes × 10 fields per SA2.
+- ERP by SA2 fetch + parse: yearly population history.
+- DSS payments fetch + parse: quarterly demographic data.
+- ATO personal income fetch + parse: financial-year income / earner counts.
+
+PRESET features (v1.4):
+
+- Each registered PRESET resolves its source columns against the
+  loaded GCP DataPack metadata (catches silently-renamed columns
+  in a new GCP release).
 
 Exits non-zero on any failure.
 

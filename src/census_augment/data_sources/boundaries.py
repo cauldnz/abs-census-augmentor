@@ -126,7 +126,7 @@ def _try_read_feather_cache(feather_path: Path, shp: Path) -> gpd.GeoDataFrame |
         if feather_path.stat().st_mtime < shp.stat().st_mtime:
             return None
         return gpd.read_feather(feather_path)
-    except (OSError, Exception) as e:  # noqa: BLE001 — feather/pyarrow can raise many things
+    except Exception as e:  # noqa: BLE001 — feather/pyarrow can raise many things
         _log.debug("Ignoring boundary feather cache at %s: %s", feather_path, e)
         return None
 
@@ -142,7 +142,7 @@ def _try_write_feather_cache(feather_path: Path, gdf: gpd.GeoDataFrame) -> None:
     try:
         gdf.to_feather(tmp_path)
         tmp_path.replace(feather_path)
-    except (OSError, Exception) as e:  # noqa: BLE001 — feather/pyarrow can raise many things
+    except Exception as e:  # noqa: BLE001 — feather/pyarrow can raise many things
         _log.debug("Could not write boundary feather cache to %s: %s", feather_path, e)
         try:
             tmp_path.unlink(missing_ok=True)

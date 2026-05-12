@@ -30,6 +30,8 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from .._http_retry import retry_stream_get
+
 _log = logging.getLogger(__name__)
 
 # Direct-link to the SA2 SEIFA 2021 workbook on the ABS site.
@@ -154,6 +156,8 @@ class SeifaDataSource:
         """Ensure the SA2 SEIFA XLSX is on disk; return its path.
 
         Streams the download to a ``.tmp`` file then renames atomically.
+        Retries on transient ABS / data.gov.au failures per spec §10
+        (see :mod:`census_augment._http_retry`).
         """
         if self._xlsx_path.exists() and not refresh:
             _log.debug("SEIFA cached at %s", self._xlsx_path)
@@ -162,7 +166,12 @@ class SeifaDataSource:
         self._root.mkdir(parents=True, exist_ok=True)
         tmp = self._xlsx_path.with_suffix(self._xlsx_path.suffix + ".tmp")
         _log.info("Downloading %s from %s", self._label, self._url)
-        with self._session.get(self._url, stream=True, timeout=self._timeout) as response:
+        with retry_stream_get(
+            self._session,
+            self._url,
+            timeout=self._timeout,
+            label=self._label,
+        ) as response:
             response.raise_for_status()
             with tmp.open("wb") as f:
                 for chunk in response.iter_content(chunk_size=self._chunk_size):

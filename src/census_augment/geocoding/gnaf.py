@@ -40,7 +40,14 @@ _TIER3_CANDIDATE_LIMIT = 1000
 
 
 class GnafGeocoder:
-    """G-NAF geocoder. Tier 1 in this commit; Tiers 2+3 land next."""
+    """Three-tier G-NAF geocoder (spec §19).
+
+    Tier 1: exact ``ADDRESS_LABEL`` match on the normalised address.
+    Tier 2: SQL component decomposition (street name + locality +
+    postcode) when the exact match fails.
+    Tier 3: DuckDB FTS-backed fuzzy match scored by RapidFuzz, gated
+    on :attr:`_fuzzy_threshold`.
+    """
 
     def __init__(
         self,

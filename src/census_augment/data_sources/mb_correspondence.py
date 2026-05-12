@@ -26,7 +26,7 @@ from typing import Any
 import pandas as pd
 import requests
 
-from .data_sources._base import _AbsZipDataSource
+from ._base import _AbsZipDataSource
 
 _log = logging.getLogger(__name__)
 

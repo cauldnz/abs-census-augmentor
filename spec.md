@@ -193,14 +193,15 @@ abs-census-augmentor/
 │       ├── paths.py                # User-cache directory resolution (§9)
 │       ├── catalog.py              # GCP variable resolution + search + suggestions
 │       ├── spatial.py              # Point-in-polygon → SA2 (fallback path)
-│       ├── mb_correspondence.py    # MB_CODE → SA2_CODE lookup (fast path)
 │       ├── enrich.py               # CensusEnricher: dispatch + PRESET integration (§7.4, §21.2)
 │       ├── pipeline.py             # Orchestration; multi-provider, MB/spatial split
 │       ├── features.py             # FeatureSpec + FeatureRegistry + FeatureEvaluator (§21)
+│       ├── _http_retry.py          # Shared retry helper for ABS streaming downloads
 │       ├── data_sources/
 │       │   ├── _base.py            # Shared download/extract base
 │       │   ├── boundaries.py       # Shapefile download + load
 │       │   ├── datapacks.py        # CSV + Excel-metadata parser
+│       │   ├── mb_correspondence.py # MB_CODE → SA2_CODE lookup (fast path)
 │       │   └── gnaf.py             # G-NAF Core fetch + DuckDB indexing
 │       ├── datasets/               # Pluggable-dataset framework (§20)
 │       │   ├── __init__.py         # `registry` singleton (re-export)

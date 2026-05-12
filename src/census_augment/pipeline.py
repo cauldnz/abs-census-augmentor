@@ -35,7 +35,7 @@ from .geocoding.base import GeocodeResult, Geocoder
 from .geocoding.cache import GeocodeCache, NullCache
 from .geocoding.gnaf import GnafGeocoder
 from .geocoding.nominatim import NominatimGeocoder
-from .mb_correspondence import MbCorrespondenceDataSource, MbInfo
+from .data_sources.mb_correspondence import MbCorrespondenceDataSource, MbInfo
 from .paths import default_cache_dir, default_data_dir
 from .spatial import SpatialIndex
 
@@ -186,6 +186,35 @@ class _UnsetType:
 
 
 _UNSET: _UnsetType = _UnsetType()
+
+
+#: Encodings tried, in order, when reading a user CSV. Excel exports
+#: on Windows are routinely CP1252 / Windows-1252; some tools prefix
+#: a UTF-8 BOM (``﻿``). Trying the BOM-aware variant first and
+#: falling back to CP1252 means most non-UTF-8 inputs Just Work.
+_CSV_READ_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp1252")
+
+
+def _read_csv_with_encoding_fallback(path: Path) -> pd.DataFrame:
+    """Read a CSV trying UTF-8 (BOM-aware) then CP1252.
+
+    Wraps :func:`pandas.read_csv` with the encoding cascade in
+    :data:`_CSV_READ_ENCODINGS`. If all encodings fail with a
+    :class:`UnicodeDecodeError`, raises :class:`ValueError` with an
+    actionable hint that includes the path and the encodings tried.
+    """
+    last_error: UnicodeDecodeError | None = None
+    for encoding in _CSV_READ_ENCODINGS:
+        try:
+            return pd.read_csv(path, encoding=encoding)
+        except UnicodeDecodeError as e:
+            last_error = e
+            continue
+    raise ValueError(
+        f"Could not decode {path} as any of {list(_CSV_READ_ENCODINGS)}. "
+        f"Re-save the file as UTF-8 (most editors offer this in 'Save As' "
+        f"-> 'Encoding'). Last decoder error: {last_error}."
+    )
 
 
 @dataclass(eq=False)
@@ -411,9 +440,12 @@ class Pipeline:
             census=CensusConfig(),
             data_sources=DataSourcesConfig(),
             geocoding=GeocodingConfig(
-                # Nominatim-only by default for the notebook factory until
-                # G-NAF wiring lands in Phase 6b. Users wanting the chain
-                # can build a Config manually and call from_config.
+                # Nominatim-only by default for the notebook factory:
+                # G-NAF imposes a 10 GB cache or live S3 reads, neither
+                # of which is what a notebook user typically wants for
+                # a quick augmentation. Users wanting the full G-NAF +
+                # Nominatim chain construct a ``Config`` manually and
+                # call ``Pipeline.from_config`` directly.
                 providers=["nominatim"],
                 nominatim=NominatimConfig(user_agent=user_agent),
             ),
@@ -440,7 +472,7 @@ class Pipeline:
                 "in/out use Pipeline.augment(df) instead."
             )
 
-        df = pd.read_csv(self._config.input.path)
+        df = _read_csv_with_encoding_fallback(self._config.input.path)
         result = self.augment(df)
 
         output_path = self._config.output.path
@@ -492,6 +524,25 @@ class Pipeline:
                 f"address={addr_col!r}, latitude={lat_col!r}, "
                 f"longitude={lon_col!r}. DataFrame columns: "
                 f"{list(df.columns)}."
+            )
+
+        # Spec §8 guarantees that input columns are preserved unchanged.
+        # If a user's DataFrame already has a column named one of the
+        # reserved seven (`geo_lat`, `geo_lon`, `geo_source`,
+        # `geo_match_score`, `sa2_code`, `sa2_name`, `sa2_resolution`),
+        # blindly assigning to those names below would overwrite the
+        # user's data and the original value would be lost forever. Fail
+        # loud instead.
+        input_collisions = sorted(set(df.columns) & _RESERVED_OUTPUT_COLS)
+        if input_collisions:
+            raise ValueError(
+                "augment(df) cannot proceed: input DataFrame has columns "
+                "whose names collide with reserved pipeline output columns "
+                f"{sorted(_RESERVED_OUTPUT_COLS)!r}. Colliding columns in "
+                f"your input: {input_collisions!r}. Rename them before "
+                "calling augment() — the pipeline would otherwise silently "
+                "overwrite your data (spec §8 guarantees input columns are "
+                "preserved)."
             )
 
         df_out = df.copy()

@@ -44,7 +44,7 @@ try:
         DEFAULT_GNAF_S3_BASE_URL,
         GnafDataSource,
     )
-    from census_augment.mb_correspondence import MbCorrespondenceDataSource
+    from census_augment.data_sources.mb_correspondence import MbCorrespondenceDataSource
     from census_augment.paths import default_data_dir
 except ModuleNotFoundError as e:
     sys.stderr.write(
