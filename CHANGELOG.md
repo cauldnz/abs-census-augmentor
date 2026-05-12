@@ -9,6 +9,42 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase B — Per-dataset `temporal:` metadata blocks
+
+Adds the schema layer the upcoming temporal-mode pipeline (see
+[`spec-temporal.md`](spec-temporal.md) and [`docs/temporal-data.md`](docs/temporal-data.md))
+will read at run time.
+
+- New Pydantic model `TemporalDatasetMetadata` in
+  `src/census_augment/datasets/_spec.py`. Each registered dataset's
+  spec markdown may now include a `temporal:` block in its YAML
+  front-matter declaring:
+  - `cadence` — `per_census` / `annual` / `quarterly` / `continuous`.
+  - `cover_basis` — how to compute a release's coverage window
+    (`census_reference_date`, `financial_year_ending`,
+    `calendar_year_ending`, `quarter_ending`).
+  - `release_id_format` — informational; documents the release-id
+    format the available list uses.
+  - `available_releases` — list of known release ids.
+  - `asgs_edition_by_release` — the per-release ASGS edition. The §2
+    invariant from `spec-temporal.md` relies on this; the upcoming
+    temporal pipeline uses this map to decide which boundary file
+    to use for each row's per-dataset spatial lookup.
+
+- Added the block to all four currently-registered datasets:
+  - `gcp_2021` (Edition 3 only — single release)
+  - `seifa_2021` (Edition 3 only — single release)
+  - `erp_by_sa2` (transition: 2021 release on Edition 2, 2022+ on Edition 3)
+  - `dss_payments` (transition: through 2023-Q1 on Edition 2, 2023-Q2+ on Edition 3)
+  - `ato_personal_income` (transition: through 2018-19 on Edition 2, 2019-20+ on Edition 3)
+
+- 7 new tests in `test_datasets_registry.py`: temporal block parses,
+  rejects unknown cadence, rejects unknown ASGS edition, the four
+  on-disk specs have well-formed temporal blocks.
+
+No behavioural change yet — this is the schema. Phase E wires the
+pipeline through.
+
 ### Phase 3 — Operational hardening
 
 Three small additions surfaced by the v1.4.2 all-up review.

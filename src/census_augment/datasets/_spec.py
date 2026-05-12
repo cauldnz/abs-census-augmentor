@@ -44,6 +44,58 @@ class VariableSpec(BaseModel):
     description: str
 
 
+class TemporalDatasetMetadata(BaseModel):
+    """Per-dataset temporal capability declaration (`spec-temporal.md` §9.2).
+
+    Datasets opt into temporal mode by including a ``temporal:`` block in
+    their spec markdown front-matter. Datasets without this block fall
+    back to their configured single release for every row in temporal-
+    mode runs.
+
+    Field reference:
+
+    - ``cadence`` — how often new releases publish. Drives the default
+      resolution rule when one isn't explicitly configured.
+    - ``cover_basis`` — how to compute a release's coverage window from
+      its release-id string.
+    - ``release_id_format`` — informational; documents the format
+      ``available_releases`` entries take.
+    - ``available_releases`` — known release ids the temporal resolver
+      can pick from. May be empty for datasets that resolve releases
+      dynamically (e.g. ERP/ATO PIA scrape a landing page; DSS queries
+      CKAN). For those, the dataset's fetcher exposes a
+      ``known_releases()`` helper that returns this list at runtime.
+    - ``asgs_edition_by_release`` — maps each release id to the ASGS
+      edition it was compiled against. The §2 invariant in
+      ``spec-temporal.md`` relies on this — the pipeline does the
+      spatial lookup at the edition this map names.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cadence: Literal["per_census", "annual", "quarterly", "continuous"]
+    cover_basis: Literal[
+        "census_reference_date",
+        "financial_year_ending",
+        "calendar_year_ending",
+        "quarter_ending",
+    ]
+    release_id_format: str
+    available_releases: list[str] = Field(default_factory=list)
+    asgs_edition_by_release: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("asgs_edition_by_release")
+    @classmethod
+    def _validate_editions(cls, v: dict[str, int]) -> dict[str, int]:
+        for release_id, edition in v.items():
+            if edition not in (1, 2, 3, 4):
+                raise ValueError(
+                    f"asgs_edition_by_release[{release_id!r}] = {edition} "
+                    f"is not a valid ASGS edition (1, 2, 3, or 4)"
+                )
+        return v
+
+
 class DatasetSpec(BaseModel):
     """Parsed dataset spec file (front-matter + schema)."""
 
@@ -69,6 +121,11 @@ class DatasetSpec(BaseModel):
 
     #: Variable list parsed from the schema table in the body.
     variables: list[VariableSpec] = Field(default_factory=list)
+
+    #: Optional temporal-capability declaration. When absent, the
+    #: dataset is cross-sectional-only — temporal-mode runs use the
+    #: dataset's configured `release` for every row with a WARNING.
+    temporal: TemporalDatasetMetadata | None = None
 
     #: Source path (for error messages).
     source_path: Path | None = None

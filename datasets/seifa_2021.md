@@ -13,6 +13,14 @@ landing_page: https://www.abs.gov.au/statistics/people/people-and-communities/so
 fetch_size_compressed: ~150 KB
 tags: [seifa, demographics, socio-economic, disadvantage, advantage]
 namespace: SEIFA
+temporal:
+  cadence: per_census
+  cover_basis: census_reference_date
+  release_id_format: YYYY (Census year)
+  available_releases:
+    - "2021"
+  asgs_edition_by_release:
+    "2021": 3
 ---
 
 # ABS Socio-Economic Indexes for Areas (SEIFA) 2021
