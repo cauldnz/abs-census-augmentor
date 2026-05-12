@@ -256,3 +256,19 @@ def _coerce_number(cell: object) -> object:
     if re.fullmatch(r"-?\d+\.\d+", s):
         return float(s)
     return None
+
+
+# ---- fetcher registration ------------------------------------------------
+
+
+def _build_fetcher(root: Path) -> AtoDataSource:
+    return AtoDataSource(root=root)
+
+
+def _register() -> None:
+    from . import registry  # noqa: PLC0415
+
+    registry.register_fetcher("ato_personal_income", _build_fetcher)
+
+
+_register()

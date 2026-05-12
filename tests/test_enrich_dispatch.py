@@ -71,9 +71,9 @@ def test_enricher_routes_dataset_variables_to_fetcher(
         instance.load = fake_load
         return instance
 
-    from census_augment import enrich as enrich_module
+    from census_augment.datasets import registry
 
-    monkeypatch.setitem(enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa)
+    monkeypatch.setitem(registry._fetcher_factories, "seifa_2021", fake_build_seifa)
 
     enricher = CensusEnricher(
         datapacks=_stub_datapacks(),
@@ -104,9 +104,9 @@ def test_enricher_handles_mixed_gcp_and_dataset_variables(
         instance.load = fake_load
         return instance
 
-    from census_augment import enrich as enrich_module
+    from census_augment.datasets import registry
 
-    monkeypatch.setitem(enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa)
+    monkeypatch.setitem(registry._fetcher_factories, "seifa_2021", fake_build_seifa)
 
     enricher = CensusEnricher(
         datapacks=_stub_datapacks(),
@@ -151,9 +151,9 @@ def test_enricher_dataset_missing_column_raises(
         instance.load = fake_load
         return instance
 
-    from census_augment import enrich as enrich_module
+    from census_augment.datasets import registry
 
-    monkeypatch.setitem(enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa)
+    monkeypatch.setitem(registry._fetcher_factories, "seifa_2021", fake_build_seifa)
 
     enricher = CensusEnricher(
         datapacks=_stub_datapacks(),
