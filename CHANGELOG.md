@@ -9,6 +9,17 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Docs — Podman Desktop noted as a Docker Desktop alternative
+
+`.devcontainer/README.md` now lists Podman Desktop as a supported
+host container runtime alongside Docker Desktop. Same
+`devcontainer.json`, no project-side changes — point VSCode's Dev
+Containers extension at the Podman socket. New "Podman Desktop"
+section covers the `dev.containers.dockerPath` setting, the rootless
+seccomp/userns posture, and the one host sysctl
+(`kernel.unprivileged_userns_clone`) to check if chromium sandbox
+complains under rootless mode.
+
 ### Added — Demo GIFs + scene strips embedded in README (closes #40)
 
 The README now embeds all three demo GIFs at sensible places —

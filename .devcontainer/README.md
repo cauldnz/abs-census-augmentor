@@ -31,9 +31,13 @@ Even-Better-TOML + GitHub PR + GitLens.
 
 1. **Install prerequisites on the host:**
    - VSCode + the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers).
-   - Docker Desktop (Windows / macOS) or Docker Engine (Linux) — running.
-   - On Windows: WSL2 enabled, Docker Desktop's WSL integration on for your
-     distro.
+   - A container runtime — one of:
+     - Docker Desktop (Windows / macOS) or Docker Engine (Linux), or
+     - [Podman Desktop](https://podman-desktop.io/) (drop-in alternative;
+       configure VSCode's Dev Containers extension to use the Podman
+       socket — see "Podman Desktop" below).
+   - On Windows: WSL2 enabled, with the chosen runtime's WSL integration on
+     for your distro.
 2. **Open the repo in VSCode**, then `F1` → `Dev Containers: Reopen in
    Container`.
 3. **Wait for the build.** The post-create script will install uv and run
@@ -128,6 +132,32 @@ Same posture every Playwright / Puppeteer Docker workflow uses.
 The dev container runs trusted user-attached code, so the broader
 security surface is fine here; it would **not** be appropriate for
 multi-tenant CI running untrusted browser content.
+
+## Podman Desktop
+
+[Podman Desktop](https://podman-desktop.io/) works as a drop-in for
+Docker Desktop here — same VSCode Dev Containers extension, same
+`devcontainer.json`, no project-side changes needed. Point the
+extension at the Podman socket via:
+
+- VSCode setting `dev.containers.dockerPath`: `podman` (or the full
+  path on Windows: `C:\Program Files\RedHat\Podman\podman.exe`), and
+- on Linux, export `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`
+  in your shell profile so other tooling agrees on the socket.
+
+Podman runs rootless by default. Two things to know:
+
+- The `--security-opt seccomp=unconfined` runArg in `devcontainer.json`
+  still applies; rootless Podman uses its own seccomp profile but
+  honours the same override flag.
+- The `docker-outside-of-docker` feature mounts whichever socket the
+  host runtime exposes, so `./tools/demo/render.sh --docker` still
+  works.
+
+If chromium inside the container complains about user namespaces
+under rootless Podman, the host needs `kernel.unprivileged_userns_clone=1`
+(default on most modern distros; check with `sysctl
+kernel.unprivileged_userns_clone`).
 
 ## Why the local Dockerfile?
 
