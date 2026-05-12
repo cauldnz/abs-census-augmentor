@@ -168,7 +168,15 @@ abs-census-augmentor/
 │   ├── pct_employed_full_time.md
 │   ├── pct_aged_65_plus.md
 │   └── pct_one_parent_family.md
-├── docs/                           # Embedded README assets (demo GIFs)
+├── docs/                           # Handbook (markdown) + embedded README assets
+│   ├── index.md                    # Handbook TOC / entry point
+│   ├── usage-library.md            # Pipeline.augment, AugmentResult
+│   ├── usage-cli.md                # Full CLI reference
+│   ├── configuration.md            # config.yaml schema, cache locations
+│   ├── gnaf-setup.md               # G-NAF cache vs remote, prefetch, BYO
+│   ├── development.md              # Make targets, dev container, contributing
+│   ├── frames/                     # Per-scene PNGs for README scene strips
+│   └── *.gif                       # Demo GIFs embedded in README
 ├── examples/                       # Runnable usage scripts (CLI + library)
 ├── data/                           # Optional project-local cache; gitignored
 │   ├── README.md                   # Defaults to platform user cache (§9)

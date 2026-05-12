@@ -22,11 +22,9 @@ Augment Australian location datasets with ABS Census data at the SA2 statistical
 Input → Geocoding (G-NAF tiered → Nominatim) → SA2 (MB fast path → spatial fallback) → Census Enrichment → Output
 ```
 
-For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in (via mesh-block lookup for G-NAF rows, point-in-polygon for the rest), and merges in your chosen variables from any registered dataset. G-NAF Core, ASGS boundary files, Census DataPacks, SEIFA / ERP / DSS / ATO sources, and Nominatim responses all cache locally so re-runs are fast.
+For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in, and merges in your chosen variables from any registered dataset. G-NAF Core, ASGS boundaries, Census DataPacks, SEIFA / ERP / DSS / ATO, and Nominatim responses all cache locally so re-runs are fast.
 
-> **v1.3 — pluggable framework.** The pipeline now dispatches across a registry of SA2-keyed datasets rather than hard-coding the GCP DataPack. The 2021 GCP DataPack (`G\d+.<col>` variables) is one entry alongside SEIFA (`SEIFA.*`), ABS Estimated Resident Population (`ERP.*`), DSS Payments (`DSS.*`), and ATO Personal Income (`ATO.*`). Plus six curated PRESET features (`pct_renters`, `pct_drive_to_work`, ...) that compute the right ratios with the right denominators. See [`spec.md` §20](spec.md) and [`spec.md` §21](spec.md), the registered specs at [`datasets/`](datasets/) and [`features/`](features/), and the new examples at [`examples/library_with_seifa.py`](examples/library_with_seifa.py) / [`examples/standalone_dataset_fetchers.py`](examples/standalone_dataset_fetchers.py).
-
-> **v1.4 — PRESETs as first-class variables.** `variables: {pct_renters: PRESET.pct_renters}` now works directly in any config — `Pipeline.run()`, `Pipeline.augment(df)`, `census-augment run`, the lot. The pipeline auto-loads each PRESET's underlying numerator + denominator source columns (deduplicated across PRESETs) and surfaces the derived ratio under the configured output prefix. The standalone `FeatureEvaluator` API remains for analysis code that prefers the manual recipe. See [`examples/library_with_preset_features.py`](examples/library_with_preset_features.py).
+The 2021 GCP DataPack is one entry in a registry alongside SEIFA, ERP, DSS, and ATO sources — plus six curated PRESET ratios (`pct_renters`, `pct_drive_to_work`, …) that bake in the right denominators. Declare them in one line: `variables: {pct_renters: PRESET.pct_renters}`.
 
 ## See it in action
 
@@ -66,25 +64,15 @@ How a PRESET feature gets used end-to-end — single config line, pipeline auto-
 
 </details>
 
-All three demos live under [`docs/`](docs/) with per-scene PNGs in
-[`docs/frames/`](docs/frames/). Re-render via `make demos`; the
-collapsed scene strips above are kept in sync automatically by
-[`tools/demo/refresh_readme_frames.py`](tools/demo/refresh_readme_frames.py).
-
-## Requirements
-
-- Python 3.11+
-- [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip` + `venv`
-
 ## Install
+
+Requires Python 3.11+ and [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip + venv`.
 
 ```bash
 uv pip install -e ".[dev]"
 ```
 
-## Two ways to use it
-
-### As a library (notebooks / data-science pipelines)
+## Hello world
 
 ```python
 import pandas as pd
@@ -108,208 +96,24 @@ df = pd.DataFrame({
 })
 
 result = pipeline.augment(df)
-
 result.df                        # original + geo + sa2 + enrichment columns
-result.summary                   # counts: input/cache/fresh/failed/unmatched/...
-result.is_fully_enriched         # bool Series, indexed like df
-result.df[result.is_fully_enriched]   # filter to clean rows
 ```
 
-`pipeline.augment(df)` returns an `AugmentResult` with the augmented DataFrame, a `RunSummary`, and three boolean Series (`is_fully_enriched`, `geocoding_failed`, `sa2_unmatched`) for filtering. See [`spec.md` §18](spec.md) for the full API.
+Prefer the CLI? Drop a `config.yaml` next to your CSV and run `census-augment run --config config.yaml`.
 
-> **First-run download:** the first call to `pipeline.augment(df)` (or `Pipeline.run()`, or any `census-augment` CLI command that touches the data) downloads ~50 MB of SA2 boundaries and ~40 MB of Census DataPacks into the user cache. Subsequent calls — including across notebooks, scripts, and CLI runs on the same machine — reuse the cache and are instant. See "Where data is cached" below.
->
-> **G-NAF has two modes — pick one that fits.** With `geocoding.gnaf.mode: cache` (default), the first run downloads ~10 GB of parquet locally for offline querying. With `geocoding.gnaf.mode: remote`, DuckDB streams directly from S3 via httpfs — no download, but each query is HTTPS-bound. See "[G-NAF setup](#g-naf-setup)" for the trade-offs. To skip G-NAF entirely set `providers: [nominatim]`.
+First call downloads ~90 MB of ABS data into the user cache; subsequent calls are instant.
 
-### As a CLI
+## Where to go next
 
-```bash
-# Augment a CSV end-to-end
-census-augment run --config config.yaml
+The handbook lives in [`docs/`](docs/index.md):
 
-# Discover what variables the DataPack offers
-census-augment discover --config config.yaml --search income
-census-augment discover --config config.yaml --table G02
+- [Library usage](docs/usage-library.md) — `Pipeline.augment(df)`, `AugmentResult`, filtering, examples.
+- [CLI usage](docs/usage-cli.md) — full `census-augment` command reference.
+- [Configuration](docs/configuration.md) — `config.yaml` schema and cache locations.
+- [G-NAF setup](docs/gnaf-setup.md) — cache vs remote mode, prefetch, bring-your-own.
+- [Development](docs/development.md) — `make` targets, dev container, contributing.
 
-# Validate a config (with --full also checks variable refs against the DataPack)
-census-augment validate --config config.yaml --full
-
-# Pre-fetch ABS data (saves the first --run from doing the download)
-census-augment fetch --config config.yaml --boundaries --census --gnaf
-
-# Inspect the resolved G-NAF release / cache size
-census-augment gnaf-info --config config.yaml
-```
-
-Run `census-augment --help` for the full list. See [`config.example.yaml`](config.example.yaml) for the full config schema.
-
-## Examples
-
-Runnable scripts and a sample CLI invocation are in [`examples/`](examples/):
-
-- [`examples/library_basic.py`](examples/library_basic.py) — minimal library use.
-- [`examples/library_with_overrides.py`](examples/library_with_overrides.py) — per-call column overrides, custom prefix, mask-based filtering.
-- [`examples/cli/`](examples/cli/) — sample config + input CSV + walkthrough.
-
-First run downloads ~90 MB of ABS data into the user cache; subsequent runs are instant.
-
-## Where data is cached
-
-By default both ABS downloads and the geocoding cache live in the platform user cache:
-
-- Linux: `~/.cache/census-augment/`
-- macOS: `~/Library/Caches/census-augment/`
-- Windows: `%LOCALAPPDATA%\census-augment\Cache\`
-
-Override with `CENSUS_AUGMENT_DATA_DIR` / `CENSUS_AUGMENT_CACHE_DIR` env vars, the CLI's `--data-dir` / `--cache-dir` flags, or `data_dir=` / `cache_dir=` kwargs in Python. See [`spec.md` §9](spec.md) for the full table.
-
-## Documentation
-
-- [`spec.md`](spec.md) — design specification; the source of truth.
-- [`CLAUDE.md`](CLAUDE.md) — contributor and AI-agent conventions.
-- [`tools/README.md`](tools/README.md) — how to verify parsers against real ABS endpoints (opt-in; not part of CI).
-- [`examples/`](examples/) — runnable usage scripts.
-
-## Development
-
-A `Makefile` wraps the common workflows. From the repo root:
-
-```bash
-make                      # list all targets
-make install              # uv sync --all-extras
-make smoke                # quick wire-up check (CLI + registries + PRESET specs)
-make check                # lint + typecheck + test (CI-equivalent)
-make test                 # hermetic pytest suite
-make verify-real          # opt-in real-data check (hits live ABS endpoints)
-make demos                # render every README demo GIF (+ refresh README scene strips)
-make check-readme-frames  # fail if README scene strips are stale (CI lint)
-make build                # build the wheel
-```
-
-If you'd rather skip Make, the underlying commands work too:
-
-```bash
-uv run pytest                     # 500+ hermetic tests; no real network
-uv run ruff check . && uv run ruff format .     # Lint + format
-uv run mypy src/ tools/           # Strict type check
-```
-
-The full suite is hermetic — every external interaction (Nominatim, ABS) is mocked. To validate against the live ABS endpoints, use the opt-in scripts in [`tools/`](tools/) (or `make verify-real`).
-
-### Dev Container (recommended)
-
-This repo ships a [VSCode Dev Container](.devcontainer/) that gives you a Linux Python 3.11 sandbox with `uv`, `gh`, `make`, the dev deps, and a native VHS install for demo rendering. Open the repo in VSCode and run `Dev Containers: Reopen in Container` — first build takes ~3-5 minutes, subsequent attaches are seconds. See [`.devcontainer/README.md`](.devcontainer/README.md) for details.
-
-The dev container is what CI runs on, so `pytest` / `ruff` / `mypy` results inside the container match what gates PRs.
-
-> **Windows users**: `make` doesn't ship with Windows by default and the Makefile uses POSIX/bash conventions. Open the dev container (or WSL) for the `make` targets, or fall back to `uv run ...` directly from PowerShell.
-
-## Status
-
-v1.0 implementation per [`spec.md` §16](spec.md). G-NAF integration, mesh-block fast path, tiered geocoding, and the v1.0 output schema are all in place. See [`CHANGELOG.md`](CHANGELOG.md) for the upgrade notes from v0.1 → v1.0.
-
-## G-NAF setup
-
-`census-augment` ships two G-NAF distribution modes (set via `geocoding.gnaf.mode`); pick whichever matches your environment.
-
-| Mode | What happens | Best for |
-| --- | --- | --- |
-| `cache` *(default)* | First call downloads the [gnaf-loader](https://github.com/minus34/gnaf-loader) snapshot (~10 GB across ~50 parquet files) from `s3://minus34.com/opendata/` to your user cache. Subsequent calls run entirely offline. | Production runs, large workloads, anywhere bandwidth is cheaper than disk-divided-by-time. |
-| `remote` | DuckDB queries the same parquet files directly over HTTPS via its `httpfs` extension. **No download.** Each query pulls only the parquet metadata + the columns/rows it needs. | Prototyping, CI, disk-constrained environments, occasional one-off queries. |
-
-To use remote mode:
-
-```yaml
-geocoding:
-  providers: [gnaf, nominatim]
-  gnaf:
-    mode: remote
-    release: latest        # or "202602"
-```
-
-That's it. No prefetch step. Open a notebook, run `Pipeline.augment(df)`, DuckDB does the rest.
-
-**Trade-offs of remote mode:**
-
-- *Speed.* Each query is HTTPS-bound — single Tier-1 lookup is ~100ms (parquet metadata fetch + ranged read). Tier 2/3 (postcode-bucket scans) read more bytes. Fine for thousands of addresses; not ideal for hundreds of thousands.
-- *Bandwidth.* Cumulative reads can get pricey. A workload that does ~10k geocodes might pull ~500 MB across queries; if you'll re-run that workload many times, cache mode pays off.
-- *Offline use.* Doesn't work without network. If your laptop's spotty, prefer cache.
-- *No local schema validation up-front* — the `httpfs` extension itself has to be installable (DuckDB downloads it once on first use, then caches in `~/.duckdb/extensions/`).
-
-**Bucket layout auto-detection.** Two layouts are recognised:
-
-1. *gnaf-loader* (the production [gnaf-loader](https://github.com/minus34/gnaf-loader) bucket): G-NAF data lives in named subdirectories. The geocoder reads from `geoparquet/address_principal_census_{year}_boundaries/` — gnaf-loader's denormalised join of address principals with the ABS census boundary IDs. Source columns (`gnaf_pid`, `address`, `latitude`, `mb_{year}_code`, ...) are aliased to the uppercase schema the geocoder expects. Set `census.year` to pick `2016` vs `2021` boundaries (default `2021`).
-2. *Legacy / bring-your-own*: a flat parquet at the release root with already-uppercase columns. Used by users who pre-build G-NAF from the official Geoscape PSV.
-
-Detection runs on every `open_connection()`; gnaf-loader wins when both layouts coexist. For non-default layouts on self-hosted mirrors (MinIO, R2, ...), combine `data_sources.gnaf_s3_https_endpoint` with `data_sources.gnaf_parquet_filter` (regex against the relative key — only consulted under the legacy code path).
-
-### One-shot prefetch (recommended for cache mode)
-
-Pull the data ahead of your first run so it isn't on the critical path of your first augmentation:
-
-```bash
-census-augment fetch --config config.yaml --gnaf
-```
-
-This:
-
-1. Anonymously lists `s3://minus34.com/opendata/geoscape-*/` to find the latest release (or honours `geocoding.gnaf.release: "202602"` if you've pinned one).
-2. Downloads every `*.parquet` under `.../geoparquet/` to `<data_dir>/gnaf/{YYYYMM}/` with atomic-rename semantics — interrupted runs resume from the partial cache, no half-files left behind.
-3. Fetches the small (~50 MB) Mesh Block correspondence shapefile alongside, since the `mb_code → SA2` fast path depends on it.
-
-### Refreshing to a newer release
-
-```bash
-census-augment fetch --config config.yaml --gnaf --refresh
-```
-
-With `release: "latest"` (the default), `--refresh` re-checks S3 to pick up any newer quarterly that's dropped since you last fetched. With an explicit `release: "202602"`, `--refresh` re-downloads that same release.
-
-### Inspecting the cache
-
-```bash
-census-augment gnaf-info --config config.yaml
-```
-
-Prints the resolved release, the on-disk path, and the cached size in MB.
-
-### Pinning a specific release
-
-For reproducibility (e.g. running the same pipeline against the same data at different times):
-
-```yaml
-geocoding:
-  gnaf:
-    release: "202602"   # default is "latest"
-```
-
-### Bringing your own G-NAF parquet
-
-If your organisation builds G-NAF from the official Geoscape PSVs (data.gov.au) instead of using gnaf-loader, drop your own `*.parquet` files into `<data_dir>/gnaf/{YYYYMM}/` — the auto-download is skipped when the cache is already populated.
-
-Two ways to lay out the file(s):
-
-- **Match the gnaf-loader convention** (preferred): place the parquet at `<data_dir>/gnaf/{YYYYMM}/address_principal_census_{year}_boundaries/your-file.parquet` with lowercase columns (`gnaf_pid`, `address`, `latitude`, `longitude`, `postcode`, `mb_{year}_code`). The view aliases them to the uppercase schema for you.
-- **Legacy flat layout**: place the parquet at `<data_dir>/gnaf/{YYYYMM}/your-file.parquet` with already-uppercase columns. Required columns: `ADDRESS_DETAIL_PID`, `ADDRESS_LABEL` (the pre-formatted "1 GEORGE STREET SYDNEY NSW 2000" string), `LATITUDE`, `LONGITUDE`, `MB_CODE` (11-digit ABS Mesh Block), `POSTCODE`. The parser raises loudly if any are missing.
-
-### Opting out of G-NAF entirely
-
-If you'd rather not deal with a 10 GB cache, switch to Nominatim-only:
-
-```yaml
-geocoding:
-  providers: [nominatim]
-  nominatim:
-    user_agent: "..."
-```
-
-Nominatim is rate-limited (1 req/sec default), so this is much slower than G-NAF for any non-trivial input set, but it requires zero local data.
-
-### G-NAF attribution
-
-> Incorporates or developed using G-NAF © Geoscape Australia licensed by the Commonwealth of Australia under the Open Geo-coded National Address File (G-NAF) End User Licence Agreement.
-
-The Open G-NAF EULA permits this kind of geocoding-and-enrichment use. It does *not* permit using the data to generate or compile addresses for sending mail unless each address has been verified against a secondary source.
+Also: [`spec.md`](spec.md) (design source of truth), [`CHANGELOG.md`](CHANGELOG.md), and runnable [`examples/`](examples/).
 
 ## License
 
