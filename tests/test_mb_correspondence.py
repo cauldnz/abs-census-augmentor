@@ -47,7 +47,7 @@ def _make_data_source(
 def test_invalid_datum_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="datum"):
         MbCorrespondenceDataSource(
-            datum="WGS84",  # type: ignore[arg-type]
+            datum="WGS84",
             base_url=BASE_URL,
             root=tmp_path,
         )
@@ -164,9 +164,7 @@ def test_zip_with_no_shapefile_raises(tmp_path: Path) -> None:
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("readme.txt", "no shapefile in here")
 
-    responses.add(
-        responses.GET, EXPECTED_URL, body=buf.getvalue(), status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=buf.getvalue(), status=200)
     ds = _make_data_source(tmp_path)
     with pytest.raises(RuntimeError, match=".shp"):
         ds.fetch()

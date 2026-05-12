@@ -26,8 +26,7 @@ import requests
 _log = logging.getLogger(__name__)
 
 ERP_LANDING_URL = (
-    "https://www.abs.gov.au/statistics/people/population/"
-    "regional-population/latest-release"
+    "https://www.abs.gov.au/statistics/people/population/regional-population/latest-release"
 )
 
 # DS-product number on the ABS download page; this is the long-history
@@ -72,9 +71,7 @@ class ErpDataSource:
         self._release_request = str(release)
         self._root = Path(root)
         self._landing_url = landing_url
-        self._session = (
-            session if session is not None else requests.Session()
-        )
+        self._session = session if session is not None else requests.Session()
         self._chunk_size = chunk_size
         self._timeout = timeout
         self._resolved_release: str | None = None
@@ -93,9 +90,7 @@ class ErpDataSource:
     def is_cached(self) -> bool:
         if self._resolved_release is not None:
             return self._xlsx_path.exists()
-        return self._root.exists() and any(
-            self._root.glob("erp-*.xlsx")
-        )
+        return self._root.exists() and any(self._root.glob("erp-*.xlsx"))
 
     @property
     def _xlsx_path(self) -> Path:
@@ -120,14 +115,10 @@ class ErpDataSource:
             self.resolved_release,
             url,
         )
-        with self._session.get(
-            url, stream=True, timeout=self._timeout
-        ) as response:
+        with self._session.get(url, stream=True, timeout=self._timeout) as response:
             response.raise_for_status()
             with tmp.open("wb") as f:
-                for chunk in response.iter_content(
-                    chunk_size=self._chunk_size
-                ):
+                for chunk in response.iter_content(chunk_size=self._chunk_size):
                     if chunk:
                         f.write(chunk)
         tmp.replace(self._xlsx_path)
@@ -146,9 +137,7 @@ class ErpDataSource:
         - ``state_abbreviation`` — copied from the source's S/T name.
         """
         if self._resolved_release is not None and self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index(
-                "sa2_code_2021"
-            )
+            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
 
         xlsx = self.fetch()
         df = self._parse_xlsx(xlsx)
@@ -164,9 +153,7 @@ class ErpDataSource:
         # Fetch the landing page and pull the latest period directory
         # from any DS0003 link.
         _log.debug("Resolving ERP release via %s", self._landing_url)
-        resp = self._session.get(
-            self._landing_url, timeout=self._timeout
-        )
+        resp = self._session.get(self._landing_url, timeout=self._timeout)
         resp.raise_for_status()
         html = resp.text
 
@@ -184,8 +171,10 @@ class ErpDataSource:
             href = m.group(1)
             period = m.group("period")
             release_year = period.split("-", 1)[0]
-            url = href if href.startswith("http") else (
-                "https://www.abs.gov.au" + (href if href.startswith("/") else "/" + href)
+            url = (
+                href
+                if href.startswith("http")
+                else ("https://www.abs.gov.au" + (href if href.startswith("/") else "/" + href))
             )
             candidates.append((release_year, url))
 
@@ -220,14 +209,11 @@ class ErpDataSource:
     def _parse_xlsx(xlsx_path: Path) -> pd.DataFrame:
         import openpyxl  # noqa: PLC0415
 
-        wb = openpyxl.load_workbook(
-            xlsx_path, read_only=True, data_only=True
-        )
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
         if "Table 1" not in wb.sheetnames:
             wb.close()
             raise RuntimeError(
-                f"ERP workbook {xlsx_path} has no 'Table 1' sheet. "
-                f"Sheets: {wb.sheetnames}"
+                f"ERP workbook {xlsx_path} has no 'Table 1' sheet. Sheets: {wb.sheetnames}"
             )
         ws = wb["Table 1"]
         rows: list[list[object]] = []
@@ -292,9 +278,7 @@ class ErpDataSource:
             sa2 = "" if sa2_raw is None else str(sa2_raw).strip()
             if not (len(sa2) == 9 and sa2.isdigit()):
                 continue
-            state_name = (
-                str(row[1]).strip() if row[1] is not None else ""
-            )
+            state_name = str(row[1]).strip() if row[1] is not None else ""
             rec: dict[str, object] = {
                 "sa2_code_2021": sa2,
                 "state_abbreviation": _state_to_abbreviation(state_name),
@@ -302,23 +286,15 @@ class ErpDataSource:
             }
             # Latest year's population goes to a stable column name.
             if latest_year in year_cols:
-                rec["population_total"] = _coerce_number(
-                    row[year_cols[latest_year]]
-                )
+                rec["population_total"] = _coerce_number(row[year_cols[latest_year]])
             # Full year history.
             for year, col_idx in year_cols.items():
                 key = f"population_history_{year}"
-                rec[key] = (
-                    _coerce_number(row[col_idx])
-                    if col_idx < len(row)
-                    else None
-                )
+                rec[key] = _coerce_number(row[col_idx]) if col_idx < len(row) else None
             records.append(rec)
 
         if not records:
-            raise RuntimeError(
-                f"No SA2 data rows in {xlsx_path}"
-            )
+            raise RuntimeError(f"No SA2 data rows in {xlsx_path}")
 
         df = pd.DataFrame.from_records(records)
         return df.set_index("sa2_code_2021")

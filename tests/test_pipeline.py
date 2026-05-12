@@ -63,7 +63,7 @@ def _success_result(
         address_normalized=normalize_address(address),
         lat=lat,
         lon=lon,
-        source=source,  # type: ignore[arg-type]
+        source=source,
         provider="fake",
         timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
     )
@@ -95,9 +95,7 @@ def _make_config(
         data_sources=DataSourcesConfig(),
         geocoding=GeocodingConfig(
             providers=["nominatim"],
-            nominatim=NominatimConfig(
-                user_agent="test/0.1 (test@example.com)"
-            ),
+            nominatim=NominatimConfig(user_agent="test/0.1 (test@example.com)"),
         ),
         variables=variables,
     )
@@ -153,9 +151,7 @@ def _empty_pipeline_pieces(tmp_path: Path) -> dict[str, Any]:
         root=tmp_path / "ds",
     )
     catalog = VariableCatalog(DataPackMetadata(tables={}))
-    enricher = CensusEnricher(
-        datapacks=ds, catalog=catalog, variables={}, output_prefix="sa2_"
-    )
+    enricher = CensusEnricher(datapacks=ds, catalog=catalog, variables={}, output_prefix="sa2_")
     return {
         "geocoders": [_FakeGeocoder({})],
         "spatial": spatial,
@@ -205,9 +201,7 @@ def test_run_fails_when_input_columns_missing(tmp_path: Path) -> None:
 
 def test_resolve_uses_input_latlon_when_present(tmp_path: Path) -> None:
     config = _make_config(tmp_path=tmp_path)
-    config.input.path.write_text(
-        "address,lat,lon\nSomewhere,-33.86,151.21\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address,lat,lon\nSomewhere,-33.86,151.21\n", encoding="utf-8")
     fake_geo = _FakeGeocoder({})
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoders"] = [fake_geo]
@@ -229,9 +223,7 @@ def test_resolve_uses_input_latlon_when_present(tmp_path: Path) -> None:
 
 def test_resolve_falls_back_to_address_when_latlon_null(tmp_path: Path) -> None:
     config = _make_config(tmp_path=tmp_path)
-    config.input.path.write_text(
-        "address,lat,lon\nFallback Address,,\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address,lat,lon\nFallback Address,,\n", encoding="utf-8")
     fake_geo = _FakeGeocoder(
         {"Fallback Address": _success_result("Fallback Address", -34.0, 150.0)}
     )
@@ -255,9 +247,7 @@ def test_resolve_falls_back_to_address_when_latlon_null(tmp_path: Path) -> None:
 
 def test_resolve_geocode_failure_propagates_source(tmp_path: Path) -> None:
     config = _make_config(tmp_path=tmp_path)
-    config.input.path.write_text(
-        "address,lat,lon\nNo Such Place,,\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address,lat,lon\nNo Such Place,,\n", encoding="utf-8")
     fake_geo = _FakeGeocoder({})  # default: returns failed
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoders"] = [fake_geo]
@@ -278,9 +268,7 @@ def test_resolve_geocode_failure_propagates_source(tmp_path: Path) -> None:
 
 def test_resolve_cache_source_propagates(tmp_path: Path) -> None:
     config = _make_config(tmp_path=tmp_path)
-    config.input.path.write_text(
-        "address,lat,lon\nCached,,\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address,lat,lon\nCached,,\n", encoding="utf-8")
     fake_geo = _FakeGeocoder(
         {"Cached": _success_result("Cached", -33.0, 151.0, source="nominatim_cache")}
     )
@@ -302,9 +290,7 @@ def test_resolve_cache_source_propagates(tmp_path: Path) -> None:
 def test_resolve_no_locator_at_all_yields_failed(tmp_path: Path) -> None:
     """Empty address row + null lat/lon → failed."""
     config = _make_config(tmp_path=tmp_path)
-    config.input.path.write_text(
-        "address,lat,lon\n,,\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address,lat,lon\n,,\n", encoding="utf-8")
     fake_geo = _FakeGeocoder({})
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoders"] = [fake_geo]
@@ -348,19 +334,16 @@ def test_end_to_end_smoke(
     )
     config.input.path.write_text(
         "address,lat,lon\n"
-        "Sydney CBD,-33.86,151.21\n"      # input lat/lon
-        "1 Macquarie St,,\n"               # geocode success
-        "Nowhere,,\n",                     # geocode failure
+        "Sydney CBD,-33.86,151.21\n"  # input lat/lon
+        "1 Macquarie St,,\n"  # geocode success
+        "Nowhere,,\n",  # geocode failure
         encoding="utf-8",
     )
 
     # Mock HTTP for all data sources
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -448,17 +431,14 @@ def test_end_to_end_with_partially_enriched_row(
     )
     config.input.path.write_text(
         "address,lat,lon\n"
-        "Sydney,-33.86,151.21\n"     # SA2 hit + enrichment hit
+        "Sydney,-33.86,151.21\n"  # SA2 hit + enrichment hit
         "Open ocean,-40.0,160.0\n",  # outside any SA2 (sa2_unmatched)
         encoding="utf-8",
     )
 
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -490,12 +470,9 @@ def test_augment_returns_augment_result_with_expected_shape(
         tmp_path=tmp_path,
         variables={"median_age": "G02.Median_age_persons"},
     )
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -545,12 +522,9 @@ def test_augment_does_not_mutate_input(
     fake_datapack_zip_bytes: bytes,
 ) -> None:
     config = _make_config(tmp_path=tmp_path)
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -581,12 +555,9 @@ def test_augment_with_column_name_overrides(
         latitude_column="lat",
         longitude_column="lon",
     )
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -597,9 +568,7 @@ def test_augment_with_column_name_overrides(
 
     # DataFrame uses "latitude"/"longitude" instead of configured "lat"/"lon"
     df_in = pd.DataFrame({"latitude": [-33.86], "longitude": [151.21]})
-    result = pipeline.augment(
-        df_in, latitude_column="latitude", longitude_column="longitude"
-    )
+    result = pipeline.augment(df_in, latitude_column="latitude", longitude_column="longitude")
 
     assert result.df.loc[0, "geo_source"] == "input"
     # In-memory: sa2_code is a string from spatial.lookup_many (no CSV round-trip)
@@ -628,11 +597,13 @@ def test_augment_explicit_none_override_disables_locator(tmp_path: Path) -> None
     pipeline = Pipeline(config=config, **pieces)
 
     # df has address present too — but we'll override to None so it's ignored
-    df_in = pd.DataFrame({
-        "address": ["Some Address"],
-        "lat": [-33.86],
-        "lon": [151.21],
-    })
+    df_in = pd.DataFrame(
+        {
+            "address": ["Some Address"],
+            "lat": [-33.86],
+            "lon": [151.21],
+        }
+    )
     result = pipeline.augment(df_in, address_column=None)
 
     # Geocoder was never consulted (lat/lon path took precedence)
@@ -661,9 +632,7 @@ def test_augment_lenient_absent_lat_lon(tmp_path: Path) -> None:
     """Conversely, if lat/lon are configured but absent, we fall back
     to address (still lenient — no hard error)."""
     config = _make_config(tmp_path=tmp_path)
-    fake_geo = _FakeGeocoder(
-        {"Sydney CBD": _success_result("Sydney CBD", -33.86, 151.21)}
-    )
+    fake_geo = _FakeGeocoder({"Sydney CBD": _success_result("Sydney CBD", -33.86, 151.21)})
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoders"] = [fake_geo]
     pipeline = Pipeline(config=config, **pieces)
@@ -688,19 +657,12 @@ def test_from_config_uses_null_cache_when_cache_disabled(
 
     config = _make_config(tmp_path=tmp_path)
     config = config.model_copy(
-        update={
-            "geocoding": config.geocoding.model_copy(
-                update={"cache_enabled": False}
-            )
-        }
+        update={"geocoding": config.geocoding.model_copy(update={"cache_enabled": False})}
     )
 
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -723,12 +685,9 @@ def test_from_config_uses_real_cache_by_default(
     from census_augment.geocoding.cache import GeocodeCache, NullCache
 
     config = _make_config(tmp_path=tmp_path)
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
     responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
     responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
@@ -833,9 +792,7 @@ def test_run_raises_when_input_path_missing(tmp_path: Path) -> None:
     """Library users can build a Config without input.path (for augment()),
     but run() must reject it."""
     config = _make_config(tmp_path=tmp_path)
-    config = config.model_copy(
-        update={"input": config.input.model_copy(update={"path": None})}
-    )
+    config = config.model_copy(update={"input": config.input.model_copy(update={"path": None})})
     pieces = _empty_pipeline_pieces(tmp_path)
     pipeline = Pipeline(config=config, **pieces)
 
@@ -845,9 +802,7 @@ def test_run_raises_when_input_path_missing(tmp_path: Path) -> None:
 
 def test_run_raises_when_output_path_missing(tmp_path: Path) -> None:
     config = _make_config(tmp_path=tmp_path)
-    config = config.model_copy(
-        update={"output": config.output.model_copy(update={"path": None})}
-    )
+    config = config.model_copy(update={"output": config.output.model_copy(update={"path": None})})
     config.input.path.write_text("address,lat,lon\nx,-33.86,151.21\n")
     pieces = _empty_pipeline_pieces(tmp_path)
     pipeline = Pipeline(config=config, **pieces)
@@ -895,11 +850,7 @@ def test_chain_falls_through_on_miss(tmp_path: Path) -> None:
     config.input.path.write_text("address\n1 Pitt St\n", encoding="utf-8")
     first = _FakeGeocoder({})  # always returns failed
     second = _FakeGeocoder(
-        {
-            "1 Pitt St": _success_result(
-                "1 Pitt St", -33.87, 151.21, source="nominatim_fresh"
-            )
-        }
+        {"1 Pitt St": _success_result("1 Pitt St", -33.87, 151.21, source="nominatim_fresh")}
     )
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoders"] = [first, second]
@@ -941,7 +892,7 @@ def _success_with_mb(
         address_normalized=normalize_address(address),
         lat=lat,
         lon=lon,
-        source=source,  # type: ignore[arg-type]
+        source=source,
         provider="fake_gnaf",
         timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
         mb_code=mb_code,
@@ -960,9 +911,7 @@ def test_mb_fast_path_resolves_sa2_without_spatial(tmp_path: Path) -> None:
     pieces = _empty_pipeline_pieces(tmp_path)
     pieces["geocoders"] = [fake_geo]
     mb_lookup = {
-        "11701132601": MbInfo(
-            mb_code="11701132601", sa2_code="117011326", sa2_name="Sydney CBD"
-        )
+        "11701132601": MbInfo(mb_code="11701132601", sa2_code="117011326", sa2_name="Sydney CBD")
     }
     pipeline = Pipeline(config=config, mb_lookup=mb_lookup, **pieces)
 
@@ -1013,13 +962,9 @@ def test_no_mb_route_uses_spatial_join(tmp_path: Path) -> None:
 def test_match_score_populated_for_fuzzy_only(tmp_path: Path) -> None:
     """geo_match_score is populated for gnaf_fuzzy hits and null for others."""
     config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
-    config.input.path.write_text(
-        "address\nexact\nfuzzy\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address\nexact\nfuzzy\n", encoding="utf-8")
     fake_geo = _FakeGeocoder({})
-    fake_geo._responses["exact"] = _success_result(
-        "exact", -33.86, 151.21, source="gnaf_exact"
-    )
+    fake_geo._responses["exact"] = _success_result("exact", -33.86, 151.21, source="gnaf_exact")
     fuzzy = GeocodeResult(
         address_input="fuzzy",
         address_normalized=normalize_address("fuzzy"),
@@ -1049,17 +994,11 @@ def test_match_score_populated_for_fuzzy_only(tmp_path: Path) -> None:
 def test_summary_per_tier_histogram(tmp_path: Path) -> None:
     """RunSummary.geo_per_tier reports counts for every observed source value."""
     config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
-    config.input.path.write_text(
-        "address\nexact_addr\nfuzzy_addr\nmiss_addr\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address\nexact_addr\nfuzzy_addr\nmiss_addr\n", encoding="utf-8")
     fake_geo = _FakeGeocoder(
         {
-            "exact_addr": _success_result(
-                "exact_addr", -33.86, 151.21, source="gnaf_exact"
-            ),
-            "fuzzy_addr": _success_result(
-                "fuzzy_addr", -33.86, 151.21, source="gnaf_fuzzy"
-            ),
+            "exact_addr": _success_result("exact_addr", -33.86, 151.21, source="gnaf_exact"),
+            "fuzzy_addr": _success_result("fuzzy_addr", -33.86, 151.21, source="gnaf_fuzzy"),
         }
     )
     pieces = _empty_pipeline_pieces(tmp_path)
@@ -1101,42 +1040,23 @@ def test_from_config_with_gnaf_provider_uses_mb_fast_path(
         update={
             "geocoding": GeocodingConfig(
                 providers=["gnaf", "nominatim"],
-                nominatim=NominatimConfig(
-                    user_agent="test/0.1 (test@example.com)"
-                ),
-                gnaf=config.geocoding.gnaf.model_copy(
-                    update={"release": "202602"}
-                ),
+                nominatim=NominatimConfig(user_agent="test/0.1 (test@example.com)"),
+                gnaf=config.geocoding.gnaf.model_copy(update={"release": "202602"}),
             )
         }
     )
-    config.input.path.write_text(
-        "address\n1 GEORGE STREET SYDNEY NSW 2000\n", encoding="utf-8"
-    )
+    config.input.path.write_text("address\n1 GEORGE STREET SYDNEY NSW 2000\n", encoding="utf-8")
 
-    boundaries_url = (
-        f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
-    )
+    boundaries_url = f"{config.data_sources.boundaries_base_url}/SA2_2021_AUST_SHP_GDA2020.zip"
     datapacks_url = (
-        f"{config.data_sources.datapacks_base_url}/"
-        "2021_GCP_SA2_for_AUS_short-header.zip"
+        f"{config.data_sources.datapacks_base_url}/2021_GCP_SA2_for_AUS_short-header.zip"
     )
-    mb_url = (
-        f"{config.data_sources.boundaries_base_url}/MB_2021_AUST_SHP_GDA2020.zip"
-    )
-    responses.add(
-        responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200
-    )
-    responses.add(
-        responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200
-    )
-    responses.add(
-        responses.GET, mb_url, body=fake_mb_correspondence_zip_bytes, status=200
-    )
+    mb_url = f"{config.data_sources.boundaries_base_url}/MB_2021_AUST_SHP_GDA2020.zip"
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
+    responses.add(responses.GET, mb_url, body=fake_mb_correspondence_zip_bytes, status=200)
 
-    pipeline = Pipeline.from_config(
-        config, data_dir=target_data_dir, cache_dir=tmp_path / "cache"
-    )
+    pipeline = Pipeline.from_config(config, data_dir=target_data_dir, cache_dir=tmp_path / "cache")
 
     summary = pipeline.run()
 

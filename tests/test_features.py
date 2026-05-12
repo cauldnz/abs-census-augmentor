@@ -204,7 +204,7 @@ def _make_spec(**overrides: object) -> FeatureSpec:
         "body": "",
     }
     base.update(overrides)
-    return FeatureSpec(**base)  # type: ignore[arg-type]
+    return FeatureSpec(**base)
 
 
 def _make_df(**columns: list[float]) -> pd.DataFrame:

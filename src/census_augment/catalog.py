@@ -88,9 +88,7 @@ class VariableCatalog:
             except CatalogError as e:
                 errors.append(f"  - {friendly_name!r} = {ref!r}: {e}")
         if errors:
-            raise CatalogError(
-                "Variable validation failed:\n" + "\n".join(errors)
-            )
+            raise CatalogError("Variable validation failed:\n" + "\n".join(errors))
 
     # ---- search / listing ------------------------------------------------
 

@@ -32,7 +32,7 @@ def _make_data_source(
     *,
     descriptor: str = "short-header",
 ) -> DataPacksDataSource:
-    census = CensusConfig(descriptor=descriptor)  # type: ignore[arg-type]
+    census = CensusConfig(descriptor=descriptor)
     return DataPacksDataSource(
         census=census,
         base_url=base_url,
@@ -99,10 +99,7 @@ def test_url_strips_trailing_slash(tmp_path: Path) -> None:
 def test_zip_and_extract_paths_are_under_root(tmp_path: Path) -> None:
     ds = _make_data_source(tmp_path)
     assert ds.zip_path.parent == tmp_path / "data" / "census"
-    assert (
-        ds.extract_dir
-        == tmp_path / "data" / "census" / "2021_GCP_SA2_for_AUS_short-header"
-    )
+    assert ds.extract_dir == tmp_path / "data" / "census" / "2021_GCP_SA2_for_AUS_short-header"
 
 
 # ---------- caching ----------
@@ -117,9 +114,7 @@ def test_not_cached_initially(tmp_path: Path) -> None:
 def test_fetch_downloads_extracts_returns_extract_dir(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     extract_dir = ds.fetch()
@@ -134,9 +129,7 @@ def test_fetch_downloads_extracts_returns_extract_dir(
 def test_fetch_returns_cached_without_redownload(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     ds.fetch()
@@ -146,15 +139,9 @@ def test_fetch_returns_cached_without_redownload(
 
 
 @responses.activate
-def test_fetch_with_refresh_redownloads(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+def test_fetch_with_refresh_redownloads(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     ds.fetch()
@@ -167,12 +154,8 @@ def test_fetch_with_refresh_redownloads(
 
 
 @responses.activate
-def test_list_tables_returns_sorted_ids(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+def test_list_tables_returns_sorted_ids(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     assert ds.list_tables() == ["G01", "G02"]
@@ -185,9 +168,7 @@ def test_list_tables_returns_sorted_ids(
 def test_load_table_returns_dataframe_indexed_by_sa2(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     df = ds.load_table("G01")
@@ -199,12 +180,8 @@ def test_load_table_returns_dataframe_indexed_by_sa2(
 
 
 @responses.activate
-def test_load_table_unknown_raises_keyerror(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+def test_load_table_unknown_raises_keyerror(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     with pytest.raises(KeyError, match="G99"):
@@ -215,9 +192,7 @@ def test_load_table_unknown_raises_keyerror(
 def test_load_table_preserves_sa2_code_as_string(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     df = ds.load_table("G01")
@@ -233,9 +208,7 @@ def test_load_table_preserves_sa2_code_as_string(
 def test_load_metadata_parses_full_structure(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     metadata = ds.load_metadata()
@@ -251,9 +224,7 @@ def test_metadata_describe_uses_columnheading(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     """Description comes from Columnheadingdescriptioninprofile, not Long."""
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     metadata = ds.load_metadata()
@@ -271,9 +242,7 @@ def test_metadata_describe_uses_columnheading(
 def test_metadata_table_names_populated_from_table_sheet(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     metadata = ds.load_metadata()
@@ -301,12 +270,8 @@ def test_metadata_handles_missing_table_sheet_gracefully(
 
 
 @responses.activate
-def test_metadata_has_table_and_column(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+def test_metadata_has_table_and_column(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     metadata = ds.load_metadata()
@@ -318,12 +283,8 @@ def test_metadata_has_table_and_column(
 
 
 @responses.activate
-def test_metadata_all_columns_iterates(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+def test_metadata_all_columns_iterates(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     metadata = ds.load_metadata()
@@ -359,10 +320,7 @@ def test_descriptor_mode_chooses_code_column(
 
     g02 = metadata.tables["G02"]
     assert expected_code in g02.columns
-    assert (
-        metadata.describe("G02", expected_code)
-        == "Median total household income ($/weekly)"
-    )
+    assert metadata.describe("G02", expected_code) == "Median total household income ($/weekly)"
 
 
 # ---------- metadata file selection ----------
@@ -375,9 +333,7 @@ def test_only_descriptor_xlsx_is_parsed_when_multiple_present(
     """The fixture ZIP includes geog_desc + Sequential_Template noise xlsxes;
     only Metadata_*GCP*DataPack*.xlsx should be parsed.
     """
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     # If the parser picked one of the noise files instead, this would fail
@@ -387,9 +343,7 @@ def test_only_descriptor_xlsx_is_parsed_when_multiple_present(
 
 
 @responses.activate
-def test_metadata_with_no_matching_xlsx_raises(
-    tmp_path: Path, fake_g01_df: pd.DataFrame
-) -> None:
+def test_metadata_with_no_matching_xlsx_raises(tmp_path: Path, fake_g01_df: pd.DataFrame) -> None:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("G01.csv", fake_g01_df.to_csv(index=False))
@@ -414,9 +368,7 @@ def test_metadata_tolerates_extra_title_rows(
 ) -> None:
     """Real ABS has 10 rows of title above the descriptor header. If they
     add more in a future release, the parser should still find the header."""
-    xlsx = build_metadata_xlsx(
-        fake_descriptor_rows, fake_table_rows, title_row_count=20
-    )
+    xlsx = build_metadata_xlsx(fake_descriptor_rows, fake_table_rows, title_row_count=20)
     zip_bytes = _build_zip_with_metadata(fake_g01_df, xlsx)
     responses.add(responses.GET, EXPECTED_URL, body=zip_bytes, status=200)
 
@@ -426,9 +378,7 @@ def test_metadata_tolerates_extra_title_rows(
 
 
 @responses.activate
-def test_metadata_no_header_at_all_raises(
-    tmp_path: Path, fake_g01_df: pd.DataFrame
-) -> None:
+def test_metadata_no_header_at_all_raises(tmp_path: Path, fake_g01_df: pd.DataFrame) -> None:
     """A descriptor sheet that never reveals a header row is an error."""
     import openpyxl as _openpyxl
 
@@ -477,7 +427,11 @@ def test_metadata_missing_required_column_raises(
         fake_descriptor_rows,
         table_rows=None,
         descriptor_columns=[
-            "Sequential", "Short", "Long", "DataPackfile", "Profiletable",
+            "Sequential",
+            "Short",
+            "Long",
+            "DataPackfile",
+            "Profiletable",
             # Note: missing Columnheadingdescriptioninprofile
         ],
     )

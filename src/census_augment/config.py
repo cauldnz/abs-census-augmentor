@@ -57,8 +57,7 @@ class InputConfig(_StrictModel):
         has_lon = self.longitude_column is not None
         if has_lat != has_lon:
             raise ValueError(
-                "input.latitude_column and input.longitude_column "
-                "must both be set or both omitted"
+                "input.latitude_column and input.longitude_column must both be set or both omitted"
             )
         if not has_address and not (has_lat and has_lon):
             raise ValueError(
@@ -89,9 +88,7 @@ class CensusConfig(_StrictModel):
     year: Literal[2021] = 2021
     level: Literal["SA2"] = "SA2"
     profile: Literal["GCP"] = "GCP"
-    region: Literal[
-        "AUS", "NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT", "OT"
-    ] = "AUS"
+    region: Literal["AUS", "NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT", "OT"] = "AUS"
     descriptor: Literal["short-header", "sequential", "long-header"] = "short-header"
     asgs_edition: Literal[3] = 3
     datum: Literal["GDA2020", "GDA94"] = "GDA2020"
@@ -149,9 +146,7 @@ class GnafConfig(_StrictModel):
     @classmethod
     def _fuzzy_in_unit_interval(cls, v: float) -> float:
         if not (0.0 <= v <= 1.0):
-            raise ValueError(
-                f"geocoding.gnaf.fuzzy_threshold must be in [0.0, 1.0]; got {v!r}"
-            )
+            raise ValueError(f"geocoding.gnaf.fuzzy_threshold must be in [0.0, 1.0]; got {v!r}")
         return v
 
 
@@ -174,8 +169,7 @@ class NominatimConfig(_StrictModel):
             return v
         if not v.strip():
             raise ValueError(
-                "geocoding.nominatim.user_agent must be a non-empty string "
-                "(Nominatim policy)"
+                "geocoding.nominatim.user_agent must be a non-empty string (Nominatim policy)"
             )
         return v
 
@@ -183,9 +177,7 @@ class NominatimConfig(_StrictModel):
     @classmethod
     def _rate_positive(cls, v: float) -> float:
         if v <= 0:
-            raise ValueError(
-                "geocoding.nominatim.rate_limit_per_second must be > 0"
-            )
+            raise ValueError("geocoding.nominatim.rate_limit_per_second must be > 0")
         return v
 
 
@@ -209,9 +201,7 @@ class GeocodingConfig(_StrictModel):
 
     @field_validator("providers")
     @classmethod
-    def _providers_non_empty_and_unique(
-        cls, v: list[GeocoderName]
-    ) -> list[GeocoderName]:
+    def _providers_non_empty_and_unique(cls, v: list[GeocoderName]) -> list[GeocoderName]:
         if not v:
             raise ValueError(
                 "geocoding.providers must contain at least one provider "
@@ -254,8 +244,7 @@ class Config(_StrictModel):
         for friendly, ref in v.items():
             if not FRIENDLY_NAME_RE.match(friendly):
                 raise ValueError(
-                    f"variable name {friendly!r} is invalid; "
-                    f"must match {FRIENDLY_NAME_RE.pattern}"
+                    f"variable name {friendly!r} is invalid; must match {FRIENDLY_NAME_RE.pattern}"
                 )
             if not VARIABLE_REF_RE.match(ref):
                 raise ValueError(
@@ -269,10 +258,7 @@ class Config(_StrictModel):
         # Spec §6.1: a CRS mismatch between the census boundaries and
         # the G-NAF data is the kind of silent drift that turns up six
         # months later as a weird bug. Log once at config-load.
-        if (
-            "gnaf" in self.geocoding.providers
-            and self.geocoding.gnaf.datum != self.census.datum
-        ):
+        if "gnaf" in self.geocoding.providers and self.geocoding.gnaf.datum != self.census.datum:
             _log.warning(
                 "Datum mismatch: census.datum=%s but geocoding.gnaf.datum=%s. "
                 "These should normally match — silent CRS mismatch can produce "

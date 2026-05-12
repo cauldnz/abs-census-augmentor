@@ -86,16 +86,12 @@ def test_full_street_type_unchanged() -> None:
 )
 def test_full_state_name_to_abbreviation(full: str, abbrev: str) -> None:
     assert (
-        normalize_address(f"1 King St Sydney {full} 2000")
-        == f"1 KING STREET SYDNEY {abbrev} 2000"
+        normalize_address(f"1 King St Sydney {full} 2000") == f"1 KING STREET SYDNEY {abbrev} 2000"
     )
 
 
 def test_already_abbreviated_state_preserved() -> None:
-    assert (
-        normalize_address("1 King Street Sydney NSW 2000")
-        == "1 KING STREET SYDNEY NSW 2000"
-    )
+    assert normalize_address("1 King Street Sydney NSW 2000") == "1 KING STREET SYDNEY NSW 2000"
 
 
 # ---- end-to-end normalization ------------------------------------------
@@ -246,9 +242,7 @@ def test_parse_pure_business_name_returns_none() -> None:
         ("1 Smith Cres", "CRESCENT"),
     ],
 )
-def test_parse_recognises_street_type_abbreviations(
-    input_text: str, expected_type: str
-) -> None:
+def test_parse_recognises_street_type_abbreviations(input_text: str, expected_type: str) -> None:
     components = parse_address(input_text)
     assert components is not None
     assert components.street_type == expected_type

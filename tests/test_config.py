@@ -175,9 +175,7 @@ def test_gnaf_fuzzy_threshold_out_of_range_fails(tmp_path: Path) -> None:
         load_config(_write(tmp_path, cfg))
 
 
-def test_datum_mismatch_emits_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_datum_mismatch_emits_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     cfg = _base_config()
     cfg["geocoding"]["providers"] = ["gnaf", "nominatim"]
     cfg["geocoding"]["gnaf"] = {"datum": "GDA94"}  # census defaults to GDA2020
@@ -186,9 +184,7 @@ def test_datum_mismatch_emits_warning(
     assert any("Datum mismatch" in rec.message for rec in caplog.records)
 
 
-def test_no_warning_when_datums_match(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_no_warning_when_datums_match(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     cfg = _base_config()  # gnaf default datum=GDA2020 matches census default
     cfg["geocoding"]["providers"] = ["gnaf", "nominatim"]
     with caplog.at_level("WARNING", logger="census_augment.config"):

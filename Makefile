@@ -66,8 +66,8 @@ lint: ## ruff check .
 format: ## ruff format . (writes files)
 	uv run ruff format .
 
-typecheck: ## mypy src/ tools/
-	uv run mypy src/ tools/
+typecheck: ## mypy src/ tools/ tests/
+	uv run mypy src/ tools/ tests/
 
 check: lint typecheck test ## lint + typecheck + test (CI-equivalent)
 

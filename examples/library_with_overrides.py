@@ -62,9 +62,7 @@ def main() -> None:
     print()
 
     print("=== Original IDs alongside the new enrichment columns ===")
-    print(
-        result.df[["site_id", "name", *result.added_columns]].to_string()
-    )
+    print(result.df[["site_id", "name", *result.added_columns]].to_string())
     print()
 
     print("=== Per-row classification ===")

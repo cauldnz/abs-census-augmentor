@@ -120,14 +120,10 @@ def parse_dataset_spec(path: Path) -> DatasetSpec:
     try:
         front = yaml.safe_load(front_text)
     except yaml.YAMLError as e:
-        raise ValueError(
-            f"{path}: front-matter is not valid YAML: {e}"
-        ) from e
+        raise ValueError(f"{path}: front-matter is not valid YAML: {e}") from e
 
     if not isinstance(front, dict):
-        raise ValueError(
-            f"{path}: front-matter must be a YAML mapping; got {type(front).__name__}"
-        )
+        raise ValueError(f"{path}: front-matter must be a YAML mapping; got {type(front).__name__}")
 
     variables = _parse_schema_table(body, namespace=front.get("namespace", ""))
 
@@ -142,9 +138,7 @@ def parse_dataset_spec(path: Path) -> DatasetSpec:
         raise ValueError(f"{path}: invalid dataset spec — {e}") from e
 
 
-def _parse_schema_table(
-    body: str, *, namespace: str
-) -> list[VariableSpec]:
+def _parse_schema_table(body: str, *, namespace: str) -> list[VariableSpec]:
     """Extract the schema table from a dataset spec's markdown body.
 
     The schema is identified by a heading whose text starts with
@@ -161,7 +155,7 @@ def _parse_schema_table(
     if not schema_match:
         return []
 
-    rest = body[schema_match.end():]
+    rest = body[schema_match.end() :]
 
     # Find the first table (block of lines starting with |).
     table_lines: list[str] = []
@@ -205,7 +199,7 @@ def _parse_schema_table(
         # Strip the markdown backticks and the namespace prefix.
         bare = var_cell.strip("` ")
         if namespace_prefix and bare.startswith(namespace_prefix):
-            bare = bare[len(namespace_prefix):]
+            bare = bare[len(namespace_prefix) :]
         out.append(
             VariableSpec(
                 field=bare,

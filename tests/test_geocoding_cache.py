@@ -78,7 +78,7 @@ def _result(
         address_normalized=normalize_address(address),
         lat=lat,
         lon=lon,
-        source=source,  # type: ignore[arg-type]
+        source=source,
         provider="nominatim",
         timestamp=datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc),
         raw_response={"display_name": "1 Main St, Sydney"},

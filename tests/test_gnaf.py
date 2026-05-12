@@ -91,14 +91,14 @@ def test_default_release_is_latest(tmp_path: Path) -> None:
     ds = GnafDataSource(data_dir=tmp_path / "data")
     # Don't access resolved_release here — it would try to resolve and fail
     # with no cache. Just confirm the request was retained.
-    assert ds._release_request == "latest"  # type: ignore[attr-defined]
+    assert ds._release_request == "latest"
 
 
 def test_explicit_release_format_validated(tmp_path: Path) -> None:
     """``'202602'`` is a valid release string (6 digits)."""
     ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
     # No exception; release_request retained.
-    assert ds._release_request == "202602"  # type: ignore[attr-defined]
+    assert ds._release_request == "202602"
 
 
 @pytest.mark.parametrize(
@@ -118,12 +118,12 @@ def test_invalid_release_format_raises(tmp_path: Path, bad_release: str) -> None
 
 def test_invalid_datum_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="datum must be"):
-        GnafDataSource(datum="WGS84", data_dir=tmp_path / "data")  # type: ignore[arg-type]
+        GnafDataSource(datum="WGS84", data_dir=tmp_path / "data")
 
 
 def test_invalid_mode_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="mode must be"):
-        GnafDataSource(mode="bogus", data_dir=tmp_path / "data")  # type: ignore[arg-type]
+        GnafDataSource(mode="bogus", data_dir=tmp_path / "data")
 
 
 # ---- caching / discovery -------------------------------------------------
@@ -159,9 +159,7 @@ def test_resolved_release_picks_highest_when_latest(
     fake_gnaf_data_dir_with_two_releases: Path,
 ) -> None:
     """``release='latest'`` picks the highest-numbered cached release."""
-    ds = GnafDataSource(
-        release="latest", data_dir=fake_gnaf_data_dir_with_two_releases
-    )
+    ds = GnafDataSource(release="latest", data_dir=fake_gnaf_data_dir_with_two_releases)
     assert ds.resolved_release == "202602"  # higher of 202511 / 202602
 
 
@@ -294,25 +292,21 @@ def test_layout_detection_fails_on_empty_release_dir(tmp_path: Path) -> None:
     rel_dir.mkdir(parents=True)
     ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
     with pytest.raises(RuntimeError, match="No G-NAF parquet files found"):
-        ds._detect_local_layout(rel_dir)  # type: ignore[attr-defined]
+        ds._detect_local_layout(rel_dir)
 
 
 # ---- deferred modes raise NotImplementedError ----------------------------
 
 
 def test_official_mode_raises_not_implemented(fake_gnaf_data_dir: Path) -> None:
-    ds = GnafDataSource(
-        release="202602", mode="official", data_dir=fake_gnaf_data_dir
-    )
+    ds = GnafDataSource(release="202602", mode="official", data_dir=fake_gnaf_data_dir)
     with pytest.raises(NotImplementedError, match="not yet implemented"):
         ds.open_connection()
 
 
 def test_fetch_raises_in_remote_mode(fake_gnaf_data_dir: Path) -> None:
     """fetch() in remote mode is meaningless — should raise loudly."""
-    ds = GnafDataSource(
-        release="202602", mode="remote", data_dir=fake_gnaf_data_dir
-    )
+    ds = GnafDataSource(release="202602", mode="remote", data_dir=fake_gnaf_data_dir)
     with pytest.raises(RuntimeError, match="meaningless in remote mode"):
         ds.fetch()
 
@@ -320,9 +314,10 @@ def test_fetch_raises_in_remote_mode(fake_gnaf_data_dir: Path) -> None:
 def test_build_object_url_default_aws_virtual_hosted(tmp_path: Path) -> None:
     """Default URL construction (dot-less bucket) is virtual-hosted AWS style."""
     ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
-    assert ds._build_object_url(  # type: ignore[attr-defined]
-        "my-gnaf", "opendata/x.parquet"
-    ) == "https://my-gnaf.s3.amazonaws.com/opendata/x.parquet"
+    assert (
+        ds._build_object_url("my-gnaf", "opendata/x.parquet")
+        == "https://my-gnaf.s3.amazonaws.com/opendata/x.parquet"
+    )
 
 
 def test_build_object_url_dotted_bucket_uses_regional_path_style(
@@ -337,10 +332,11 @@ def test_build_object_url_dotted_bucket_uses_regional_path_style(
     """
     ds = GnafDataSource(release="202602", data_dir=tmp_path / "data")
     # Skip the boto3 round-trip: pre-cache the region.
-    ds._resolved_bucket_region = "ap-southeast-2"  # type: ignore[attr-defined]
-    assert ds._build_object_url(  # type: ignore[attr-defined]
-        "minus34.com", "opendata/x.parquet"
-    ) == "https://s3.ap-southeast-2.amazonaws.com/minus34.com/opendata/x.parquet"
+    ds._resolved_bucket_region = "ap-southeast-2"
+    assert (
+        ds._build_object_url("minus34.com", "opendata/x.parquet")
+        == "https://s3.ap-southeast-2.amazonaws.com/minus34.com/opendata/x.parquet"
+    )
 
 
 def test_build_object_url_with_endpoint_override(tmp_path: Path) -> None:
@@ -350,9 +346,10 @@ def test_build_object_url_with_endpoint_override(tmp_path: Path) -> None:
         data_dir=tmp_path / "data",
         s3_https_endpoint="http://localhost:5000",
     )
-    assert ds._build_object_url(  # type: ignore[attr-defined]
-        "minus34.com", "opendata/x.parquet"
-    ) == "http://localhost:5000/minus34.com/opendata/x.parquet"
+    assert (
+        ds._build_object_url("minus34.com", "opendata/x.parquet")
+        == "http://localhost:5000/minus34.com/opendata/x.parquet"
+    )
 
 
 def test_build_object_url_endpoint_trailing_slash_stripped(
@@ -363,9 +360,10 @@ def test_build_object_url_endpoint_trailing_slash_stripped(
         data_dir=tmp_path / "data",
         s3_https_endpoint="http://localhost:5000/",  # trailing slash
     )
-    assert ds._build_object_url(  # type: ignore[attr-defined]
-        "minus34.com", "opendata/x.parquet"
-    ) == "http://localhost:5000/minus34.com/opendata/x.parquet"
+    assert (
+        ds._build_object_url("minus34.com", "opendata/x.parquet")
+        == "http://localhost:5000/minus34.com/opendata/x.parquet"
+    )
 
 
 @mock_aws
@@ -374,9 +372,7 @@ def test_fetch_in_cache_mode_downloads_from_s3_on_cache_miss(
 ) -> None:
     """A cache miss triggers an anonymous S3 download to the local cache dir."""
     parquet_bytes = _gnaf_parquet_bytes()
-    _populate_mock_bucket(
-        releases={"202602": {"addresses.parquet": parquet_bytes}}
-    )
+    _populate_mock_bucket(releases={"202602": {"addresses.parquet": parquet_bytes}})
 
     ds = GnafDataSource(
         release="202602",
@@ -489,9 +485,7 @@ def test_fetch_with_refresh_re_resolves_latest_from_s3(tmp_path: Path) -> None:
 @mock_aws
 def test_fetch_atomic_no_tmp_files_after_success(tmp_path: Path) -> None:
     """Successful download leaves no ``.tmp`` files behind."""
-    _populate_mock_bucket(
-        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}}
-    )
+    _populate_mock_bucket(releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}})
     ds = GnafDataSource(
         release="202602",
         data_dir=tmp_path / "data",
@@ -516,7 +510,7 @@ def test_list_releases_on_s3_returns_sorted_yyyymm(tmp_path: Path) -> None:
         data_dir=tmp_path / "data",
         s3_base_url=_TEST_BASE,
     )
-    assert ds._list_releases_on_s3() == ["202508", "202511", "202602"]  # type: ignore[attr-defined]
+    assert ds._list_releases_on_s3() == ["202508", "202511", "202602"]
 
 
 @mock_aws
@@ -537,15 +531,13 @@ def test_list_releases_on_s3_ignores_non_geoscape_prefixes(
         data_dir=tmp_path / "data",
         s3_base_url=_TEST_BASE,
     )
-    assert ds._list_releases_on_s3() == ["202602"]  # type: ignore[attr-defined]
+    assert ds._list_releases_on_s3() == ["202602"]
 
 
 @mock_aws
 def test_open_connection_works_after_s3_fetch(tmp_path: Path) -> None:
     """End-to-end: cache miss -> S3 download -> DuckDB opens cleanly."""
-    _populate_mock_bucket(
-        releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}}
-    )
+    _populate_mock_bucket(releases={"202602": {"addresses.parquet": _gnaf_parquet_bytes()}})
     ds = GnafDataSource(
         release="202602",
         data_dir=tmp_path / "data",
@@ -731,9 +723,7 @@ def test_remote_mode_raises_when_release_does_not_exist(
         ds.open_connection()
 
 
-def test_remote_mode_validates_schema(
-    tmp_path: Path, moto_s3_server: str
-) -> None:
+def test_remote_mode_validates_schema(tmp_path: Path, moto_s3_server: str) -> None:
     """Remote mode raises if the parquet schema is wrong."""
     bucket, base = _unique_bucket("validates-schema")
     # Build a parquet missing MB_CODE.
@@ -803,14 +793,12 @@ def test_listing_default_filter_excludes_subdir_parquets(
         s3_base_url=base,
         s3_https_endpoint=moto_s3_server,
     )
-    objs = ds._list_parquet_objects_on_s3("202602")  # type: ignore[attr-defined]
+    objs = ds._list_parquet_objects_on_s3("202602")
     keys = [k for k, _ in objs]
     assert keys == ["opendata/geoscape-202602/geoparquet/addresses.parquet"]
 
 
-def test_listing_custom_filter_overrides_default(
-    tmp_path: Path, moto_s3_server: str
-) -> None:
+def test_listing_custom_filter_overrides_default(tmp_path: Path, moto_s3_server: str) -> None:
     """Override regex matches the relative key (post-``geoparquet/``)."""
     bucket, base = _unique_bucket("filter-custom")
     parquet_bytes = _gnaf_parquet_bytes()
@@ -835,7 +823,7 @@ def test_listing_custom_filter_overrides_default(
         s3_https_endpoint=moto_s3_server,
         parquet_filter=r"^(?!abs_)",
     )
-    objs = ds._list_parquet_objects_on_s3("202602")  # type: ignore[attr-defined]
+    objs = ds._list_parquet_objects_on_s3("202602")
     keys = sorted(k.rsplit("/", 1)[-1] for k, _ in objs)
     # Both G-NAF parquets included, ABS one filtered out.
     assert keys == ["addresses.parquet", "locality.parquet"]
@@ -870,9 +858,7 @@ def test_remote_mode_end_to_end_with_mixed_bucket_contents(
             "202602": {
                 "addresses.parquet": _gnaf_parquet_bytes(),
                 # Same partitioned-subdirectory layout as the real bucket.
-                "abs_2016_gccsa/part-00000-aaa.snappy.parquet": (
-                    abs_bytes_buf.getvalue()
-                ),
+                "abs_2016_gccsa/part-00000-aaa.snappy.parquet": (abs_bytes_buf.getvalue()),
             }
         },
     )
@@ -995,9 +981,7 @@ def _census_boundaries_parquet_bytes(year: int = 2021) -> bytes:
     return buf.getvalue()
 
 
-def test_remote_mode_with_gnaf_loader_layout(
-    tmp_path: Path, moto_s3_server: str
-) -> None:
+def test_remote_mode_with_gnaf_loader_layout(tmp_path: Path, moto_s3_server: str) -> None:
     """Issue #12 / #17 reproduction: bucket has the real gnaf-loader
     layout (multiple subdirectories under ``geoparquet/``). The
     ``address_principals/`` subdirectory carries the columns we need;
@@ -1012,9 +996,7 @@ def test_remote_mode_with_gnaf_loader_layout(
             "202602": {
                 # The right source — has gnaf_pid, address, lat/lon,
                 # postcode, mb_*_code.
-                "address_principals/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes()
-                ),
+                "address_principals/part-00000.parquet": (_gnaf_loader_parquet_bytes()),
                 # Mix in non-G-NAF subdirectories (mirrors the real bucket).
                 "abs_2016_gccsa/part-00000.parquet": _gnaf_parquet_bytes(),
             }
@@ -1037,8 +1019,7 @@ def test_remote_mode_with_gnaf_loader_layout(
     assert rows[0] == 2
 
     row = con.execute(
-        "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE "
-        "ADDRESS_DETAIL_PID = 'GANSW000000001'"
+        "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'"
     ).fetchone()
     assert row is not None
     label, mb = row
@@ -1046,9 +1027,7 @@ def test_remote_mode_with_gnaf_loader_layout(
     assert mb == "11701132601"
 
 
-def test_remote_mode_picks_correct_mb_year_column(
-    tmp_path: Path, moto_s3_server: str
-) -> None:
+def test_remote_mode_picks_correct_mb_year_column(tmp_path: Path, moto_s3_server: str) -> None:
     """``census_year`` selects which ``mb_<year>_code`` column to alias
     as ``MB_CODE``. The ``address_principals`` table carries both
     2016 and 2021 MB codes; the SELECT clause picks one based on
@@ -1091,9 +1070,11 @@ def test_remote_mode_picks_correct_mb_year_column(
         s3_https_endpoint=moto_s3_server,
         census_year=2016,
     )
-    row = ds.open_connection().execute(
-        "SELECT MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'"
-    ).fetchone()
+    row = (
+        ds.open_connection()
+        .execute("SELECT MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'")
+        .fetchone()
+    )
     assert row is not None
     assert row[0] == "MB16"
 
@@ -1118,9 +1099,7 @@ def test_remote_mode_ignores_boundaries_siblings_issue_17(
         releases={
             "202602": {
                 # Primary source — what we expect to be picked up.
-                "address_principals/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes()
-                ),
+                "address_principals/part-00000.parquet": (_gnaf_loader_parquet_bytes()),
                 # Sibling boundary tables — no address column;
                 # picking one of these would produce the
                 # BinderException reported in #17.
@@ -1151,8 +1130,7 @@ def test_remote_mode_ignores_boundaries_siblings_issue_17(
     # state_code_2021.
     con = ds.open_connection()
     row = con.execute(
-        "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE "
-        "ADDRESS_DETAIL_PID = 'GANSW000000001'"
+        "SELECT ADDRESS_LABEL, MB_CODE FROM gnaf WHERE ADDRESS_DETAIL_PID = 'GANSW000000001'"
     ).fetchone()
     assert row is not None
     label, mb = row
@@ -1204,9 +1182,7 @@ def test_cache_mode_with_gnaf_loader_layout(tmp_path: Path) -> None:
     rel_dir = data_dir / "gnaf" / "202602"
     loader_dir = rel_dir / "address_principals"
     loader_dir.mkdir(parents=True)
-    (loader_dir / "part-00000.parquet").write_bytes(
-        _gnaf_loader_parquet_bytes()
-    )
+    (loader_dir / "part-00000.parquet").write_bytes(_gnaf_loader_parquet_bytes())
 
     ds = GnafDataSource(
         release="202602",
@@ -1221,9 +1197,7 @@ def test_cache_mode_with_gnaf_loader_layout(tmp_path: Path) -> None:
 
     # Spot-check column aliasing: ADDRESS_LABEL came from the
     # `address` source column.
-    labels = [
-        r[0] for r in con.execute("SELECT ADDRESS_LABEL FROM gnaf").fetchall()
-    ]
+    labels = [r[0] for r in con.execute("SELECT ADDRESS_LABEL FROM gnaf").fetchall()]
     assert "1 GEORGE STREET SYDNEY NSW 2000" in labels
 
 
@@ -1244,9 +1218,7 @@ def test_layout_detection_prefers_gnaf_loader_over_legacy(
     # gnaf-loader subdir with different content (only 2 rows vs 5).
     loader_dir = rel_dir / "address_principals"
     loader_dir.mkdir()
-    (loader_dir / "part-00000.parquet").write_bytes(
-        _gnaf_loader_parquet_bytes()
-    )
+    (loader_dir / "part-00000.parquet").write_bytes(_gnaf_loader_parquet_bytes())
 
     ds = GnafDataSource(
         release="202602",
@@ -1254,7 +1226,7 @@ def test_layout_detection_prefers_gnaf_loader_over_legacy(
         data_dir=data_dir,
         census_year=2021,
     )
-    layout = ds._detect_local_layout(rel_dir)  # type: ignore[attr-defined]
+    layout = ds._detect_local_layout(rel_dir)
     assert layout.style == "gnaf-loader"
     # Confirm the resulting view reads the gnaf-loader one (2 rows),
     # not the legacy one (5 rows).
@@ -1277,12 +1249,8 @@ def test_cache_mode_download_preserves_gnaf_loader_subdir_structure(
         bucket,
         releases={
             "202602": {
-                "address_principals/part-00000.parquet": (
-                    _gnaf_loader_parquet_bytes()
-                ),
-                "address_principals/part-00001.parquet": (
-                    _gnaf_loader_parquet_bytes()
-                ),
+                "address_principals/part-00000.parquet": (_gnaf_loader_parquet_bytes()),
+                "address_principals/part-00001.parquet": (_gnaf_loader_parquet_bytes()),
             }
         },
     )

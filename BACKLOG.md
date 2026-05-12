@@ -87,6 +87,22 @@ authoring exercise.
 
 ## Other deferred items
 
+- **Exclude `_template.md` from the built wheel.** Hatchling's
+  `[tool.hatch.build.targets.wheel.force-include]` bypasses
+  per-target `exclude` patterns AND the build-global
+  `[tool.hatch.build] exclude` list, so the obvious one-liner
+  doesn't take effect. Two viable approaches when someone wants
+  to do this properly:
+  1. Move `_template.md` out of `datasets/` and `features/` into
+     a separate `templates/` (or `docs/spec-templates/`) tree at
+     the repo root, then update `spec.md` §5 and the
+     "full template at `datasets/_template.md`" reference.
+  2. Write a custom hatchling build hook (`hatch_build.py`) that
+     drops the templates from the wheel after force-include runs.
+  Both are bigger than a typical tidy-up; runtime loaders silently
+  skip `_template.md` regardless of where it lives (the leading
+  underscore is the contract), so the cost of NOT doing this is
+  ~4 KB of wheel space.
 - Automated G-NAF S3 fetch is shipped (v1.1). The `gnaf-loader`
   bucket is the canonical default; users who want a different mirror
   can override `data_sources.gnaf_s3_https_endpoint` and

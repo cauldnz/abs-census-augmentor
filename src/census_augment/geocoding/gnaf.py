@@ -49,9 +49,7 @@ class GnafGeocoder:
         fuzzy_threshold: float = 0.85,
     ) -> None:
         if not (0.0 <= fuzzy_threshold <= 1.0):
-            raise ValueError(
-                f"fuzzy_threshold must be in [0.0, 1.0]; got {fuzzy_threshold!r}"
-            )
+            raise ValueError(f"fuzzy_threshold must be in [0.0, 1.0]; got {fuzzy_threshold!r}")
         self._data_source = data_source
         self._fuzzy_threshold = fuzzy_threshold
 
@@ -85,9 +83,7 @@ class GnafGeocoder:
 
     # ---- tier implementations ------------------------------------------
 
-    def _tier1_exact(
-        self, address_input: str, normalized: str
-    ) -> GeocodeResult | None:
+    def _tier1_exact(self, address_input: str, normalized: str) -> GeocodeResult | None:
         """Exact-match the normalised input against G-NAF's ``ADDRESS_LABEL``.
 
         Returns the hit as a ``GeocodeResult`` with
@@ -104,9 +100,7 @@ class GnafGeocoder:
             _log.debug("GnafGeocoder Tier 1 miss for %r", normalized)
             return None
         pid, label, lat, lon, mb_code = rows[0]
-        _log.debug(
-            "GnafGeocoder Tier 1 hit: %r -> %s (mb=%s)", normalized, pid, mb_code
-        )
+        _log.debug("GnafGeocoder Tier 1 hit: %r -> %s (mb=%s)", normalized, pid, mb_code)
         return GeocodeResult(
             address_input=address_input,
             address_normalized=normalized,
@@ -152,13 +146,10 @@ class GnafGeocoder:
         # Canonical substring: "1 GEORGE STREET" — order matters in the label.
         if components.street_type:
             substring = (
-                f"{components.street_number} {components.street_name} "
-                f"{components.street_type}"
+                f"{components.street_number} {components.street_name} {components.street_type}"
             )
         else:
-            substring = (
-                f"{components.street_number} {components.street_name}"
-            )
+            substring = f"{components.street_number} {components.street_name}"
 
         con = self._data_source.open_connection()
         rows = con.execute(
@@ -173,8 +164,7 @@ class GnafGeocoder:
             # guess. Tier 3 fuzzy scoring will pick a winner if there is
             # a clear best candidate.
             _log.debug(
-                "GnafGeocoder Tier 2 %s for %r in postcode %s: "
-                "%d candidate(s)",
+                "GnafGeocoder Tier 2 %s for %r in postcode %s: %d candidate(s)",
                 "miss" if not rows else "ambiguous",
                 substring,
                 components.postcode,
@@ -183,9 +173,7 @@ class GnafGeocoder:
             return None
 
         pid, label, lat, lon, mb_code = rows[0]
-        _log.debug(
-            "GnafGeocoder Tier 2 hit: %r -> %s (mb=%s)", normalized, pid, mb_code
-        )
+        _log.debug("GnafGeocoder Tier 2 hit: %r -> %s (mb=%s)", normalized, pid, mb_code)
         return GeocodeResult(
             address_input=address_input,
             address_normalized=normalized,

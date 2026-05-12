@@ -63,9 +63,7 @@ except ModuleNotFoundError as e:
     )
     sys.exit(2)
 
-NOMINATIM_USER_AGENT = (
-    "census-augment-fetch/0.1 (real-data-verification; https://example.com)"
-)
+NOMINATIM_USER_AGENT = "census-augment-fetch/0.1 (real-data-verification; https://example.com)"
 NOMINATIM_SAMPLE_ADDRESS = "1 Macquarie Street, Sydney NSW"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
@@ -83,9 +81,7 @@ def _project_root() -> Path:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--refresh", action="store_true", help="Force re-download of cached files"
-    )
+    p.add_argument("--refresh", action="store_true", help="Force re-download of cached files")
     p.add_argument(
         "--skip-nominatim",
         action="store_true",
@@ -115,9 +111,7 @@ def main() -> int:
     data_dir = default_data_dir()
     census = CensusConfig()  # spec defaults: SA2, 2021, GCP, AUS, short-header, GDA2020
     print(f"Cache root: {data_dir}")
-    print(
-        "(Override via CENSUS_AUGMENT_DATA_DIR env var.)\n"
-    )
+    print("(Override via CENSUS_AUGMENT_DATA_DIR env var.)\n")
 
     print("=== Boundary ===")
     boundaries = BoundariesDataSource(

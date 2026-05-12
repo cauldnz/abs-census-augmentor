@@ -32,7 +32,10 @@ def _write_config(
             "address_column": "address",
         },
         "output": {"path": str(tmp_path / "output.csv")},
-        "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "test/0.1 (test@example.com)"}},
+        "geocoding": {
+            "providers": ["nominatim"],
+            "nominatim": {"user_agent": "test/0.1 (test@example.com)"},
+        },
         "variables": variables or {"median_age": "G02.Median_age_persons"},
     }
     if not address_only:
@@ -50,12 +53,8 @@ def _add_abs_mocks(
     fake_datapack_zip_bytes: bytes,
 ) -> None:
     """Common mocks for the boundary + DataPack downloads used by run/discover/validate --full."""
-    responses.add(
-        responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200
-    )
-    responses.add(
-        responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, boundaries_url, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, datapacks_url, body=fake_datapack_zip_bytes, status=200)
 
 
 # Default base URLs from the spec / config defaults
@@ -91,9 +90,7 @@ def test_run_command_end_to_end(
     fake_datapack_zip_bytes: bytes,
 ) -> None:
     config_path = _write_config(tmp_path)
-    (tmp_path / "input.csv").write_text(
-        "address,lat,lon\nSydney,-33.86,151.21\n", encoding="utf-8"
-    )
+    (tmp_path / "input.csv").write_text("address,lat,lon\nSydney,-33.86,151.21\n", encoding="utf-8")
     _add_abs_mocks(
         _BOUNDARIES_URL,
         _DATAPACKS_URL,
@@ -121,9 +118,7 @@ def test_run_command_end_to_end(
 
 
 def test_run_missing_config_file_fails(tmp_path: Path) -> None:
-    result = runner.invoke(
-        app, ["run", "--config", str(tmp_path / "nonexistent.yaml")]
-    )
+    result = runner.invoke(app, ["run", "--config", str(tmp_path / "nonexistent.yaml")])
     assert result.exit_code != 0
 
 
@@ -133,7 +128,10 @@ def test_run_fails_when_input_path_missing_from_config(tmp_path: Path) -> None:
     cfg = {
         "input": {"address_column": "address"},  # no path
         "output": {"path": str(tmp_path / "output.csv")},
-        "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "test/0.1 (test@example.com)"}},
+        "geocoding": {
+            "providers": ["nominatim"],
+            "nominatim": {"user_agent": "test/0.1 (test@example.com)"},
+        },
         "variables": {"median_age": "G02.Median_age_persons"},
     }
     config_path = tmp_path / "config.yaml"
@@ -153,7 +151,10 @@ def test_run_fails_when_output_path_missing_from_config(tmp_path: Path) -> None:
             "address_column": "address",
         },
         "output": {},  # no path
-        "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "test/0.1 (test@example.com)"}},
+        "geocoding": {
+            "providers": ["nominatim"],
+            "nominatim": {"user_agent": "test/0.1 (test@example.com)"},
+        },
         "variables": {"median_age": "G02.Median_age_persons"},
     }
     config_path = tmp_path / "config.yaml"
@@ -170,13 +171,9 @@ def test_run_fails_when_output_path_missing_from_config(tmp_path: Path) -> None:
 
 
 @responses.activate
-def test_discover_search_finds_matches(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
+def test_discover_search_finds_matches(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -197,13 +194,9 @@ def test_discover_search_finds_matches(
 
 
 @responses.activate
-def test_discover_search_no_matches(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
+def test_discover_search_no_matches(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -223,13 +216,9 @@ def test_discover_search_no_matches(
 
 
 @responses.activate
-def test_discover_table_lists_columns(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
+def test_discover_table_lists_columns(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -255,9 +244,7 @@ def test_discover_table_unknown_includes_suggestions(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -309,13 +296,9 @@ def test_discover_both_search_and_table_errors(tmp_path: Path) -> None:
 
 
 @responses.activate
-def test_fetch_boundaries_only(
-    tmp_path: Path, fake_boundary_zip_bytes: bytes
-) -> None:
+def test_fetch_boundaries_only(tmp_path: Path, fake_boundary_zip_bytes: bytes) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _BOUNDARIES_URL, body=fake_boundary_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _BOUNDARIES_URL, body=fake_boundary_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -335,13 +318,9 @@ def test_fetch_boundaries_only(
 
 
 @responses.activate
-def test_fetch_census_only(
-    tmp_path: Path, fake_datapack_zip_bytes: bytes
-) -> None:
+def test_fetch_census_only(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -422,7 +401,10 @@ def test_validate_invalid_config_fails(tmp_path: Path) -> None:
             {
                 # Missing input section entirely - structural failure
                 "output": {"path": "out.csv"},
-                "geocoding": {"providers": ["nominatim"], "nominatim": {"user_agent": "x/1 (a@b.c)"}},
+                "geocoding": {
+                    "providers": ["nominatim"],
+                    "nominatim": {"user_agent": "x/1 (a@b.c)"},
+                },
                 "variables": {"foo": "G01.Tot_P_M"},
             }
         ),
@@ -439,9 +421,7 @@ def test_validate_full_passes_with_valid_variables(
     tmp_path: Path, fake_datapack_zip_bytes: bytes
 ) -> None:
     config_path = _write_config(tmp_path)
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -468,9 +448,7 @@ def test_validate_full_fails_with_unknown_variable_ref(
         tmp_path,
         variables={"bad": "G99.does_not_exist"},
     )
-    responses.add(
-        responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _DATAPACKS_URL, body=fake_datapack_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -512,9 +490,7 @@ def test_fetch_gnaf_downloads_mb_correspondence_and_prints_attribution(
     # Pre-populate the gnaf cache so fetch() resolves without S3 download.
     config_path = _write_config(tmp_path, address_only=True)
 
-    responses.add(
-        responses.GET, _MB_URL, body=fake_mb_correspondence_zip_bytes, status=200
-    )
+    responses.add(responses.GET, _MB_URL, body=fake_mb_correspondence_zip_bytes, status=200)
 
     result = runner.invoke(
         app,
@@ -578,17 +554,13 @@ def test_gnaf_info_when_provider_not_enabled(tmp_path: Path) -> None:
     """``gnaf-info`` exits with a useful message when G-NAF isn't even
     in providers (the user hasn't opted in)."""
     config_path = _write_config(tmp_path)  # nominatim-only by default
-    result = runner.invoke(
-        app, ["gnaf-info", "--config", str(config_path)]
-    )
+    result = runner.invoke(app, ["gnaf-info", "--config", str(config_path)])
     assert result.exit_code == 1
     output = result.stdout + (result.stderr or "")
     assert "G-NAF is not in" in output
 
 
-def test_gnaf_info_with_cached_release(
-    tmp_path: Path, fake_gnaf_data_dir: Path
-) -> None:
+def test_gnaf_info_with_cached_release(tmp_path: Path, fake_gnaf_data_dir: Path) -> None:
     """A populated cache produces a tidy info dump."""
     cfg: dict[str, Any] = {
         "input": {

@@ -78,9 +78,7 @@ class NominatimGeocoder:
                     )
                     return self._failed_result(address, normalized)
                 wait = max(_parse_retry_after(response), backoff)
-                _log.info(
-                    "Nominatim rate-limited for %r; backing off %.1fs", address, wait
-                )
+                _log.info("Nominatim rate-limited for %r; backing off %.1fs", address, wait)
                 self._sleep(wait)
                 backoff *= 2
                 continue
@@ -111,9 +109,7 @@ class NominatimGeocoder:
         self, response: requests.Response, address: str, normalized: str
     ) -> GeocodeResult:
         if not response.ok:
-            _log.warning(
-                "Nominatim returned %d for %r", response.status_code, address
-            )
+            _log.warning("Nominatim returned %d for %r", response.status_code, address)
             return self._failed_result(address, normalized)
         try:
             data = response.json()

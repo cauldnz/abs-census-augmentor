@@ -13,9 +13,7 @@ from census_augment.geocoding.gnaf import GnafGeocoder
 # ---- helpers -------------------------------------------------------------
 
 
-def _make_geocoder(
-    fake_gnaf_data_dir: Path, fuzzy_threshold: float = 0.85
-) -> GnafGeocoder:
+def _make_geocoder(fake_gnaf_data_dir: Path, fuzzy_threshold: float = 0.85) -> GnafGeocoder:
     ds = GnafDataSource(release="202602", data_dir=fake_gnaf_data_dir)
     return GnafGeocoder(data_source=ds, fuzzy_threshold=fuzzy_threshold)
 

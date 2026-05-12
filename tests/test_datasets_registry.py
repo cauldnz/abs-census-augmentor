@@ -98,9 +98,7 @@ def test_parse_spec_with_schema_table(tmp_path: Path) -> None:
     )
     spec = parse_dataset_spec(spec_path)
     assert len(spec.variables) == 2
-    assert spec.variables[0] == VariableSpec(
-        field="aaa", type="int", description="First var"
-    )
+    assert spec.variables[0] == VariableSpec(field="aaa", type="int", description="First var")
     assert spec.variables[1].field == "bbb"
 
 
@@ -168,7 +166,7 @@ def _make_spec(**overrides: object) -> DatasetSpec:
         "body": "body",
     }
     defaults.update(overrides)
-    return DatasetSpec(**defaults)  # type: ignore[arg-type]
+    return DatasetSpec(**defaults)
 
 
 def test_registry_register_and_get() -> None:

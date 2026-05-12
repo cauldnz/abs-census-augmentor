@@ -78,9 +78,7 @@ class AtoDataSource:
         self._release_request = release
         self._root = Path(root)
         self._landing_url = landing_url
-        self._session = (
-            session if session is not None else requests.Session()
-        )
+        self._session = session if session is not None else requests.Session()
         self._chunk_size = chunk_size
         self._timeout = timeout
         self._resolved_release: str | None = None
@@ -99,9 +97,7 @@ class AtoDataSource:
     def is_cached(self) -> bool:
         if self._resolved_release is not None:
             return self._xlsx_path.exists()
-        return self._root.exists() and any(
-            self._root.glob("ato-*.xlsx")
-        )
+        return self._root.exists() and any(self._root.glob("ato-*.xlsx"))
 
     @property
     def _xlsx_path(self) -> Path:
@@ -126,14 +122,10 @@ class AtoDataSource:
             self.resolved_release,
             url,
         )
-        with self._session.get(
-            url, stream=True, timeout=self._timeout
-        ) as response:
+        with self._session.get(url, stream=True, timeout=self._timeout) as response:
             response.raise_for_status()
             with tmp.open("wb") as f:
-                for chunk in response.iter_content(
-                    chunk_size=self._chunk_size
-                ):
+                for chunk in response.iter_content(chunk_size=self._chunk_size):
                     if chunk:
                         f.write(chunk)
         tmp.replace(self._xlsx_path)
@@ -142,9 +134,7 @@ class AtoDataSource:
 
     def load(self) -> pd.DataFrame:
         if self._resolved_release is not None and self._parquet_path.exists():
-            return pd.read_parquet(self._parquet_path).set_index(
-                "sa2_code_2021"
-            )
+            return pd.read_parquet(self._parquet_path).set_index("sa2_code_2021")
 
         xlsx = self.fetch()
         df = self._parse_xlsx(xlsx)
@@ -159,9 +149,7 @@ class AtoDataSource:
             return
 
         _log.debug("Resolving ATO release via %s", self._landing_url)
-        resp = self._session.get(
-            self._landing_url, timeout=self._timeout
-        )
+        resp = self._session.get(self._landing_url, timeout=self._timeout)
         resp.raise_for_status()
         html = resp.text
 
@@ -178,16 +166,15 @@ class AtoDataSource:
         for m in pattern.finditer(html):
             href = m.group(1)
             period = m.group("period")
-            url = href if href.startswith("http") else (
-                "https://www.abs.gov.au"
-                + (href if href.startswith("/") else "/" + href)
+            url = (
+                href
+                if href.startswith("http")
+                else ("https://www.abs.gov.au" + (href if href.startswith("/") else "/" + href))
             )
             candidates.append((period, url))
 
         if not candidates:
-            raise RuntimeError(
-                f"Could not find any Table 1 link on {self._landing_url}"
-            )
+            raise RuntimeError(f"Could not find any Table 1 link on {self._landing_url}")
 
         if self._release_request == "latest":
             picked = max(candidates, key=lambda t: t[0])
@@ -214,14 +201,11 @@ class AtoDataSource:
     def _parse_xlsx(xlsx_path: Path) -> pd.DataFrame:
         import openpyxl  # noqa: PLC0415
 
-        wb = openpyxl.load_workbook(
-            xlsx_path, read_only=True, data_only=True
-        )
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
         if _SA2_SHEET not in wb.sheetnames:
             wb.close()
             raise RuntimeError(
-                f"ATO workbook {xlsx_path} has no '{_SA2_SHEET}' sheet. "
-                f"Sheets: {wb.sheetnames}"
+                f"ATO workbook {xlsx_path} has no '{_SA2_SHEET}' sheet. Sheets: {wb.sheetnames}"
             )
 
         ws = wb[_SA2_SHEET]
@@ -234,17 +218,13 @@ class AtoDataSource:
         # any of the known group labels).
         group_row_idx = -1
         for i, row in enumerate(rows[:10]):
-            text = " ".join(
-                "" if c is None else str(c) for c in row
-            )
+            text = " ".join("" if c is None else str(c) for c in row)
             if any(label in text for label in _GROUP_COLUMNS):
                 group_row_idx = i
                 break
 
         if group_row_idx < 0:
-            raise RuntimeError(
-                "Could not find ATO group header row in Table 1.4"
-            )
+            raise RuntimeError("Could not find ATO group header row in Table 1.4")
 
         # Map group label → starting column index (the column where the
         # group label appears).
@@ -268,11 +248,7 @@ class AtoDataSource:
         # group_starts is sorted; each group spans from its start col
         # to the start of the next group (exclusive).
         for i, (col_idx, label) in enumerate(group_starts):
-            end = (
-                group_starts[i + 1][0]
-                if i + 1 < len(group_starts)
-                else len(year_row)
-            )
+            end = group_starts[i + 1][0] if i + 1 < len(group_starts) else len(year_row)
             # Walk year_row[col_idx:end] looking for the last
             # financial-year-shaped cell.
             last_year_col = -1
@@ -306,9 +282,7 @@ class AtoDataSource:
             records.append(rec)
 
         if not records:
-            raise RuntimeError(
-                f"No SA2 data rows in {xlsx_path}"
-            )
+            raise RuntimeError(f"No SA2 data rows in {xlsx_path}")
 
         df = pd.DataFrame.from_records(records)
         return df.set_index("sa2_code_2021")
@@ -320,9 +294,7 @@ def _coerce_number(cell: object) -> object:
     if isinstance(cell, (int, float)):
         return cell
     s = str(cell).strip()
-    if not s or s.lower() in (
-        "np", "na", "n/a", "-", "..", ".", "<5", "nan", "null"
-    ):
+    if not s or s.lower() in ("np", "na", "n/a", "-", "..", ".", "<5", "nan", "null"):
         return None
     if re.fullmatch(r"-?\d+", s):
         return int(s)

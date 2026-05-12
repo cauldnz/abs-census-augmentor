@@ -19,9 +19,7 @@ EXPECTED_FILENAME = "SA2_2021_AUST_SHP_GDA2020.zip"
 EXPECTED_URL = f"{BASE_URL}/{EXPECTED_FILENAME}"
 
 
-def _make_data_source(
-    tmp_path: Path, base_url: str = BASE_URL
-) -> BoundariesDataSource:
+def _make_data_source(tmp_path: Path, base_url: str = BASE_URL) -> BoundariesDataSource:
     return BoundariesDataSource(
         census=CensusConfig(),
         base_url=base_url,
@@ -50,10 +48,7 @@ def test_url_strips_trailing_slash(tmp_path: Path) -> None:
 def test_zip_and_extract_paths_are_under_root(tmp_path: Path) -> None:
     ds = _make_data_source(tmp_path)
     assert ds.zip_path.parent == tmp_path / "data" / "boundaries"
-    assert (
-        ds.extract_dir
-        == tmp_path / "data" / "boundaries" / "SA2_2021_AUST_SHP_GDA2020"
-    )
+    assert ds.extract_dir == tmp_path / "data" / "boundaries" / "SA2_2021_AUST_SHP_GDA2020"
 
 
 # ---------- caching ----------
@@ -69,9 +64,7 @@ def test_not_cached_initially(tmp_path: Path) -> None:
 def test_fetch_downloads_extracts_and_returns_shapefile(
     tmp_path: Path, fake_boundary_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     shp = ds.fetch()
@@ -90,9 +83,7 @@ def test_fetch_downloads_extracts_and_returns_shapefile(
 def test_fetch_returns_cached_without_redownload(
     tmp_path: Path, fake_boundary_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     first = ds.fetch()
@@ -103,15 +94,9 @@ def test_fetch_returns_cached_without_redownload(
 
 
 @responses.activate
-def test_fetch_with_refresh_redownloads(
-    tmp_path: Path, fake_boundary_zip_bytes: bytes
-) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
+def test_fetch_with_refresh_redownloads(tmp_path: Path, fake_boundary_zip_bytes: bytes) -> None:
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     ds.fetch()
@@ -124,12 +109,8 @@ def test_fetch_with_refresh_redownloads(
 def test_refresh_replaces_old_extract_directory(
     tmp_path: Path, fake_boundary_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     ds.fetch()
@@ -149,9 +130,7 @@ def test_refresh_replaces_old_extract_directory(
 def test_load_returns_geodataframe_with_expected_shape(
     tmp_path: Path, fake_boundary_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     gdf = ds.load()
@@ -200,12 +179,10 @@ def test_zip_with_no_shapefile_raises(tmp_path: Path) -> None:
 def test_no_tmp_file_remains_after_successful_fetch(
     tmp_path: Path, fake_boundary_zip_bytes: bytes
 ) -> None:
-    responses.add(
-        responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200
-    )
+    responses.add(responses.GET, EXPECTED_URL, body=fake_boundary_zip_bytes, status=200)
 
     ds = _make_data_source(tmp_path)
     ds.fetch()
 
-    leftover = list(ds._root.glob("*.tmp"))  # type: ignore[attr-defined]
+    leftover = list(ds._root.glob("*.tmp"))
     assert leftover == []

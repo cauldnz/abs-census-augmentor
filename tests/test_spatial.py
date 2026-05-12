@@ -14,11 +14,11 @@ from census_augment.spatial import SpatialIndex
 #   Sydney CBD       : lon 151.20-151.22, lat -33.87 to -33.85
 #   North Sydney     : lon 151.19-151.21, lat -33.84 to -33.82
 #   Eastern Suburbs  : lon 151.23-151.26, lat -33.89 to -33.86
-SYDNEY_CBD_POINT = (-33.86, 151.21)        # (lat, lon)
+SYDNEY_CBD_POINT = (-33.86, 151.21)  # (lat, lon)
 NORTH_SYDNEY_POINT = (-33.83, 151.20)
 EASTERN_SUBURBS_POINT = (-33.875, 151.245)
-NYC_POINT = (40.7128, -74.0060)            # nowhere near Australia
-RURAL_NSW_POINT = (-30.0, 145.0)           # in NSW but outside our polygons
+NYC_POINT = (40.7128, -74.0060)  # nowhere near Australia
+RURAL_NSW_POINT = (-30.0, 145.0)  # in NSW but outside our polygons
 
 
 # ---- construction ---------------------------------------------------------

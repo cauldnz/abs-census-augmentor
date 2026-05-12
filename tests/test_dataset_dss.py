@@ -82,12 +82,8 @@ def dss_data_dir(tmp_path: Path) -> Path:
 
 
 def test_release_id_from_name_quarterly() -> None:
-    assert _release_id_from_name(
-        "Expanded DSS - December 2025"
-    ) == "2025-Q4"
-    assert _release_id_from_name(
-        "Expanded DSS - September 2025"
-    ) == "2025-Q3"
+    assert _release_id_from_name("Expanded DSS - December 2025") == "2025-Q4"
+    assert _release_id_from_name("Expanded DSS - September 2025") == "2025-Q3"
     assert _release_id_from_name("DSS - June 2024") == "2024-Q2"
     assert _release_id_from_name("DSS - March 2023") == "2023-Q1"
 
@@ -100,8 +96,7 @@ def test_release_id_from_name_no_match() -> None:
 def test_payment_column_name() -> None:
     assert _payment_column_name("Age Pension") == "age_pension_recipients"
     assert (
-        _payment_column_name("ABSTUDY (Living allowance)")
-        == "abstudy_living_allowance_recipients"
+        _payment_column_name("ABSTUDY (Living allowance)") == "abstudy_living_allowance_recipients"
     )
     assert (
         _payment_column_name("Carer Allowance (Child Health Care Card only)")
@@ -210,9 +205,7 @@ def test_resolve_no_resources_raises(dss_data_dir: Path) -> None:
 @responses.activate
 def test_fetch_downloads_xlsx(dss_data_dir: Path) -> None:
     fake_url = "https://example.com/dss-dec-2025.xlsx"
-    fake_xlsx = _make_dss_xlsx(
-        [("117011326", {"Age Pension": 545, "JobSeeker Payment": 120})]
-    )
+    fake_xlsx = _make_dss_xlsx([("117011326", {"Age Pension": 545, "JobSeeker Payment": 120})])
     responses.add(
         responses.GET,
         CKAN_PACKAGE_URL,
@@ -241,24 +234,35 @@ def test_fetch_downloads_xlsx(dss_data_dir: Path) -> None:
 @responses.activate
 def test_load_returns_sa2_indexed_dataframe(dss_data_dir: Path) -> None:
     fake_url = "https://example.com/dss-dec-2025.xlsx"
-    fake_xlsx = _make_dss_xlsx([
-        ("117011326", {
-            "Age Pension": 545,
-            "JobSeeker Payment": 120,
-            "Disability Support Pension": 80,
-        }),
-        ("117011327", {
-            "Age Pension": 380,
-            "JobSeeker Payment": 75,
-            "Disability Support Pension": 45,
-        }),
-        # An aggregate row with non-9-digit code that should be filtered.
-        ("Australia", {
-            "Age Pension": 9999999,
-            "JobSeeker Payment": 9999999,
-            "Disability Support Pension": 9999999,
-        }),
-    ])
+    fake_xlsx = _make_dss_xlsx(
+        [
+            (
+                "117011326",
+                {
+                    "Age Pension": 545,
+                    "JobSeeker Payment": 120,
+                    "Disability Support Pension": 80,
+                },
+            ),
+            (
+                "117011327",
+                {
+                    "Age Pension": 380,
+                    "JobSeeker Payment": 75,
+                    "Disability Support Pension": 45,
+                },
+            ),
+            # An aggregate row with non-9-digit code that should be filtered.
+            (
+                "Australia",
+                {
+                    "Age Pension": 9999999,
+                    "JobSeeker Payment": 9999999,
+                    "Disability Support Pension": 9999999,
+                },
+            ),
+        ]
+    )
     responses.add(
         responses.GET,
         CKAN_PACKAGE_URL,
@@ -297,9 +301,11 @@ def test_load_returns_sa2_indexed_dataframe(dss_data_dir: Path) -> None:
 @responses.activate
 def test_load_handles_suppressed_cells(dss_data_dir: Path) -> None:
     fake_url = "https://example.com/dss-dec-2025.xlsx"
-    fake_xlsx = _make_dss_xlsx([
-        ("117011326", {"Age Pension": "np", "JobSeeker Payment": 120}),
-    ])
+    fake_xlsx = _make_dss_xlsx(
+        [
+            ("117011326", {"Age Pension": "np", "JobSeeker Payment": 120}),
+        ]
+    )
     responses.add(
         responses.GET,
         CKAN_PACKAGE_URL,
@@ -325,9 +331,7 @@ def test_load_handles_suppressed_cells(dss_data_dir: Path) -> None:
 @responses.activate
 def test_load_caches_parquet(dss_data_dir: Path) -> None:
     fake_url = "https://example.com/dss-dec-2025.xlsx"
-    fake_xlsx = _make_dss_xlsx(
-        [("117011326", {"Age Pension": 545})]
-    )
+    fake_xlsx = _make_dss_xlsx([("117011326", {"Age Pension": 545})])
     responses.add(
         responses.GET,
         CKAN_PACKAGE_URL,

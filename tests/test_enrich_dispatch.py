@@ -20,12 +20,14 @@ from census_augment.enrich import CensusEnricher
 def _stub_catalog() -> MagicMock:
     """A VariableCatalog stub that resolves G\\d+.foo to itself."""
     catalog = MagicMock()
+
     def fake_resolve(ref: str):  # type: ignore[no-untyped-def]
         table_id, _, code = ref.partition(".")
         meta = MagicMock()
         meta.table_id = table_id
         meta.code = code
         return meta
+
     catalog.resolve.side_effect = fake_resolve
     return catalog
 
@@ -71,9 +73,7 @@ def test_enricher_routes_dataset_variables_to_fetcher(
 
     from census_augment import enrich as enrich_module
 
-    monkeypatch.setitem(
-        enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa
-    )
+    monkeypatch.setitem(enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa)
 
     enricher = CensusEnricher(
         datapacks=_stub_datapacks(),
@@ -106,9 +106,7 @@ def test_enricher_handles_mixed_gcp_and_dataset_variables(
 
     from census_augment import enrich as enrich_module
 
-    monkeypatch.setitem(
-        enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa
-    )
+    monkeypatch.setitem(enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa)
 
     enricher = CensusEnricher(
         datapacks=_stub_datapacks(),
@@ -155,9 +153,7 @@ def test_enricher_dataset_missing_column_raises(
 
     from census_augment import enrich as enrich_module
 
-    monkeypatch.setitem(
-        enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa
-    )
+    monkeypatch.setitem(enrich_module._FETCHER_FACTORIES, "seifa_2021", fake_build_seifa)
 
     enricher = CensusEnricher(
         datapacks=_stub_datapacks(),
