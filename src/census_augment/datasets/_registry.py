@@ -15,10 +15,12 @@ Variable resolution dispatches by namespace:
   dataset).
 
 The registry's own knowledge is intentionally minimal — it knows about
-specs, not about how to fetch the data. Fetcher classes register
-themselves separately via :meth:`Registry.register_fetcher` so the
-spec layer stays Python-import-free for tooling that just needs to
-list / search the catalogue.
+specs, not about how to fetch the data. Built-in fetchers register
+themselves via :meth:`Registry.register_fetcher` at module-import
+time (each dataset module ends with a registration call), and the
+pipeline retrieves them via :meth:`Registry.make_fetcher`. The spec
+layer stays Python-import-free for tooling that just needs to list /
+search the catalogue without instantiating fetchers.
 """
 
 from __future__ import annotations
@@ -131,6 +133,9 @@ class Registry:
             )
         self._fetcher_factories[dataset_id] = factory
 
+    # `make_fetcher` is defined further down (in the "fetcher access"
+    # section); this position is the spec-side of the API.
+
     # ---- lookup --------------------------------------------------------
 
     def list_datasets(self) -> list[DatasetSpec]:
@@ -203,13 +208,15 @@ class Registry:
         factory. ``**kwargs`` are passed through to the factory.
 
         Raises :class:`RegistryError` if no fetcher factory has been
-        registered. Most callers won't need this directly — the
-        pipeline orchestrator calls it on demand once it's resolved
-        which datasets a config touches.
+        registered — typically a signal that the dataset module was
+        never imported (built-in datasets are imported by
+        :mod:`census_augment.datasets`'s ``__init__``).
         """
         if dataset_id not in self._fetcher_factories:
             raise RegistryError(
                 f"No fetcher registered for dataset {dataset_id!r}. "
-                "Register one with `registry.register_fetcher(...)`."
+                f"Datasets with factories: {sorted(self._fetcher_factories)}. "
+                f"If this is a built-in dataset, ensure its module is imported "
+                f"in census_augment.datasets.__init__."
             )
         return self._fetcher_factories[dataset_id](**kwargs)

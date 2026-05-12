@@ -273,3 +273,19 @@ def _coerce_number(cell: object) -> object:
     if re.fullmatch(r"-?\d+\.\d+", s):
         return float(s)
     return None
+
+
+# ---- fetcher registration ------------------------------------------------
+
+
+def _build_fetcher(root: Path) -> ErpDataSource:
+    return ErpDataSource(root=root)
+
+
+def _register() -> None:
+    from . import registry  # noqa: PLC0415
+
+    registry.register_fetcher("erp_by_sa2", _build_fetcher)
+
+
+_register()

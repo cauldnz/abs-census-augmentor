@@ -22,7 +22,6 @@ Loads only the datasets / tables actually referenced.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -187,7 +186,13 @@ class CensusEnricher:
 
     def _make_fetcher(self, dataset_id: str) -> Any:
         """Construct a fetcher for ``dataset_id`` with cache under
-        ``data_dir / <dataset_id>``."""
+        ``data_dir / <dataset_id>``.
+
+        Delegates to :meth:`census_augment.datasets.Registry.make_fetcher`,
+        which dispatches to the factory each dataset module registered
+        at import time. If no factory is registered the registry
+        raises :class:`RegistryError` with a useful diagnostic.
+        """
         if self._data_dir is None:
             # Tests / direct callers may not have a data_dir; honour
             # the registry's per-instance default.
@@ -197,14 +202,9 @@ class CensusEnricher:
                 "data_dir=... to the enricher constructor."
             )
 
-        factory = _FETCHER_FACTORIES.get(dataset_id)
-        if factory is None:
-            raise ValueError(
-                f"No fetcher factory registered for dataset {dataset_id!r}. "
-                "Add one in census_augment.enrich or register with "
-                "datasets.registry."
-            )
-        return factory(self._data_dir / dataset_id)
+        from .datasets import registry  # noqa: PLC0415
+
+        return registry.make_fetcher(dataset_id, root=self._data_dir / dataset_id)
 
     # ---- PRESET integration --------------------------------------------
 
@@ -366,34 +366,6 @@ class CensusEnricher:
         return df.merge(lookup_for_merge, on=sa2_code_col, how="left")
 
 
-def _build_seifa(root: Path) -> Any:
-    from .datasets._seifa import SeifaDataSource  # noqa: PLC0415
-
-    return SeifaDataSource(root=root)
-
-
-def _build_erp(root: Path) -> Any:
-    from .datasets._erp import ErpDataSource  # noqa: PLC0415
-
-    return ErpDataSource(root=root)
-
-
-def _build_dss(root: Path) -> Any:
-    from .datasets._dss import DssDataSource  # noqa: PLC0415
-
-    return DssDataSource(root=root)
-
-
-def _build_ato(root: Path) -> Any:
-    from .datasets._ato import AtoDataSource  # noqa: PLC0415
-
-    return AtoDataSource(root=root)
-
-
-# Registered fetcher factories — dataset_id → callable taking a cache root.
-_FETCHER_FACTORIES: dict[str, Callable[[Path], Any]] = {
-    "seifa_2021": _build_seifa,
-    "erp_by_sa2": _build_erp,
-    "dss_payments": _build_dss,
-    "ato_personal_income": _build_ato,
-}
+# Fetcher-factory wiring moved into each dataset module's tail
+# (see `datasets/_seifa.py::_register()` and siblings). The pipeline
+# resolves factories via `registry.make_fetcher(dataset_id, root)`.

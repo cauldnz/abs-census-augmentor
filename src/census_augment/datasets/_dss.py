@@ -284,3 +284,19 @@ def _coerce_dss_cell(cell: object) -> object:
     if re.fullmatch(r"-?\d+\.\d+", s):
         return float(s)
     return s
+
+
+# ---- fetcher registration ------------------------------------------------
+
+
+def _build_fetcher(root: Path) -> DssDataSource:
+    return DssDataSource(root=root)
+
+
+def _register() -> None:
+    from . import registry  # noqa: PLC0415
+
+    registry.register_fetcher("dss_payments", _build_fetcher)
+
+
+_register()

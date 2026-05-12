@@ -306,3 +306,26 @@ def _field_name(prefix: str, field: str) -> str:
     if field in ("urp", "state_abbreviation"):
         return field
     return f"{prefix}_{field}"
+
+
+# ---- fetcher registration ------------------------------------------------
+#
+# Bind the SEIFA fetcher to its dataset id on the process-wide registry
+# (see :mod:`census_augment.datasets`). The pipeline calls
+# ``registry.make_fetcher("seifa_2021", root)`` to construct one when
+# enrichment needs it.
+
+
+def _build_fetcher(root: Path) -> SeifaDataSource:
+    return SeifaDataSource(root=root)
+
+
+def _register() -> None:
+    # Late import to dodge the circular: `datasets/__init__.py` imports
+    # us, and we'd otherwise import it back at module top.
+    from . import registry  # noqa: PLC0415
+
+    registry.register_fetcher("seifa_2021", _build_fetcher)
+
+
+_register()

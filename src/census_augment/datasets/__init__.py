@@ -28,8 +28,21 @@ from ._protocol import DatasetFetcher
 from ._registry import Registry
 from ._spec import DatasetSpec, VariableSpec
 
-# The single process-wide registry instance.
+# The single process-wide registry instance. Built from the on-disk
+# spec markdown files; fetchers are bound below by importing each
+# built-in dataset module (each module's tail calls
+# `registry.register_fetcher(...)`).
 registry = Registry.from_repo_specs()
+
+# Import each built-in fetcher module so its module-level
+# `register_fetcher` call runs. This intentionally happens after
+# `registry = Registry.from_repo_specs()` so the registration is
+# attached to the canonical singleton. Suppressed-unused-import lint:
+# the modules' side-effect is the whole point.
+from . import _ato as _ato  # noqa: F401, E402
+from . import _dss as _dss  # noqa: F401, E402
+from . import _erp as _erp  # noqa: F401, E402
+from . import _seifa as _seifa  # noqa: F401, E402
 
 __all__ = [
     "DatasetFetcher",

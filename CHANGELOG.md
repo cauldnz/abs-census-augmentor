@@ -9,6 +9,43 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Phase 2 PR-2 — Architectural simplification: fetcher-registration consolidation
+
+Before this change there were **two** fetcher-registration mechanisms
+side by side:
+
+- `enrich._FETCHER_FACTORIES` — a module-level dict in
+  `census_augment/enrich.py` mapping the four built-in dataset ids
+  to local `_build_*` factory functions. Used by
+  `CensusEnricher._make_fetcher`.
+- `Registry.register_fetcher` / `Registry.make_fetcher` — public
+  methods on the registry that already existed and were documented
+  as the contract, but were **never called from production**.
+
+The registry's docstring also claimed "Fetcher classes register
+themselves separately via `Registry.register_fetcher`" — a polite
+lie.
+
+This change collapses the two:
+
+- Each built-in dataset module (`_seifa.py`, `_erp.py`, `_dss.py`,
+  `_ato.py`) ends with a `_register()` call that binds its
+  `_build_fetcher(root)` factory to its dataset id on the
+  process-wide registry.
+- `datasets/__init__.py` imports each module after building the
+  registry so the side-effecting registrations run.
+- `CensusEnricher._make_fetcher` now calls
+  `registry.make_fetcher(dataset_id, root=...)` — one line, no
+  knowledge of which datasets exist.
+- `_FETCHER_FACTORIES` and the four `_build_*` shims in
+  `enrich.py` are gone.
+- Three test stubs in `tests/test_enrich_dispatch.py` were updated
+  to patch `registry._fetcher_factories` instead of the deleted
+  dict.
+- The lying docstring in `datasets/_registry.py` is now accurate.
+
+Same number of tests pass (**543**); zero behavioural change.
+
 ### Phase 2 PR-1 — Architectural simplification: shared dataset base + spec loader
 
 Two structural duplications from the v1.3 / v1.4 evolution have been
