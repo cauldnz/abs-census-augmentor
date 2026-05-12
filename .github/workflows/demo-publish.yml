@@ -1,0 +1,105 @@
+# Manual workflow: render every demo GIF on the latest `main` and
+# commit the refreshed renders + frames + README strip back to `main`.
+#
+# Use this when:
+# - A tape edit / CLI rename / spec change has merged via a PR whose
+#   `demo-render.yml` artifact looked right, but the committed demo
+#   assets on `main` are now stale.
+# - You want to refresh the demos against the latest ABS data (e.g.
+#   ABS published a new boundary edition).
+#
+# Push back to `main` via the default `GITHUB_TOKEN` with `contents:
+# write` scoped to this workflow. The bot commit author is
+# `github-actions[bot]`, which keeps the audit trail clear.
+#
+# Branch protection (if enabled on `main`) needs to allow this
+# workflow's pushes — either via "Allow specified actors to bypass
+# required pull requests" or by always landing demo refreshes through
+# a PR-style flow. The current repo has no branch protection, so the
+# direct push works as-is; add a check before tightening.
+#
+# Designed in issue #38.
+
+name: Publish demos to main
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Commit message subject (optional)"
+        required: false
+        default: "chore(demos): refresh rendered GIFs and frames"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Render and commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # Only allow from the `main` branch — running this against a
+    # feature branch would commit demo renders against unmerged
+    # code.
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          # Needs the token with write scope so the later `git push`
+          # works.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install render dependencies
+        uses: ./.github/actions/install-render-deps
+
+      - name: Install project + dev deps
+        run: uv sync --all-extras
+
+      - name: Render every tape
+        run: ./tools/demo/render.sh --local --all
+
+      - name: Refresh README scene strips
+        run: uv run python tools/demo/refresh_readme_frames.py
+
+      - name: Show render log on failure
+        if: failure()
+        run: |
+          for f in tools/demo/.last-render-*.log; do
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
+      # Commit + push only the rendered artefacts, plus any README
+      # change the scene-strip refresh produced. Skips the push when
+      # nothing changed — the workflow is idempotent.
+      - name: Commit refreshed demos
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add docs/*.gif docs/frames/*.png README.md
+
+          if git diff --cached --quiet; then
+            echo "No demo changes; nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "${{ inputs.message }}
+
+          Rendered by .github/workflows/demo-publish.yml against
+          ${GITHUB_SHA::8} on $(date -u +%Y-%m-%dT%H:%M:%SZ).
+          "
+          git push origin HEAD:main

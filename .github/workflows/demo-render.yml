@@ -1,0 +1,100 @@
+# PR validation: re-render every demo GIF and upload as artifacts.
+#
+# Triggered on PRs that touch anything that could change what the
+# demos show — tape files, the CLI entry point, the pipeline, registered
+# dataset / PRESET specs. Avoids the cost of a 5-7 minute render on
+# every documentation-only or unrelated-source PR.
+#
+# Output: a `demo-renders` artifact containing the GIFs + per-scene
+# PNGs. Reviewers can download it to see the visual delta a PR would
+# produce. Nothing gets committed — `demo-publish.yml` is the manual
+# workflow that lands refreshed renders on `main`.
+#
+# Designed in issue #38.
+
+name: Render demos
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # Tape edits / config tweaks / Sleep adjustments
+      - "tools/demo/**"
+      # CLI surface / output prompt strings can appear in scenes
+      - "src/census_augment/cli.py"
+      - "src/census_augment/pipeline.py"
+      - "src/census_augment/enrich.py"
+      # Registered datasets + PRESETs surface in `discover` output
+      - "datasets/**.md"
+      - "features/**.md"
+      # The workflows themselves
+      - ".github/workflows/demo-render.yml"
+      - ".github/actions/install-render-deps/action.yml"
+  # Allow manual re-run from the Actions tab without opening a PR.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: Render and upload artifact
+    runs-on: ubuntu-latest
+    # Render takes ~5-7 minutes (3 tape pre-warms + parallel render).
+    # 20 minutes gives ample headroom for ABS download slowness.
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install render dependencies
+        uses: ./.github/actions/install-render-deps
+
+      - name: Install project + dev deps
+        run: uv sync --all-extras
+
+      # Render uses the same `--local` path that the devcontainer
+      # uses by default — no Docker, native vhs invocation. The
+      # script pre-warms the ABS cache and pre-runs every demo
+      # config before invoking vhs.
+      - name: Render every tape
+        run: ./tools/demo/render.sh --local --all
+
+      # README scene strips are kept in sync by `make demos`. The
+      # render script doesn't run the refresh step itself (the
+      # Makefile does), so do it here to guarantee artifacts match
+      # what would be committed.
+      - name: Refresh README scene strips
+        run: uv run python tools/demo/refresh_readme_frames.py
+
+      - name: Show render log on failure
+        if: failure()
+        run: |
+          for f in tools/demo/.last-render-*.log; do
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
+      - name: Upload demo artifacts
+        uses: actions/upload-artifact@v4
+        # `if: always()` so a partial render (e.g. 2 of 3 tapes
+        # succeeded) still lets the reviewer download what did render.
+        if: always()
+        with:
+          name: demo-renders
+          path: |
+            docs/*.gif
+            docs/frames/*.png
+          retention-days: 14
+          if-no-files-found: warn

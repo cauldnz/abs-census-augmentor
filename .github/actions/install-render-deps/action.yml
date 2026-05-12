@@ -1,0 +1,87 @@
+# Composite action: install the runtime deps `tools/demo/render.sh --local`
+# needs (ffmpeg + bsdmainutils + chromium + chromium-sandbox via apt;
+# ttyd + vhs from GitHub releases). Shared between `demo-render.yml`
+# and `demo-publish.yml`.
+#
+# Versions are pinned to match `.devcontainer/post-create.sh` so the
+# devcontainer and CI render with the same toolchain — bumping either
+# means bumping both.
+#
+# Designed for ubuntu-latest x86_64. arm64 needs different ttyd/vhs
+# asset names; we don't run CI on arm64 today so that branch is
+# omitted.
+
+name: Install render deps
+description: Install ffmpeg, chromium, ttyd, and vhs for `render.sh --local`.
+
+inputs:
+  ttyd-version:
+    description: ttyd release tag (e.g. "1.7.7")
+    required: false
+    default: "1.7.7"
+  vhs-version:
+    description: vhs release version (e.g. "0.11.0")
+    required: false
+    default: "0.11.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Install apt deps (ffmpeg, chromium runtime libs, column)
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        # ffmpeg              — vhs encodes captured frames to GIF.
+        # bsdmainutils        — provides `column`, used by demo tapes.
+        #
+        # The remaining libs are chromium's runtime shared-library set.
+        # vhs's go-rod downloads its own headless-chromium binary to
+        # ~/.cache/rod/; that binary still needs the standard chromium
+        # / Playwright shared-lib set at runtime.
+        #
+        # Why not just `apt install chromium`? `ubuntu-latest` on
+        # GitHub Actions is Ubuntu 24.04 (noble), where chromium is
+        # only available as a snap — the apt package no longer exists,
+        # and `chromium-sandbox` has no candidate either. Debian
+        # bookworm (the devcontainer base) still has apt chromium, so
+        # `.devcontainer/post-create.sh` uses the single-package path
+        # there. On noble we list the libs explicitly.
+        #
+        # The list matches Playwright's published `chromium` deps for
+        # ubuntu-24.04. Package names use the `t64` time-64-bit
+        # variants on noble; apt resolves the legacy names as aliases.
+        # No `chromium-sandbox` either — GHA runners aren't
+        # containerised, so unprivileged user namespaces are enabled
+        # by default and the setuid sandbox helper isn't needed.
+        sudo apt-get install -y --no-install-recommends \
+            ffmpeg bsdmainutils \
+            libnss3 libnspr4 \
+            libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64
+
+    - name: Install ttyd ${{ inputs.ttyd-version }}
+      shell: bash
+      run: |
+        TTYD_VERSION="${{ inputs.ttyd-version }}"
+        # ttyd ships a single static binary per arch on each GitHub
+        # release. Not in Debian/Ubuntu apt — that's the entire reason
+        # we curl it.
+        curl -fsSL \
+            "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" \
+            -o /tmp/ttyd
+        sudo install -m 0755 /tmp/ttyd /usr/local/bin/ttyd
+        ttyd --version
+
+    - name: Install vhs ${{ inputs.vhs-version }}
+      shell: bash
+      run: |
+        VHS_VERSION="${{ inputs.vhs-version }}"
+        # vhs is a tarball with the binary inside. Same GitHub-release
+        # pattern as ttyd.
+        curl -fsSL \
+            "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz" \
+            | tar xz -C /tmp
+        sudo install -m 0755 /tmp/vhs_*/vhs /usr/local/bin/vhs
+        vhs --version
