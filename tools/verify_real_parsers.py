@@ -79,7 +79,7 @@ def main() -> int:
     boundaries = BoundariesDataSource(
         census=census,
         base_url=DEFAULT_BOUNDARIES_URL,
-        root=data_dir / "boundaries",
+        root=data_dir / "boundaries" / str(census.year),
     )
     if not boundaries.is_cached():
         print("  [FAIL] No cached boundary. Run fetch_real_data.py first.")
@@ -109,7 +109,7 @@ def main() -> int:
     datapacks = DataPacksDataSource(
         census=census,
         base_url=DEFAULT_DATAPACKS_URL,
-        root=data_dir / "census",
+        root=data_dir / "census" / str(census.year),
     )
     if not datapacks.is_cached():
         print("  [FAIL] No cached DataPack. Run fetch_real_data.py first.")
@@ -162,7 +162,7 @@ def main() -> int:
         year=census.year,
         datum=census.datum,
         base_url=DEFAULT_BOUNDARIES_URL,
-        root=data_dir / "mb",
+        root=data_dir / "mb" / str(census.year),
     )
     if not mb_ds.is_cached():
         print("  (skipped; no MB shapefile cached. Run fetch_real_data.py to populate it.)")

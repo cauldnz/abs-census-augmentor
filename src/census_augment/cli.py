@@ -224,7 +224,7 @@ def discover(
     datapacks = DataPacksDataSource(
         census=cfg.census,
         base_url=cfg.data_sources.datapacks_base_url,
-        root=effective_data_dir / "census",
+        root=effective_data_dir / "census" / str(cfg.census.year),
     )
     catalog = VariableCatalog.from_data_source(datapacks)
 
@@ -280,11 +280,12 @@ def fetch(
 
     cfg = load_config(config)
     effective_data_dir = data_dir if data_dir is not None else default_data_dir()
+    boundary_year = str(cfg.census.year)
     if boundaries:
         bds = BoundariesDataSource(
             census=cfg.census,
             base_url=cfg.data_sources.boundaries_base_url,
-            root=effective_data_dir / "boundaries",
+            root=effective_data_dir / "boundaries" / boundary_year,
         )
         path = bds.fetch(refresh=refresh)
         typer.echo(f"Boundaries: {path}")
@@ -292,7 +293,7 @@ def fetch(
         dds = DataPacksDataSource(
             census=cfg.census,
             base_url=cfg.data_sources.datapacks_base_url,
-            root=effective_data_dir / "census",
+            root=effective_data_dir / "census" / boundary_year,
         )
         path = dds.fetch(refresh=refresh)
         typer.echo(f"DataPacks:  {path}")
@@ -333,7 +334,7 @@ def fetch(
             year=cfg.census.year,
             datum=cfg.geocoding.gnaf.datum,
             base_url=cfg.data_sources.boundaries_base_url,
-            root=effective_data_dir / "mb",
+            root=effective_data_dir / "mb" / boundary_year,
         )
         mb_path = mb_ds.fetch(refresh=refresh)
         typer.echo(f"MB lookup:  {mb_path}")
@@ -439,7 +440,7 @@ def validate(
     datapacks = DataPacksDataSource(
         census=cfg.census,
         base_url=cfg.data_sources.datapacks_base_url,
-        root=effective_data_dir / "census",
+        root=effective_data_dir / "census" / str(cfg.census.year),
     )
     catalog = VariableCatalog.from_data_source(datapacks)
     try:
