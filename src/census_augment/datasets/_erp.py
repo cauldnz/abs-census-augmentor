@@ -23,6 +23,8 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from .._http_retry import retry_stream_get
+
 _log = logging.getLogger(__name__)
 
 ERP_LANDING_URL = (
@@ -115,7 +117,12 @@ class ErpDataSource:
             self.resolved_release,
             url,
         )
-        with self._session.get(url, stream=True, timeout=self._timeout) as response:
+        with retry_stream_get(
+            self._session,
+            url,
+            timeout=self._timeout,
+            label=self._label,
+        ) as response:
             response.raise_for_status()
             with tmp.open("wb") as f:
                 for chunk in response.iter_content(chunk_size=self._chunk_size):

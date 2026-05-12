@@ -48,8 +48,9 @@ _log = logging.getLogger(__name__)
 DEFAULT_GNAF_S3_BASE_URL = "s3://minus34.com/opendata"
 DEFAULT_GNAF_OFFICIAL_BASE_URL = "https://data.gov.au/data/dataset"
 
-# Minimum schema we require from G-NAF Core. Extended in Phase 4 once the
-# geocoder needs the component-match columns (street, locality, etc.).
+# Minimum schema we require from G-NAF Core. The columns below cover
+# all three geocoder tiers (exact label match, component match,
+# fuzzy FTS) — see spec §19.
 _REQUIRED_COLUMNS = frozenset(
     {
         "ADDRESS_DETAIL_PID",

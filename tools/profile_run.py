@@ -65,7 +65,7 @@ def main() -> int:
     from census_augment.enrich import CensusEnricher
     from census_augment.geocoding.cache import GeocodeCache, NullCache
     from census_augment.geocoding.nominatim import NominatimGeocoder
-    from census_augment.mb_correspondence import MbCorrespondenceDataSource
+    from census_augment.data_sources.mb_correspondence import MbCorrespondenceDataSource
     from census_augment.paths import default_cache_dir, default_data_dir
     from census_augment.pipeline import Pipeline, _is_gcp_variable_ref
     from census_augment.spatial import SpatialIndex

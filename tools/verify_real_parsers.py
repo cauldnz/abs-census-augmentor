@@ -31,7 +31,7 @@ try:
     from census_augment.data_sources.datapacks import DataPacksDataSource
     from census_augment.data_sources.gnaf import GnafDataSource
     from census_augment.geocoding.gnaf import GnafGeocoder
-    from census_augment.mb_correspondence import MbCorrespondenceDataSource
+    from census_augment.data_sources.mb_correspondence import MbCorrespondenceDataSource
     from census_augment.paths import default_data_dir
 except ModuleNotFoundError as e:
     sys.stderr.write(

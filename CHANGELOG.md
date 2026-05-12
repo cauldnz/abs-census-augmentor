@@ -9,6 +9,61 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Phase 1 polish — correctness, error UX, hygiene
+
+A bundle of small wins surfaced by the v1.4.2 all-up review.
+
+**Retry on transient ABS / data.gov.au failures (spec §10).** Spec
+§10 documented "Retry with exponential backoff (3 attempts), then
+abort", but only `geocoding/nominatim.py` actually did it. The five
+bulk fetchers (`_AbsZipDataSource._download` for boundaries +
+DataPacks; `_seifa.py`, `_erp.py`, `_dss.py`, `_ato.py`) all issued
+a single `session.get()` and aborted the run on the first
+transient 5xx. Added `src/census_augment/_http_retry.py` — a
+shared streaming-GET helper that retries on `ConnectionError`,
+`Timeout`, and HTTP 502 / 503 / 504 with 1s / 2s / 4s backoff. Wired
+into all five call sites; 9 new tests cover the retry semantics
+(label propagation, 404 not retried, 500 not retried, etc.).
+
+**Input-column collision check (spec §8).** Spec §8 says "Original
+input columns are preserved unchanged"; the pipeline silently
+overwrote them if a user's CSV already had a column named
+`sa2_code` / `geo_lat` / etc. `Pipeline.augment(df)` now raises a
+`ValueError` listing every colliding name before any work happens.
+8 new parametrised tests across the seven reserved column names.
+
+**CLI run command swallows tracebacks.** `census-augment run` now
+catches `CatalogError`, pydantic `ValidationError`, `HTTPError`,
+`ConnectionError`, `ValueError`, `RuntimeError` and surfaces a
+one-line `Error: ...` + exit 1, instead of dumping a raw Python
+traceback. Bare tracebacks still available via `-v` / `--verbose`.
+
+**`pd.read_csv` encoding fallback.** `Pipeline.run()` now tries
+`utf-8-sig` → `utf-8` → `cp1252` when reading the user's input
+CSV, so Excel-exported Windows-1252 inputs don't fail with an
+uninformative `UnicodeDecodeError`. If all three fail, the error
+message names the path and the encodings tried.
+
+**`mb_correspondence.py` relocated** from the package root into
+`data_sources/`. Logically it's been an ABS-zip data source since
+v1.0; this just makes the file tree match. All importers (CLI,
+pipeline, tests, three `tools/` scripts) updated; `spec.md` §5
+project-structure tree updated to match.
+
+**Trivial cleanups:**
+
+- Dropped redundant `except (OSError, Exception)` tuple syntax in
+  `data_sources/boundaries.py` — `Exception` already covers
+  `OSError`. `# noqa: BLE001` retained intentionally.
+- Removed three stale "Phase 4 / Phase 6b" comments referencing
+  long-shipped milestones (`geocoding/gnaf.py` GnafGeocoder
+  docstring, `pipeline.py` `Pipeline.create` comment,
+  `data_sources/gnaf.py` `_REQUIRED_COLUMNS` comment).
+- Updated `tools/README.md` "what `verify_real_parsers.py` checks"
+  list to reflect the v1.1 G-NAF coverage, v1.3 dataset coverage,
+  and v1.4 PRESET-source coverage that landed but weren't
+  documented there.
+
 ### Removed — Host Docker socket bind from the devcontainer
 
 `.devcontainer/devcontainer.json` no longer enables the

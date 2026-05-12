@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import requests
 import typer
 from pydantic import ValidationError
 
@@ -25,7 +26,7 @@ from .config import load_config
 from .data_sources.boundaries import BoundariesDataSource
 from .data_sources.datapacks import DataPacksDataSource
 from .data_sources.gnaf import GnafDataSource
-from .mb_correspondence import MbCorrespondenceDataSource
+from .data_sources.mb_correspondence import MbCorrespondenceDataSource
 from .paths import default_data_dir
 from .pipeline import Pipeline
 
@@ -85,8 +86,49 @@ def run(
         )
         raise typer.Exit(code=1)
 
-    pipeline = Pipeline.from_config(cfg, data_dir=data_dir, cache_dir=cache_dir)
-    summary = pipeline.run()
+    # Catch the obvious failure modes and surface a one-line "Error:
+    # ..." message + exit 1, so users get a usable diagnostic instead
+    # of a raw Python traceback. Bare tracebacks are still available
+    # via `-v` / `--verbose` (logging picks up DEBUG-level info).
+    try:
+        pipeline = Pipeline.from_config(cfg, data_dir=data_dir, cache_dir=cache_dir)
+        summary = pipeline.run()
+    except CatalogError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    except ValidationError as e:
+        typer.echo(f"Error: config validation failed:\n{e}", err=True)
+        raise typer.Exit(code=1) from e
+    except requests.HTTPError as e:
+        # Reached from ABS / data.gov.au after retries are exhausted
+        # (see census_augment._http_retry). Surface the URL +
+        # status code, not a full traceback.
+        status = e.response.status_code if e.response is not None else "?"
+        url = e.response.url if e.response is not None else "<unknown URL>"
+        typer.echo(
+            f"Error: ABS data fetch failed (HTTP {status} from {url}). "
+            f"Check connectivity, the configured base URL, and whether "
+            f"the upstream resource still exists.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from e
+    except requests.ConnectionError as e:
+        typer.echo(
+            f"Error: could not reach ABS / data.gov.au "
+            f"({e.__class__.__name__}: {e}). Check connectivity.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from e
+    except ValueError as e:
+        # Pipeline column-collision / locator-resolution errors land here.
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
+    except RuntimeError as e:
+        # Parser / extract failures (e.g. "No table CSVs found in ZIP")
+        # land here.
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1) from e
+
     typer.echo(summary.format_human_readable())
 
 

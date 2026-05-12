@@ -587,6 +587,62 @@ def test_augment_missing_column_raises(tmp_path: Path) -> None:
         pipeline.augment(df_in)
 
 
+@pytest.mark.parametrize(
+    "colliding_col",
+    [
+        "geo_lat",
+        "geo_lon",
+        "geo_source",
+        "geo_match_score",
+        "sa2_code",
+        "sa2_name",
+        "sa2_resolution",
+    ],
+)
+def test_augment_input_column_collision_raises(tmp_path: Path, colliding_col: str) -> None:
+    """Input DataFrames carrying a reserved output column name raise loud.
+
+    Spec §8 says "Original input columns are preserved unchanged"; a
+    silent overwrite would violate that contract. Reserved set is the
+    seven pipeline-output names (lat/lon/source/score + sa2 trio).
+    """
+    config = _make_config(tmp_path=tmp_path)
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    df_in = pd.DataFrame(
+        {
+            "lat": [-33.86],
+            "lon": [151.21],
+            colliding_col: ["pre-existing value"],
+        }
+    )
+    with pytest.raises(ValueError, match="collide with reserved"):
+        pipeline.augment(df_in)
+
+
+def test_augment_input_column_collision_lists_all_collisions(tmp_path: Path) -> None:
+    """If multiple input columns collide, the error names all of them."""
+    config = _make_config(tmp_path=tmp_path)
+    pieces = _empty_pipeline_pieces(tmp_path)
+    pipeline = Pipeline(config=config, **pieces)
+
+    df_in = pd.DataFrame(
+        {
+            "lat": [-33.86],
+            "lon": [151.21],
+            "sa2_code": ["x"],
+            "geo_lat": [0.0],
+        }
+    )
+    with pytest.raises(ValueError) as exc_info:
+        pipeline.augment(df_in)
+
+    msg = str(exc_info.value)
+    assert "geo_lat" in msg
+    assert "sa2_code" in msg
+
+
 def test_augment_explicit_none_override_disables_locator(tmp_path: Path) -> None:
     """Passing ``address_column=None`` explicitly should disable address
     resolution for that call, even when config has it set."""
@@ -902,7 +958,7 @@ def _success_with_mb(
 def test_mb_fast_path_resolves_sa2_without_spatial(tmp_path: Path) -> None:
     """A geocoder that returns mb_code should resolve SA2 via the MB
     lookup dict, with sa2_resolution='mb_code'."""
-    from census_augment.mb_correspondence import MbInfo
+    from census_augment.data_sources.mb_correspondence import MbInfo
 
     config = _make_config(tmp_path=tmp_path, latitude_column=None, longitude_column=None)
     fake_geo = _FakeGeocoder(

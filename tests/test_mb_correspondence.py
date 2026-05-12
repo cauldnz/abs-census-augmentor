@@ -16,7 +16,7 @@ import pytest
 import requests
 import responses
 
-from census_augment.mb_correspondence import (
+from census_augment.data_sources.mb_correspondence import (
     MbCorrespondenceDataSource,
     MbInfo,
 )

@@ -24,6 +24,8 @@ from pathlib import Path
 
 import requests
 
+from .._http_retry import retry_stream_get
+
 _log = logging.getLogger(__name__)
 
 
@@ -66,10 +68,21 @@ class _AbsZipDataSource:
         return self._root / self.filename.removesuffix(".zip")
 
     def _download(self) -> None:
-        """Stream-download to a ``.tmp`` file then atomically rename."""
+        """Stream-download to a ``.tmp`` file then atomically rename.
+
+        Retries the initial GET on connection / timeout / 502 / 503 / 504
+        failures (spec §10). Mid-stream interruptions still propagate to
+        the caller — resume-from-byte-N would need server range support
+        and is out of scope for v1.
+        """
         self._root.mkdir(parents=True, exist_ok=True)
         _log.info("Downloading %s from %s", self._label, self.url)
-        with self._session.get(self.url, stream=True, timeout=self._timeout) as response:
+        with retry_stream_get(
+            self._session,
+            self.url,
+            timeout=self._timeout,
+            label=self._label,
+        ) as response:
             response.raise_for_status()
             tmp = self._root / (self.filename + ".tmp")
             with tmp.open("wb") as f:
