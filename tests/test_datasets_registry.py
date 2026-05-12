@@ -117,6 +117,174 @@ def test_parse_invalid_yaml_raises(tmp_path: Path) -> None:
         parse_dataset_spec(spec_path)
 
 
+def test_parse_spec_without_temporal_block_has_none(tmp_path: Path) -> None:
+    """The `temporal:` field is optional; spec without it parses with
+    `temporal=None` (datasets default to cross-sectional)."""
+    spec_path = _write_spec(
+        tmp_path,
+        dedent(
+            """\
+            ---
+            id: foo
+            name: Foo
+            status: active
+            custodian: Org
+            licence: CC-BY-4.0
+            update_cadence: one-shot
+            geography_level: SA2
+            geography_edition: 2021_ASGS_Edition_3
+            geography_native: true
+            join_key: sa2_code_2021
+            landing_page: https://example.com
+            namespace: FOO
+            ---
+
+            body
+            """
+        ),
+    )
+    spec = parse_dataset_spec(spec_path)
+    assert spec.temporal is None
+
+
+def test_parse_spec_with_temporal_block(tmp_path: Path) -> None:
+    """A spec with a `temporal:` block parses it into a
+    `TemporalDatasetMetadata` instance with the expected fields."""
+    spec_path = _write_spec(
+        tmp_path,
+        dedent(
+            """\
+            ---
+            id: foo
+            name: Foo
+            status: active
+            custodian: Org
+            licence: CC-BY-4.0
+            update_cadence: annual
+            geography_level: SA2
+            geography_edition: 2021_ASGS_Edition_3
+            geography_native: true
+            join_key: sa2_code_2021
+            landing_page: https://example.com
+            namespace: FOO
+            temporal:
+              cadence: annual
+              cover_basis: financial_year_ending
+              release_id_format: "YYYY-YY"
+              available_releases:
+                - "2018-19"
+                - "2019-20"
+                - "2020-21"
+              asgs_edition_by_release:
+                "2018-19": 2
+                "2019-20": 3
+                "2020-21": 3
+            ---
+
+            body
+            """
+        ),
+    )
+    spec = parse_dataset_spec(spec_path)
+    assert spec.temporal is not None
+    assert spec.temporal.cadence == "annual"
+    assert spec.temporal.cover_basis == "financial_year_ending"
+    assert spec.temporal.available_releases == ["2018-19", "2019-20", "2020-21"]
+    assert spec.temporal.asgs_edition_by_release == {
+        "2018-19": 2,
+        "2019-20": 3,
+        "2020-21": 3,
+    }
+
+
+def test_parse_temporal_block_rejects_unknown_cadence(tmp_path: Path) -> None:
+    """An invalid `cadence` value fails parsing loudly."""
+    spec_path = _write_spec(
+        tmp_path,
+        dedent(
+            """\
+            ---
+            id: foo
+            name: Foo
+            status: active
+            custodian: Org
+            licence: CC-BY-4.0
+            update_cadence: annual
+            geography_level: SA2
+            geography_edition: 2021_ASGS_Edition_3
+            geography_native: true
+            join_key: sa2_code_2021
+            landing_page: https://example.com
+            namespace: FOO
+            temporal:
+              cadence: bogus
+              cover_basis: financial_year_ending
+              release_id_format: "YYYY"
+            ---
+
+            body
+            """
+        ),
+    )
+    with pytest.raises(ValueError, match="invalid dataset spec"):
+        parse_dataset_spec(spec_path)
+
+
+def test_parse_temporal_block_rejects_unknown_asgs_edition(tmp_path: Path) -> None:
+    """`asgs_edition_by_release` values must be 1/2/3/4."""
+    spec_path = _write_spec(
+        tmp_path,
+        dedent(
+            """\
+            ---
+            id: foo
+            name: Foo
+            status: active
+            custodian: Org
+            licence: CC-BY-4.0
+            update_cadence: annual
+            geography_level: SA2
+            geography_edition: 2021_ASGS_Edition_3
+            geography_native: true
+            join_key: sa2_code_2021
+            landing_page: https://example.com
+            namespace: FOO
+            temporal:
+              cadence: annual
+              cover_basis: financial_year_ending
+              release_id_format: "YYYY"
+              asgs_edition_by_release:
+                "2018": 99
+            ---
+
+            body
+            """
+        ),
+    )
+    with pytest.raises(ValueError, match="invalid dataset spec"):
+        parse_dataset_spec(spec_path)
+
+
+def test_existing_seifa_2021_spec_has_temporal_block() -> None:
+    """The registered SEIFA 2021 spec markdown now includes its
+    temporal metadata block — sanity-check the on-disk file."""
+    repo_root = Path(__file__).resolve().parents[1]
+    spec = parse_dataset_spec(repo_root / "datasets" / "seifa_2021.md")
+    assert spec.temporal is not None
+    assert spec.temporal.cadence == "per_census"
+    assert spec.temporal.asgs_edition_by_release == {"2021": 3}
+
+
+def test_existing_erp_spec_has_temporal_block_with_edition_transition() -> None:
+    """ERP's temporal block declares the 2021→2022 ASGS edition
+    transition (2021 release on Edition 2; 2022 onwards on Edition 3)."""
+    repo_root = Path(__file__).resolve().parents[1]
+    spec = parse_dataset_spec(repo_root / "datasets" / "erp_by_sa2.md")
+    assert spec.temporal is not None
+    assert spec.temporal.asgs_edition_by_release["2021"] == 2
+    assert spec.temporal.asgs_edition_by_release["2022"] == 3
+
+
 def test_parse_missing_required_field_raises(tmp_path: Path) -> None:
     spec_path = _write_spec(
         tmp_path,

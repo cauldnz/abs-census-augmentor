@@ -13,6 +13,30 @@ landing_page: https://www.abs.gov.au/statistics/people/population/regional-popul
 fetch_size_compressed: ~3 MB
 tags: [population, demographics, denominators]
 namespace: ERP
+temporal:
+  cadence: annual
+  cover_basis: financial_year_ending
+  release_id_format: "YYYY (year ending 30 Jun)"
+  available_releases:
+    - "2016"
+    - "2017"
+    - "2018"
+    - "2019"
+    - "2020"
+    - "2021"
+    - "2022"
+    - "2023"
+    - "2024"
+  asgs_edition_by_release:
+    "2016": 2
+    "2017": 2
+    "2018": 2
+    "2019": 2
+    "2020": 2
+    "2021": 2
+    "2022": 3
+    "2023": 3
+    "2024": 3
 ---
 
 # ABS Estimated Resident Population by SA2

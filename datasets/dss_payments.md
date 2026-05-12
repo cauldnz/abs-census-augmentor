@@ -13,6 +13,36 @@ landing_page: https://data.gov.au/data/dataset/dss-payment-demographic-data
 fetch_size_compressed: ~5 MB per quarter
 tags: [welfare, social-services, demographics]
 namespace: DSS
+temporal:
+  cadence: quarterly
+  cover_basis: quarter_ending
+  release_id_format: "YYYY-Qn (quarter ending)"
+  available_releases:
+    - "2022-Q4"
+    - "2023-Q1"
+    - "2023-Q2"
+    - "2023-Q3"
+    - "2023-Q4"
+    - "2024-Q1"
+    - "2024-Q2"
+    - "2024-Q3"
+    - "2024-Q4"
+    - "2025-Q1"
+    - "2025-Q2"
+    - "2025-Q3"
+  asgs_edition_by_release:
+    "2022-Q4": 2
+    "2023-Q1": 2
+    "2023-Q2": 3
+    "2023-Q3": 3
+    "2023-Q4": 3
+    "2024-Q1": 3
+    "2024-Q2": 3
+    "2024-Q3": 3
+    "2024-Q4": 3
+    "2025-Q1": 3
+    "2025-Q2": 3
+    "2025-Q3": 3
 ---
 
 # DSS Payment Demographic Data

@@ -13,6 +13,28 @@ landing_page: https://www.abs.gov.au/statistics/labour/earnings-and-working-cond
 fetch_size_compressed: ~4 MB
 tags: [income, employment, administrative-data]
 namespace: ATO
+temporal:
+  cadence: annual
+  cover_basis: financial_year_ending
+  release_id_format: "YYYY-YY (Australian financial year)"
+  available_releases:
+    - "2015-16"
+    - "2016-17"
+    - "2017-18"
+    - "2018-19"
+    - "2019-20"
+    - "2020-21"
+    - "2021-22"
+    - "2022-23"
+  asgs_edition_by_release:
+    "2015-16": 2
+    "2016-17": 2
+    "2017-18": 2
+    "2018-19": 2
+    "2019-20": 3
+    "2020-21": 3
+    "2021-22": 3
+    "2022-23": 3
 ---
 
 # ABS Personal Income in Australia by SA2
