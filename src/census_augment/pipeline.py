@@ -36,6 +36,7 @@ from .geocoding.cache import GeocodeCache, NullCache
 from .geocoding.gnaf import GnafGeocoder
 from .geocoding.nominatim import NominatimGeocoder
 from .data_sources.mb_correspondence import MbCorrespondenceDataSource, MbInfo
+from .datasets._spec import TemporalDatasetMetadata
 from .paths import default_cache_dir, default_data_dir
 from .spatial import SpatialIndex
 
@@ -241,6 +242,11 @@ class AugmentResult:
     is_fully_enriched: pd.Series
     geocoding_failed: pd.Series
     sa2_unmatched: pd.Series
+    #: Per-dataset set of releases touched by the run, populated only
+    #: in temporal mode (``input.date_column`` set). ``None`` in
+    #: cross-sectional mode. Keys are dataset ids, values are sorted
+    #: sets of release identifiers.
+    releases_used: dict[str, list[str]] | None = None
 
 
 class Pipeline:
@@ -565,7 +571,15 @@ class Pipeline:
         df_out[_SA2_NAME_COL] = names
         df_out[_SA2_RESOLUTION_COL] = sa2_resolution
 
-        df_out = self._enricher.add_enrichment_columns(df_out, sa2_code_col=_SA2_CODE_COL)
+        # Temporal mode (spec-temporal.md §9): when input.date_column is
+        # set, bucket rows by per-dataset release and enrich each bucket
+        # with its own release-overridden enricher. Cross-sectional mode
+        # uses the configured enricher directly.
+        if self._config.input.date_column is not None:
+            df_out, releases_used = self._enrich_temporal(df, df_out)
+        else:
+            df_out = self._enricher.add_enrichment_columns(df_out, sa2_code_col=_SA2_CODE_COL)
+            releases_used = None
         df_out = self._reorder_output_columns(df_out, original_cols)
 
         summary = self._build_summary(df_out, sources, sa2_resolution)
@@ -634,6 +648,7 @@ class Pipeline:
             is_fully_enriched=is_fully_enriched,
             geocoding_failed=geocoding_failed,
             sa2_unmatched=sa2_unmatched,
+            releases_used=releases_used,
         )
 
     # ---- internals -------------------------------------------------------
@@ -889,10 +904,16 @@ class Pipeline:
 
     def _reorder_output_columns(self, df: pd.DataFrame, original_cols: list[str]) -> pd.DataFrame:
         prefix = self._config.output.prefix
+        # Per-dataset <dataset_id>_release columns added by temporal mode
+        # (spec-temporal.md §11). In cross-sectional mode these don't
+        # exist; in temporal mode they slot in after the SA2 trio and
+        # before the enrichment values.
+        release_cols = sorted(c for c in df.columns if c.endswith("_release"))
         desired = (
             original_cols
             + [_GEO_LAT_COL, _GEO_LON_COL, _GEO_SOURCE_COL, _GEO_MATCH_SCORE_COL]
             + [_SA2_CODE_COL, _SA2_NAME_COL, _SA2_RESOLUTION_COL]
+            + release_cols
             + [f"{prefix}{name}" for name in self._config.variables]
         )
         existing = [c for c in desired if c in df.columns]
@@ -959,4 +980,205 @@ class Pipeline:
             partially_enriched=partially_enriched,
             geo_per_tier=geo_per_tier,
             sa2_resolution_counts=sa2_resolution_counts,
+        )
+
+    # ---- temporal-mode orchestrator (spec-temporal.md §9) ----------------
+
+    def _enrich_temporal(
+        self,
+        original_df: pd.DataFrame,
+        df_out: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, dict[str, list[str]]]:
+        """Per-bucket enrichment for temporal mode.
+
+        Resolves a per-dataset release for each row, buckets rows by the
+        per-dataset release tuple, then for each bucket runs the
+        configured enricher with that bucket's release overrides and
+        concatenates the results.
+
+        Adds per-dataset ``<dataset_id>_release`` columns to the output.
+
+        Phase E.2 scope: single-edition only. If any resolved release
+        is on an ASGS edition other than ``temporal.reference_edition``,
+        raises a clear error pointing at Phase F (cross-edition support).
+
+        Returns ``(enriched_df, releases_used)`` where ``releases_used``
+        maps dataset id → sorted list of releases touched.
+        """
+        from collections import defaultdict  # noqa: PLC0415
+        from datetime import date  # noqa: PLC0415
+
+        from ._temporal import resolve_release, to_date  # noqa: PLC0415
+        from .datasets import registry  # noqa: PLC0415
+
+        date_col = self._config.input.date_column
+        assert date_col is not None  # narrowed by caller
+
+        if date_col not in original_df.columns:
+            raise ValueError(
+                f"input.date_column {date_col!r} is not in the input DataFrame; "
+                f"columns are: {list(original_df.columns)}"
+            )
+
+        temporal_cfg = self._config.temporal
+        reference_edition = temporal_cfg.reference_edition
+
+        # Coerce each row's date column value to a `date`. Bad rows fail
+        # loud — same pattern as the rest of the pipeline.
+        try:
+            row_dates: list[date] = [to_date(v) for v in original_df[date_col].tolist()]
+        except ValueError as e:
+            raise ValueError(f"input.date_column {date_col!r} has unparseable values: {e}") from e
+
+        # Identify which datasets the configured variables touch, and
+        # for each, fetch the registered TemporalDatasetMetadata.
+        # PRESET refs are also expanded — they're stored at the
+        # PRESET registry level and reference underlying datasets.
+        touched_dataset_ids = self._touched_dataset_ids()
+
+        dataset_metadata: dict[str, "TemporalDatasetMetadata"] = {}
+        for did in touched_dataset_ids:
+            try:
+                spec = registry.get(did)
+            except Exception:  # noqa: BLE001 — RegistryError, NameError, ...
+                # Dataset not in the registry — skip (treat as not
+                # temporal-aware).
+                continue
+            if spec.temporal is None:
+                _log.warning(
+                    "Dataset %r has no `temporal:` block declared; falling back "
+                    "to its configured release for all rows.",
+                    did,
+                )
+                continue
+            dataset_metadata[did] = spec.temporal
+
+        # Per-row, per-dataset: resolve the release id.
+        # row_release_tuples[i] is a tuple ((dataset_id, release_id), ...)
+        # sorted by dataset_id so identical tuples bucket together.
+        row_release_tuples: list[tuple[tuple[str, str], ...]] = []
+        for i, d in enumerate(row_dates):
+            row_releases: list[tuple[str, str]] = []
+            for did in sorted(dataset_metadata):
+                md = dataset_metadata[did]
+                # Per-dataset resolution override?
+                per_ds = temporal_cfg.per_dataset.get(did)
+                rule = (
+                    per_ds.resolution if per_ds and per_ds.resolution else temporal_cfg.resolution
+                )
+                rel = resolve_release(
+                    d,
+                    metadata=md,
+                    rule=rule,
+                    out_of_range=temporal_cfg.out_of_range,
+                    dataset_id=did,
+                    row_index=int(original_df.index[i])
+                    if isinstance(original_df.index[i], (int, str))
+                    else i,
+                )
+                row_releases.append((did, rel))
+            row_release_tuples.append(tuple(row_releases))
+
+        # Single-edition validation (Phase E.2 scope).
+        # Walk every (dataset, release) used; check each release's
+        # asgs_edition_by_release entry matches reference_edition.
+        for did, md in dataset_metadata.items():
+            used_releases = {rel for tup in row_release_tuples for d2, rel in tup if d2 == did}
+            for rel in used_releases:
+                src_edition = md.asgs_edition_by_release.get(rel)
+                if src_edition is None:
+                    _log.warning(
+                        "Dataset %r release %r has no asgs_edition_by_release "
+                        "entry; assuming reference_edition=%d.",
+                        did,
+                        rel,
+                        reference_edition,
+                    )
+                    continue
+                if src_edition != reference_edition:
+                    raise NotImplementedError(
+                        f"Temporal-mode row resolved {did!r} → release {rel!r} "
+                        f"(ASGS Edition {src_edition}), but the configured "
+                        f"reference_edition is {reference_edition}. "
+                        f"Cross-edition boundary lookup is Phase F work — until "
+                        f"then, every resolved release must be on the reference "
+                        f"edition. Either pin earlier ASGS-edition data out of "
+                        f"the input, or pre-filter rows to dates that all "
+                        f"resolve to Edition-{reference_edition} releases."
+                    )
+
+        # Bucket rows by release tuple.
+        buckets: dict[tuple[tuple[str, str], ...], list[int]] = defaultdict(list)
+        for i, tup in enumerate(row_release_tuples):
+            buckets[tup].append(i)
+
+        # Per-bucket: build a sub-enricher with the bucket's release
+        # overrides, run add_enrichment_columns, concat.
+        enriched_parts: list[pd.DataFrame] = []
+        releases_used: dict[str, set[str]] = defaultdict(set)
+        for bucket_releases, row_positions in buckets.items():
+            sub_enricher = self._enricher_for_bucket(dict(bucket_releases))
+            bucket_df = df_out.iloc[row_positions]
+            enriched_bucket = sub_enricher.add_enrichment_columns(
+                bucket_df, sa2_code_col=_SA2_CODE_COL
+            )
+            enriched_parts.append(enriched_bucket)
+            for did, rel in bucket_releases:
+                releases_used[did].add(rel)
+
+        # Concat in original row order.
+        enriched_full = pd.concat(enriched_parts).sort_index()
+
+        # Append per-dataset release columns.
+        for did in sorted(releases_used):
+            col_name = f"{did}_release"
+            # Build per-row release for this dataset by indexing back.
+            release_per_row: list[str | None] = [None] * len(original_df)
+            for i, tup in enumerate(row_release_tuples):
+                for d2, rel in tup:
+                    if d2 == did:
+                        release_per_row[i] = rel
+                        break
+            enriched_full[col_name] = release_per_row
+
+        return enriched_full, {did: sorted(rels) for did, rels in releases_used.items()}
+
+    def _touched_dataset_ids(self) -> set[str]:
+        """Set of dataset ids the configured variables resolve to.
+
+        Walks the variables map and resolves each ref's namespace against
+        the registry. PRESET refs are followed through to their source
+        variables' datasets. GCP refs map to ``gcp_2021``.
+        """
+        from .datasets import registry  # noqa: PLC0415
+
+        touched: set[str] = set()
+        for ref in self._config.variables.values():
+            namespace = ref.split(".", 1)[0] if "." in ref else ""
+            # GCP-style ``G\d+.<col>`` resolves to the GCP dataset.
+            if namespace and namespace[0] == "G" and namespace[1:].isdigit():
+                touched.add("gcp_2021")
+                continue
+            # Otherwise look the namespace up against registered datasets.
+            for spec in registry.list_datasets():
+                if spec.namespace == namespace:
+                    touched.add(spec.id)
+                    break
+        return touched
+
+    def _enricher_for_bucket(
+        self,
+        release_overrides: dict[str, str],
+    ) -> CensusEnricher:
+        """Build a per-bucket :class:`CensusEnricher` with the given
+        release overrides. Other state (catalog, variables, output
+        prefix, data_dir) is inherited from the configured enricher.
+        """
+        return CensusEnricher(
+            datapacks=self._enricher._datapacks,
+            catalog=self._enricher._catalog,
+            variables=self._enricher._variables,
+            output_prefix=self._enricher._output_prefix,
+            data_dir=self._enricher._data_dir,
+            dataset_release_overrides=release_overrides,
         )

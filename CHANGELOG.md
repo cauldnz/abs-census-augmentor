@@ -9,6 +9,38 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase E.2 — Pipeline orchestrator (temporal mode is live)
+
+End-to-end temporal mode lands. Setting `input.date_column` in a
+config now does what `spec-temporal.md` §9 describes: each row picks
+the dataset snapshot closest to its timestamp, rows are bucketed by
+the per-dataset release tuple, and the output gains
+`<dataset>_release` columns naming the release used per row.
+
+- `Pipeline.augment(df)` branches into `_enrich_temporal()` when
+  `input.date_column` is set. Cross-sectional mode stays bit-identical
+  to v1.4.x.
+- Per-bucket sub-enrichers are built with
+  `dataset_release_overrides`, threaded through to each fetcher's
+  factory (which gained an optional `release` kwarg).
+- `AugmentResult.releases_used` is populated in temporal mode
+  (`dict[str, list[str]]`), `None` in cross-sectional mode.
+- `_reorder_output_columns` knows to slot `<dataset>_release` columns
+  between the SA2 trio and the enrichment values.
+- 8 new integration tests in `tests/test_pipeline_temporal.py` cover:
+  single-bucket happy path, multi-bucket fan-out, cross-edition raise
+  with helpful error pointing at Phase F, `closest` resolution rule,
+  `out_of_range` fail / nearest, missing date column, and the
+  cross-sectional-mode-unaffected case.
+
+**Phase E.2 scope: single-edition only.** If any row resolves to a
+release on an ASGS edition different from the configured
+`temporal.reference_edition` (default 3), the orchestrator raises a
+clear `NotImplementedError` pointing at Phase F. Cross-edition
+boundary lookups land in Phase F when historical datasets register.
+
+579 tests pass (was 571 in E.1); mypy + lint + format clean.
+
 ### Temporal Phase E.1 — Config schema + release resolver
 
 Schema-layer additions for temporal mode. Pipeline orchestrator

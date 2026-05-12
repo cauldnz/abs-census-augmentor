@@ -316,8 +316,11 @@ def _field_name(prefix: str, field: str) -> str:
 # enrichment needs it.
 
 
-def _build_fetcher(root: Path) -> SeifaDataSource:
-    return SeifaDataSource(root=root)
+def _build_fetcher(root: Path, release: str | None = None) -> SeifaDataSource:
+    kwargs: dict[str, object] = {"root": root}
+    if release is not None:
+        kwargs["release"] = release
+    return SeifaDataSource(**kwargs)  # type: ignore[arg-type]
 
 
 def _register() -> None:
