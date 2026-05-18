@@ -76,17 +76,33 @@ current ASGS via concordance.
 
 ## Schema (variables exposed by the augmentor)
 
+The v1.5 fetcher parses Table 1.4 of the source workbook only — the SA2-level
+total-income summary sheet. Per-income-type breakdowns (employee / investment
+/ super / business) and the gini coefficient live on other sheets (Tables 2-9)
+and are wish-list items not yet wired up (see "Wish list" below).
+
 | Variable | Type | Description |
 |---|---|---|
-| `ABS_PIA.median_total_income` | float | Median total income across persons in SA2 ($) |
-| `ABS_PIA.mean_total_income` | float | Mean total income ($) |
-| `ABS_PIA.median_employee_income` | float | Median employee income ($) |
-| `ABS_PIA.median_investment_income` | float | Median investment income ($) — many people have $0 here |
-| `ABS_PIA.median_super_income` | float | Median superannuation income ($) |
-| `ABS_PIA.median_own_business_income` | float | Median income from own unincorporated business ($) |
-| `ABS_PIA.gini_coefficient` | float | Gini coefficient of total income within the SA2 |
 | `ABS_PIA.income_earners_count` | int | Number of income earners (people who lodged a return with non-zero income) |
+| `ABS_PIA.median_age_of_earners` | float | Median age of income earners (years) |
+| `ABS_PIA.sum_total_income` | float | Sum of total income across earners in SA2 ($) |
+| `ABS_PIA.median_total_income` | float | Median total income across earners in SA2 ($) |
+| `ABS_PIA.mean_total_income` | float | Mean total income ($) |
 | `ABS_PIA.reference_financial_year` | str | Reference period (e.g. "2022-23") |
+
+### Wish list — spec'd in earlier drafts, not yet implemented
+
+These rows were documented in the v1.4 draft of this spec but never landed
+in the fetcher. They live in Tables 2-9 of the source workbook (one table
+per income source). Wiring them up means parsing additional sheets and
+matching the existing latest-year-per-group extraction logic. Tracked in
+BACKLOG.md.
+
+- `ABS_PIA.median_employee_income` — Table 2 / employee income
+- `ABS_PIA.median_investment_income` — Table 3 / investment income
+- `ABS_PIA.median_super_income` — Table 4 / superannuation income
+- `ABS_PIA.median_own_business_income` — Table 5 / own unincorporated business income
+- `ABS_PIA.gini_coefficient` — typically Table 9 / inequality measures
 
 ## Fetch notes
 

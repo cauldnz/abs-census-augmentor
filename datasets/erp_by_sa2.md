@@ -76,20 +76,37 @@ on 2021 boundaries goes back to ~2001.
 
 ## Schema (variables exposed by the augmentor)
 
+The v1.5 fetcher exposes the latest-year summary plus the full per-year time
+series. Age-band breakdowns, median age, gendered totals, and a derived
+population-density column are wish-list items not yet wired up (see "Wish list"
+below).
+
 | Variable | Type | Description |
 |---|---|---|
-| `ERP.population_total` | int | Total estimated resident population |
-| `ERP.population_male` | int | Male persons |
-| `ERP.population_female` | int | Female persons |
-| `ERP.population_0_14` | int | Persons aged 0-14 |
-| `ERP.population_15_64` | int | Persons aged 15-64 (working-age) |
-| `ERP.population_65_plus` | int | Persons aged 65+ |
-| `ERP.median_age` | float | Median age (years) |
+| `ERP.population_total` | int | Total estimated resident population for the latest reference year |
 | `ERP.reference_year` | int | The mid-year reference year (e.g. 2024 = June 2024) |
-| `ERP.population_density_per_km2` | float | Population per square km (derived from ASGS area) |
+| `ERP.state_abbreviation` | str | State/territory abbreviation (NSW, VIC, ...) |
+
+In addition, the fetcher emits one int column per available year as
+`ERP.population_history_YYYY` (e.g. `population_history_2001` through
+`population_history_2024` for the 2024 release). These cover the same
+2001-onwards history ABS publishes in the source workbook and let
+downstream consumers compute multi-year growth without re-fetching.
 
 The augmentor returns the latest available year by default. Users can pin
 via `Pipeline.create(..., erp_year=2023)`.
+
+### Wish list — spec'd in earlier drafts, not yet implemented
+
+These rows were documented in the v1.4 draft of this spec but never landed
+in the fetcher. They're real ABS-published series; wiring them up means
+parsing additional sheets / computing density from the ASGS area lookup.
+Tracked in BACKLOG.md.
+
+- `ERP.population_male`, `ERP.population_female` — gendered totals
+- `ERP.population_0_14`, `ERP.population_15_64`, `ERP.population_65_plus` — age bands
+- `ERP.median_age` — median age (years)
+- `ERP.population_density_per_km2` — derived from SA2 area
 
 ## Fetch notes
 
