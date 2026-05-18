@@ -81,6 +81,15 @@ suppression hides which).
 
 ## Schema (variables exposed by the augmentor)
 
+The DSS workbook is published with one column per payment type, and the
+fetcher snake-cases each header verbatim (suffixing `_recipients`). The
+columns below are the ones DSS publishes for the v1.5 supported releases
+(2022-Q4 onwards) — there can be more columns in a given release than
+listed here (e.g. ABSTUDY, austudy, special_benefit, low_income_card,
+pension_concession_card, health_care_card, commonwealth_seniors_health_card,
+carer_allowance, family_tax_benefit_a/b). Downstream consumers can
+introspect the live set via `fetcher.load().columns`.
+
 | Variable | Type | Description |
 |---|---|---|
 | `DSS.age_pension_recipients` | int | Recipients of Age Pension |
@@ -90,7 +99,7 @@ suppression hides which).
 | `DSS.parenting_payment_partnered_recipients` | int | Recipients of Parenting Payment Partnered |
 | `DSS.carer_payment_recipients` | int | Recipients of Carer Payment |
 | `DSS.youth_allowance_other_recipients` | int | Recipients of Youth Allowance (Other) |
-| `DSS.youth_allowance_student_recipients` | int | Recipients of Youth Allowance (Student/Apprentice) |
+| `DSS.youth_allowance_student_and_apprentice_recipients` | int | Recipients of Youth Allowance (Student / Apprentice) |
 | `DSS.commonwealth_rent_assistance_recipients` | int | Recipients of CRA |
 | `DSS.release_quarter` | str | The release period these counts apply to (e.g. "2024-Q4") |
 

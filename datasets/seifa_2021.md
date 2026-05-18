@@ -90,6 +90,7 @@ publication for SA2 modelling.
 | `SEIFA.ieo_state_decile` | int | IEO state decile |
 | `SEIFA.ieo_state_percentile` | int | IEO state percentile |
 | `SEIFA.urp` | int | Usual resident population (URP) of the SA2 (denominator for area-vs-population deciles) |
+| `SEIFA.state_abbreviation` | str | State/territory abbreviation (NSW, VIC, ...) — sourced from the workbook's state column |
 
 ## Fetch notes
 
