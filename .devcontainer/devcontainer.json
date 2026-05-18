@@ -55,20 +55,37 @@
     //   Network namespace supported, but failed: errno = Operation
     //   not permitted
     //
-    // Two flags:
+    // Four flags:
     //   --security-opt seccomp=unconfined : lets chromium create its
     //                                       user namespace
     //   --ipc=host                         : chromium's recommended
     //                                       IPC mode under Docker
     //                                       (per Playwright docs)
     //                                       to avoid memory issues
+    //   --dns=1.1.1.1 / --dns=8.8.8.8      : pin upstream resolvers.
+    //                                       Container's default DNS is
+    //                                       whatever the host runtime
+    //                                       hands down — under Podman
+    //                                       on some Windows / WSL2
+    //                                       setups that path is flaky
+    //                                       (resolution failures during
+    //                                       apt-get / GitHub release
+    //                                       fetches in post-create.sh).
+    //                                       Pinning to Cloudflare +
+    //                                       Google removes the host
+    //                                       network manager from the
+    //                                       chain. Same pattern used
+    //                                       on the sibling repo
+    //                                       cauldnz/aus-fuel-forecaster.
     //
     // The dev container runs trusted, user-attached code; this is the
     // same security posture every Playwright/Puppeteer Docker workflow
     // uses. Not appropriate for untrusted multi-tenant CI.
     "runArgs": [
         "--security-opt", "seccomp=unconfined",
-        "--ipc=host"
+        "--ipc=host",
+        "--dns=1.1.1.1",
+        "--dns=8.8.8.8"
     ],
 
     "containerEnv": {
