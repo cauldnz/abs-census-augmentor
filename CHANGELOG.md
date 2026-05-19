@@ -9,6 +9,38 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### tools: Phase F.3 / F.4 inspection probes
+
+Two one-off discovery scripts to capture the schema of SEIFA 2016 and
+GCP 2016 *before* their fetchers are written, per CLAUDE.md's "Real
+Data First" rule. The pattern: encode the maintainer's schema
+questions in code, run once, paste the output, build the real fetcher
+off the captured shape.
+
+- **`tools/inspect_seifa_2016.py`** — fetches the live ABS SEIFA 2016
+  SA2 `.xls` (URL captured via WebFetch from the legacy catalogue
+  page 2033.0.55.001) and dumps every sheet's preamble, candidate
+  data header row, and 3 sample data rows. Requires `xlrd==1.2.0`
+  for the legacy `.xls` format (`uv pip install 'xlrd==1.2.0'`);
+  not added to project deps because it's a one-off discovery
+  prerequisite.
+- **`tools/inspect_gcp_2016.py <zip-path>`** — accepts a locally
+  downloaded 2016 GCP DataPack ZIP and dumps the internal layout,
+  descriptor xlsx structure, table-CSV inventory, and a
+  representative table's header + sample rows. The 2016 GCP isn't
+  reachable via a static URL the way the 2021 one is (ABS migrated
+  it away from the modern `find-census-data/datapacks` interface
+  and the historical archive doesn't expose a direct link). The
+  script's docstring documents three options for obtaining the ZIP;
+  if a static URL turns up later, the script gains a `_download()`
+  helper mirroring `inspect_seifa_2016.py`.
+
+`tools/README.md` updated with discovery instructions. Both scripts
+are idempotent (cache the artefact under `data/`); reruns skip
+re-fetch unless `--refresh` is passed. Once the F.3 / F.4 fetchers
+land, the equivalent post-fetch shape checks move into
+`verify_real_parsers.py` and these `inspect_*.py` scripts retire.
+
 ### CI: speed up `Render demos` PR validation
 
 Two focused changes to the demo-render PR workflow, addressing the
