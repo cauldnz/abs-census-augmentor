@@ -1,8 +1,8 @@
 # PR validation: re-render every demo GIF and upload as artifacts.
 #
 # Triggered on PRs that touch anything that could change what the
-# demos show — tape files, the CLI entry point, the pipeline, registered
-# dataset / PRESET specs. Avoids the cost of a 5-7 minute render on
+# demos show — tape files, the CLI entry point, registered
+# dataset / PRESET specs. Avoids the cost of a multi-minute render on
 # every documentation-only or unrelated-source PR.
 #
 # Output: a `demo-renders` artifact containing the GIFs + per-scene
@@ -10,7 +10,9 @@
 # produce. Nothing gets committed — `demo-publish.yml` is the manual
 # workflow that lands refreshed renders on `main`.
 #
-# Designed in issue #38.
+# Designed in issue #38. ABS-cache + paths tightening landed under the
+# BACKLOG "Slow `Render demos` CI workflow" entry: see CHANGELOG for
+# the rationale.
 
 name: Render demos
 
@@ -20,10 +22,12 @@ on:
     paths:
       # Tape edits / config tweaks / Sleep adjustments
       - "tools/demo/**"
-      # CLI surface / output prompt strings can appear in scenes
+      # CLI surface / output prompt strings can appear in scenes.
+      # NOTE: pipeline.py / enrich.py are deliberately *not* listed —
+      # internal-orchestration edits there rarely change anything the
+      # demos show. Re-run on demand via workflow_dispatch when a PR
+      # touches those AND you genuinely care about the visual delta.
       - "src/census_augment/cli.py"
-      - "src/census_augment/pipeline.py"
-      - "src/census_augment/enrich.py"
       # Registered datasets + PRESETs surface in `discover` output
       - "datasets/**.md"
       - "features/**.md"
@@ -62,6 +66,33 @@ jobs:
 
       - name: Install project + dev deps
         run: uv sync --all-extras
+
+      # ABS data pre-warm cache. The render script downloads the SA2
+      # boundary ZIP (~50 MB) + GCP DataPack ZIP (~50 MB) + each
+      # registered-dataset XLSX before it can render. Caching this
+      # cuts 30-60 seconds off every run that hits a warm cache, and
+      # — more importantly — keeps the workflow tolerant of transient
+      # ABS download flakes on later commits in a PR.
+      #
+      # Key strategy:
+      # - Primary: hash of pyproject.toml + every YAML config under
+      #   tools/demo/ (which together describe the dataset surface
+      #   the pre-warm fetches). A dependency bump OR a new demo
+      #   config invalidates.
+      # - Restore-keys fall back to any prior cache for the same
+      #   dependency hash on this OS, so we still get a warm cache
+      #   when only the demo YAMLs change.
+      # The cache root matches what `platformdirs` resolves to on
+      # ubuntu-latest. Render.sh checks the same path before
+      # firing `census-augment fetch`, so a warm cache turns the
+      # pre-warm into a no-op.
+      - name: Cache ABS data pre-warm
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/census-augment/data
+          key: census-augment-abs-cache-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'tools/demo/*.yaml') }}
+          restore-keys: |
+            census-augment-abs-cache-${{ runner.os }}-
 
       # Render uses the same `--local` path that the devcontainer
       # uses by default — no Docker, native vhs invocation. The

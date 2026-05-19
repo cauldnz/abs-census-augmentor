@@ -115,41 +115,36 @@ pending work. When picking either up, start by reading §6 and §12
 of the spec, then walk through the Phase E.2 orchestrator in
 `pipeline.py::_enrich_temporal` to understand the pattern.
 
-## Slow `Render demos` CI workflow
+## Slow `Render demos` CI workflow — partial fix shipped
 
-The `.github/workflows/demo-render.yml` PR-validation step takes
-~5–7 minutes (per the workflow's own comment) and we've watched it
-dominate CI wall-clock time on every PR that touches
-`src/census_augment/cli.py` / `pipeline.py` / `enrich.py` /
-`datasets/**` / `features/**` — i.e. most non-test-only PRs in the
-temporal-mode work.
+Original problem: the `.github/workflows/demo-render.yml`
+PR-validation step took ~5–7 minutes and triggered on every PR that
+touched `pipeline.py` / `enrich.py` / `cli.py` / `datasets/**` /
+`features/**` — including all the temporal-mode work that didn't
+actually change anything the demos record.
 
-The render uploads a non-committed artifact for reviewer inspection;
-nothing about it gates merge. It's pure "nice to see the visual delta"
-optics. Three levers to pull, ordered cheapest-first:
+**Shipped (Tier-C-adjacent CI fix):**
 
-1. **Tighten the `paths:` filter.** The current filter triggers on
-   any change to `pipeline.py` or `enrich.py`. Many edits there
-   (e.g. the temporal orchestrator's per-edition fan-out) don't
-   affect what any tape records. Either narrow to `cli.py` only,
-   or invert: skip render on PRs labelled `no-demo-render` (or
-   matching `temporal/**` branches).
-2. **Cache the ABS pre-warm.** Each render run re-downloads the
-   2021 boundary + DataPack ZIP via the production fetcher (per
-   `render.sh`'s pre-warm step). That's ~50 MB / ~30 s. A
-   `actions/cache@v4` keyed on `pyproject.toml` could persist
-   `~/.cache/census-augment/data/boundaries/` and
-   `~/.cache/census-augment/data/census/` across runs.
-3. **Pull render out of PR CI entirely.** Keep `demo-publish.yml`
-   (manual, run from `main` post-merge) as the only render path;
-   PR reviewers wanting to see visual deltas trigger
-   `workflow_dispatch` on the rendered tape. Cuts CI cost to zero
-   for the common path at the cost of one extra click for the
-   rarer "I want to see how this PR changes the demos" review.
+- *Tightened `paths:` filter.* Dropped `pipeline.py` and `enrich.py`
+  from the trigger list — internal orchestration edits there rarely
+  change visible terminal output. PRs that genuinely affect demos
+  re-trigger via `workflow_dispatch` (one click in the Actions tab).
+- *Cached the ABS data pre-warm.* `actions/cache@v4` now persists
+  `~/.cache/census-augment/data/` across runs, keyed on the
+  pyproject deps + every YAML config under `tools/demo/`. The
+  pre-warm becomes a no-op on cache hit; the actual save when the
+  cache misses is the ~50 MB boundary + ~50 MB DataPack + each
+  registered-dataset XLSX (~5-10 MB total).
 
-Pick (1) + (2) for a fast win; (3) is the heavier change but
-arguably the right end state given how rarely demo-affecting PRs
-land.
+**Still on the table if CI cost regresses:**
+
+- *Pull render out of PR CI entirely.* Keep `demo-publish.yml`
+  (manual, run from `main` post-merge) as the only render path;
+  PR reviewers wanting to see visual deltas trigger
+  `workflow_dispatch` against the PR's tape. Cuts CI cost to zero
+  for the common path at the cost of one extra click for the rarer
+  "I want to see how this PR changes the demos" review. Worth doing
+  if we hit churn on the `paths:` filter or the cache stops paying.
 
 ## Other deferred items
 
