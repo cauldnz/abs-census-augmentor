@@ -104,13 +104,30 @@ def main() -> int:
             f"configured S3 bucket ({DEFAULT_GNAF_S3_BASE_URL})."
         ),
     )
+    p.add_argument(
+        "--edition",
+        type=int,
+        choices=[2, 3],
+        default=3,
+        help=(
+            "ASGS boundary edition to fetch. 3 (default) = current "
+            "(year 2021, GDA2020). 2 = historical (year 2016, GDA94); "
+            "fetches only the SA2 boundary file — DataPack/MB Edition 2 "
+            "are deferred to follow-up PRs."
+        ),
+    )
     args = p.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
     data_dir = default_data_dir()
-    census = CensusConfig()  # spec defaults: SA2, 2021, GCP, AUS, short-header, GDA2020
+    # Edition 2 → year=2016/GDA94; Edition 3 → year=2021/GDA2020 (default).
+    if args.edition == 2:
+        census = CensusConfig(year=2016, asgs_edition=2, datum="GDA94")
+    else:
+        census = CensusConfig()  # spec defaults: SA2, 2021, GCP, AUS, short-header, GDA2020
     print(f"Cache root: {data_dir}")
+    print(f"ASGS edition: {census.asgs_edition} (year={census.year}, datum={census.datum})")
     print("(Override via CENSUS_AUGMENT_DATA_DIR env var.)\n")
 
     print("=== Boundary ===")
@@ -122,6 +139,18 @@ def main() -> int:
     print(f"  URL:  {boundaries.url}")
     shp = boundaries.fetch(refresh=args.refresh)
     print(f"  shp:  {shp}")
+
+    if args.edition == 2:
+        # Edition 2 DataPack and MB downloads are deferred (see CHANGELOG /
+        # spec-temporal.md §6). The Edition 2 boundary above is enough to
+        # exercise the verify_real_parsers.py Edition 2 probe.
+        print(
+            "\nEdition 2 fetch complete (SA2 boundary only). DataPack and "
+            "MB correspondence for 2016 are deferred to a follow-up PR.\n"
+            "Run `uv run python tools/verify_real_parsers.py` to confirm "
+            "the parser handles the live Edition 2 file."
+        )
+        return 0
 
     print("=== DataPack ===")
     datapacks = DataPacksDataSource(

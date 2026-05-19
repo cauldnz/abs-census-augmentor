@@ -1,4 +1,11 @@
-"""ASGS SA2 boundary download, extraction, and loading (spec §4.1, §7.3)."""
+"""ASGS SA2 boundary download, extraction, and loading (spec §4.1, §7.3).
+
+Edition support (spec-temporal.md §2, §13): each ABS ASGS edition ships
+the SA2 boundary at a different URL with different filenames and DBF
+column names. The per-edition variation is captured in
+:mod:`~census_augment.data_sources._edition`; this module just
+delegates URL / filename / column-name decisions to that spec.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +17,7 @@ import requests
 
 from ..config import CensusConfig
 from ._base import _AbsZipDataSource
+from ._edition import BoundaryEditionSpec, edition_spec_for
 
 _log = logging.getLogger(__name__)
 
@@ -23,13 +31,13 @@ _BOUNDARIES_FEATHER_SUFFIX = ".feather"
 
 
 class BoundariesDataSource(_AbsZipDataSource):
-    """Download, extract, and load the ASGS boundary Shapefile.
+    """Download, extract, and load the ASGS SA2 boundary Shapefile.
 
-    Filename is constructed deterministically from config (spec §4.1):
-    ``{level}_{year}_AUST_SHP_{datum}.zip``, e.g.
-    ``SA2_2021_AUST_SHP_GDA2020.zip``. The ``SHP`` token is only on the
-    ZIP filename — files inside the ZIP are named
-    ``SA2_2021_AUST_GDA2020.{shp,dbf,prj,shx,...}``.
+    The download URL, filename, and SA2 DBF column names are taken from
+    a :class:`BoundaryEditionSpec` — either built from the supplied
+    :class:`CensusConfig` (default) or passed explicitly. Edition 3
+    (2021, GDA2020/GDA94) is the historical default; Edition 2 (2016,
+    GDA94) is supported once ``census.year=2016`` is set.
 
     Downloaded ZIPs are cached under ``root`` and extracted into a sibling
     directory named after the ZIP. Re-fetch with ``refresh=True`` per
@@ -47,6 +55,7 @@ class BoundariesDataSource(_AbsZipDataSource):
         session: requests.Session | None = None,
         chunk_size: int = 1024 * 1024,
         timeout: float = 300.0,
+        edition_spec: BoundaryEditionSpec | None = None,
     ) -> None:
         super().__init__(
             base_url=base_url,
@@ -56,11 +65,30 @@ class BoundariesDataSource(_AbsZipDataSource):
             timeout=timeout,
         )
         self._census = census
+        # An explicit spec wins (test injection, future temporal-mode
+        # multi-edition orchestrator); otherwise derive from config.
+        # ``base_url`` only affects Edition 3 — Edition 2's URL is fixed.
+        self._edition: BoundaryEditionSpec = edition_spec or edition_spec_for(
+            year=census.year,
+            datum=census.datum,
+            base_url=base_url,
+        )
+
+    @property
+    def edition(self) -> BoundaryEditionSpec:
+        """The resolved edition spec — URL/filename/columns this source uses."""
+        return self._edition
 
     @property
     def filename(self) -> str:
-        c = self._census
-        return f"{c.level}_{c.year}_AUST_SHP_{c.datum}.zip"
+        return self._edition.sa2_zip_filename
+
+    @property
+    def url(self) -> str:
+        # Override the base-class ``base_url + filename`` construction.
+        # Edition 2's URL isn't ``base_url + filename`` — it's a
+        # Lotus Notes openagent query string captured whole in the spec.
+        return self._edition.sa2_download_url
 
     @property
     def shapefile_path(self) -> Path | None:

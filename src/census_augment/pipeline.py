@@ -326,7 +326,15 @@ class Pipeline:
             base_url=config.data_sources.boundaries_base_url,
             root=data_dir / "boundaries" / boundary_year,
         )
-        spatial = SpatialIndex(boundaries_ds.load())
+        # Per-edition column names (Edition 2 uses SA2_MAIN16/SA2_NAME16;
+        # Edition 3 uses SA2_CODE21/SA2_NAME21). The boundary source's
+        # edition spec is the single source of truth.
+        edition = boundaries_ds.edition
+        spatial = SpatialIndex(
+            boundaries_ds.load(),
+            code_column=edition.sa2_code_column,
+            name_column=edition.sa2_name_column,
+        )
 
         datapacks_ds = DataPacksDataSource(
             census=config.census,

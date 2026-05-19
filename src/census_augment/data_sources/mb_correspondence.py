@@ -87,6 +87,18 @@ class MbCorrespondenceDataSource(_AbsZipDataSource):
     ) -> None:
         if datum not in ("GDA2020", "GDA94"):
             raise ValueError(f"datum must be 'GDA2020' or 'GDA94'; got {datum!r}")
+        if year == 2016:
+            # ABS Edition 2 ships Mesh Block boundaries per state/territory,
+            # not as a single national ZIP. The 8-file concat is deferred
+            # to a follow-up PR; the Config-level validator should already
+            # catch the year=2016 + G-NAF combo before we ever reach here.
+            raise NotImplementedError(
+                "MbCorrespondenceDataSource doesn't yet support "
+                "year=2016 (ASGS Edition 2): ABS publishes the 2016 "
+                "Mesh Block shapefile per state, and the per-state "
+                "concat is deferred to a follow-up PR. Use year=2021 "
+                "or skip the G-NAF geocoder."
+            )
         super().__init__(
             base_url=base_url,
             root=root,

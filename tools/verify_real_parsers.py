@@ -104,6 +104,57 @@ def main() -> int:
     if not _check("Load + schema + CRS", _load_boundary):
         failures.append("boundaries")
 
+    # ------ Edition 2 (2016) boundaries (Phase F.1) ------
+    #
+    # Cross-checks the BoundaryEditionSpec-driven URL / filename /
+    # column-name claims against the live ABS Edition-2 SA2 download.
+    # Skipped if the 2016 boundary hasn't been fetched yet — keep the
+    # probe self-skipping so a partial cache doesn't bork the whole run.
+    e2_root = data_dir / "boundaries" / "2016"
+    if e2_root.exists():
+        print("=== Boundaries (ASGS Edition 2, 2016) ===")
+        e2_census = CensusConfig(year=2016, asgs_edition=2, datum="GDA94")
+        e2_boundaries = BoundariesDataSource(
+            census=e2_census,
+            base_url=DEFAULT_BOUNDARIES_URL,  # Edition 2 ignores this
+            root=e2_root,
+        )
+        if not e2_boundaries.is_cached():
+            print(
+                "  (skipped; no cached Edition 2 boundary. "
+                "Run `uv run python tools/fetch_real_data.py --edition 2` to populate it.)"
+            )
+        else:
+
+            def _load_edition_2_boundary() -> None:
+                gdf = e2_boundaries.load()
+                # 2016 had ~2,310 SA2s — fewer than 2021's ~2,473.
+                assert len(gdf) > 1000, f"only {len(gdf)} rows (expected ~2,310)"
+                spec = e2_boundaries.edition
+                assert spec.sa2_code_column in gdf.columns, (
+                    f"missing {spec.sa2_code_column!r}; got: {list(gdf.columns)[:5]}"
+                )
+                assert spec.sa2_name_column in gdf.columns, (
+                    f"missing {spec.sa2_name_column!r}; got: {list(gdf.columns)[:5]}"
+                )
+                # Edition 2 should be GDA94 (EPSG:4283).
+                assert gdf.crs is not None, "CRS is None"
+                crs_epsg = gdf.crs.to_epsg()
+                crs_name = (gdf.crs.name or "").upper()
+                assert crs_epsg == 4283 or "GDA94" in crs_name, (
+                    f"unexpected CRS for Edition 2: epsg={crs_epsg}, name={gdf.crs.name!r}"
+                )
+                print(
+                    f"         -> {len(gdf)} polygons, "
+                    f"columns include {sorted(gdf.columns.tolist())[:5]}..."
+                )
+
+            if not _check(
+                "Edition 2 load + schema (SA2_MAIN16/SA2_NAME16) + CRS (GDA94)",
+                _load_edition_2_boundary,
+            ):
+                failures.append("boundaries_edition_2")
+
     # ------ DataPacks ------
     print("=== DataPacks ===")
     datapacks = DataPacksDataSource(

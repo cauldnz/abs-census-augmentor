@@ -228,6 +228,75 @@ def test_input_lon_without_lat_fails(tmp_path: Path) -> None:
         load_config(_write(tmp_path, cfg))
 
 
+# ---------- ASGS edition / year / datum interactions (Phase F.1) -----------
+
+
+def test_year_2016_with_edition_2_and_gda94_loads(tmp_path: Path) -> None:
+    """The valid Edition 2 trio: year=2016, asgs_edition=2, datum=GDA94."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2016, "asgs_edition": 2, "datum": "GDA94"}
+    # SEIFA-style variable so the year=2016 + GCP guard doesn't fire.
+    cfg["variables"] = {"irsd": "SEIFA.irsd_aus_decile"}
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.census.year == 2016
+    assert loaded.census.asgs_edition == 2
+    assert loaded.census.datum == "GDA94"
+
+
+def test_year_2021_with_edition_2_fails(tmp_path: Path) -> None:
+    """ASGS Edition 2 implies year=2016."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2021, "asgs_edition": 2}
+    with pytest.raises(ValidationError, match=r"asgs_edition=3|Edition 2"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_year_2016_with_edition_3_fails(tmp_path: Path) -> None:
+    """ASGS Edition 3 implies year=2021."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2016, "asgs_edition": 3, "datum": "GDA94"}
+    cfg["variables"] = {"irsd": "SEIFA.irsd_aus_decile"}
+    with pytest.raises(ValidationError, match=r"asgs_edition=2|Edition 2"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_year_2016_with_gda2020_fails(tmp_path: Path) -> None:
+    """ABS never published 2016 boundaries in GDA2020."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2016, "asgs_edition": 2, "datum": "GDA2020"}
+    cfg["variables"] = {"irsd": "SEIFA.irsd_aus_decile"}
+    with pytest.raises(ValidationError, match=r"GDA94"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_year_2016_with_gnaf_fails_at_config_load(tmp_path: Path) -> None:
+    """G-NAF on year=2016 requires Edition 2 MB concat — deferred."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2016, "asgs_edition": 2, "datum": "GDA94"}
+    cfg["variables"] = {"irsd": "SEIFA.irsd_aus_decile"}
+    cfg["geocoding"]["providers"] = ["gnaf", "nominatim"]
+    cfg["geocoding"]["gnaf"] = {"datum": "GDA94"}
+    with pytest.raises(ValidationError, match=r"year=2016.*G-NAF|gnaf"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_year_2016_with_gcp_variables_fails_at_config_load(tmp_path: Path) -> None:
+    """GCP DataPack for 2016 isn't registered yet — Phase F.4 work."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2016, "asgs_edition": 2, "datum": "GDA94"}
+    # _base_config uses G02.Median_age_persons — that's a GCP-shape ref.
+    with pytest.raises(ValidationError, match=r"year=2016.*GCP|DataPack"):
+        load_config(_write(tmp_path, cfg))
+
+
+def test_year_2021_invalid_value_rejected(tmp_path: Path) -> None:
+    """Sanity: years outside the supported set still rejected by Literal."""
+    cfg = _base_config()
+    cfg["census"] = {"year": 2026}
+    with pytest.raises(ValidationError):
+        load_config(_write(tmp_path, cfg))
+
+
 def test_input_path_optional_for_library_use(tmp_path: Path) -> None:
     """input.path is optional (CLI run command requires it; library doesn't)."""
     cfg = _base_config()

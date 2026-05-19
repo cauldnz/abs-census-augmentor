@@ -24,6 +24,10 @@ _log = logging.getLogger(__name__)
 FRIENDLY_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 VARIABLE_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\.[A-Za-z][A-Za-z0-9_]*$")
 PREFIX_RE = re.compile(r"^[a-z0-9_]*$")
+#: Matches GCP-DataPack-shaped variable refs (``G##.<col>`` / ``G##A.<col>``).
+#: Used by the Edition 2 guard below; kept here so the regex isn't
+#: re-built every config load.
+_GCP_VARIABLE_REF_RE = re.compile(r"^G\d+[A-Z]?\.[A-Za-z][A-Za-z0-9_]*$")
 
 DEFAULT_BOUNDARIES_URL = (
     "https://www.abs.gov.au/statistics/standards/"
@@ -90,13 +94,48 @@ class OutputConfig(_StrictModel):
 
 
 class CensusConfig(_StrictModel):
-    year: Literal[2021] = 2021
+    #: Census / boundary year. 2021 = ASGS Edition 3 (current). 2016 =
+    #: ASGS Edition 2 (historical). Older years are not supported — see
+    #: ``spec-temporal.md`` §6 for scope.
+    year: Literal[2016, 2021] = 2021
     level: Literal["SA2"] = "SA2"
     profile: Literal["GCP"] = "GCP"
     region: Literal["AUS", "NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT", "OT"] = "AUS"
     descriptor: Literal["short-header", "sequential", "long-header"] = "short-header"
-    asgs_edition: Literal[3] = 3
+    #: ASGS edition derived from / consistent with ``year``: 2 (Jul 2016 –
+    #: Jun 2021) or 3 (Jul 2021 – Jun 2026). See ``spec-temporal.md`` §2.
+    asgs_edition: Literal[2, 3] = 3
+    #: Geodetic datum. Edition 2 only ships GDA94; Edition 3 ships both.
+    #: The combination is cross-validated below.
     datum: Literal["GDA2020", "GDA94"] = "GDA2020"
+
+    @model_validator(mode="after")
+    def _validate_year_edition_datum(self) -> CensusConfig:
+        """Enforce the valid (year, edition, datum) combinations.
+
+        ABS publishes:
+
+        - 2021 boundaries on Edition 3, in GDA2020 (default) or GDA94.
+        - 2016 boundaries on Edition 2, in GDA94 only (GDA2020 didn't
+          exist as an ABS-published datum yet at the 2016 Census).
+        """
+        if self.year == 2021 and self.asgs_edition != 3:
+            raise ValueError(
+                f"census.year=2021 requires asgs_edition=3 (the current ABS edition); "
+                f"got asgs_edition={self.asgs_edition}."
+            )
+        if self.year == 2016 and self.asgs_edition != 2:
+            raise ValueError(
+                f"census.year=2016 requires asgs_edition=2 (the historical ABS edition); "
+                f"got asgs_edition={self.asgs_edition}."
+            )
+        if self.year == 2016 and self.datum != "GDA94":
+            raise ValueError(
+                f"census.year=2016 (ASGS Edition 2) is only published in GDA94; "
+                f"got datum={self.datum!r}. Set census.datum=GDA94 or use "
+                f"census.year=2021 for GDA2020 boundaries."
+            )
+        return self
 
 
 class DataSourcesConfig(_StrictModel):
@@ -313,6 +352,52 @@ class Config(_StrictModel):
                 self.census.datum,
                 self.geocoding.gnaf.datum,
             )
+        return self
+
+    @model_validator(mode="after")
+    def _edition_2_gnaf_not_supported_yet(self) -> Config:
+        # Edition 2 (2016) MB correspondence ships per-state — the
+        # single-national ``MB_2016_AUST_SHP_GDA94.zip`` that the
+        # filename pattern would imply does not exist. Wiring the 8-file
+        # state-by-state concat is deferred to a follow-up PR. Fail
+        # loudly at config-load rather than 404ing inside the pipeline.
+        if self.census.year == 2016 and "gnaf" in self.geocoding.providers:
+            raise ValueError(
+                "census.year=2016 (ASGS Edition 2) is not yet supported "
+                "with the G-NAF geocoder: ABS publishes the 2016 Mesh "
+                "Block shapefiles per state/territory, and the §7.3 "
+                "fast-path concat across them is deferred. Either set "
+                "census.year=2021 or remove 'gnaf' from "
+                "geocoding.providers (Nominatim-only with year=2016 is "
+                "supported)."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _edition_2_gcp_variables_not_supported_yet(self) -> Config:
+        # Edition 2 GCP DataPack lives at a different URL with a
+        # different filename pattern than Edition 3 — registering it is
+        # part of Phase F.4 work and not in this PR. Any GCP-shaped
+        # variable ref (``G\d+.<col>``) requires a working DataPack
+        # download; flag the combo at config-load to keep the failure
+        # mode loud and out of the network layer.
+        if self.census.year == 2016:
+            gcp_refs = [
+                (friendly, ref)
+                for friendly, ref in self.variables.items()
+                if _GCP_VARIABLE_REF_RE.match(ref)
+            ]
+            if gcp_refs:
+                raise ValueError(
+                    f"census.year=2016 (ASGS Edition 2) is not yet supported "
+                    f"with GCP DataPack variables. Registering the 2016 "
+                    f"DataPack is a separate follow-up. The following "
+                    f"variables reference GCP tables: "
+                    f"{[name for name, _ in gcp_refs]}. Either set "
+                    f"census.year=2021 or use only non-GCP variables "
+                    f"(SEIFA / ERP / DSS / ABS_PIA / PRESET, once those "
+                    f"have year=2016 fetchers wired up)."
+                )
         return self
 
 

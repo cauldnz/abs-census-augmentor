@@ -91,6 +91,81 @@ def fake_boundary_zip_bytes(tmp_path: Path, fake_sa2_gdf: gpd.GeoDataFrame) -> b
     return buf.getvalue()
 
 
+# ---- Edition 2 (2016) boundary fixtures -----------------------------------
+#
+# Schema mirrors what ABS publishes for the 2016 SA2 shapefile:
+# ``SA2_MAIN16`` (9-digit code) and ``SA2_NAME16``, in GDA94 (EPSG:4283).
+# The synthetic codes / names below are made up but follow ABS-2016's
+# code structure (9 digits, first state-1, ...).
+_FAKE_SA2_E2_RECORDS = [
+    {
+        "SA2_MAIN16": "117011326",
+        "SA2_NAME16": "Sydney CBD",
+        "polygon": [
+            (151.20, -33.87),
+            (151.22, -33.87),
+            (151.22, -33.85),
+            (151.20, -33.85),
+        ],
+    },
+    {
+        "SA2_MAIN16": "117011327",
+        "SA2_NAME16": "North Sydney",
+        "polygon": [
+            (151.19, -33.84),
+            (151.21, -33.84),
+            (151.21, -33.82),
+            (151.19, -33.82),
+        ],
+    },
+    {
+        "SA2_MAIN16": "117011328",
+        "SA2_NAME16": "Eastern Suburbs",
+        "polygon": [
+            (151.23, -33.89),
+            (151.26, -33.89),
+            (151.26, -33.86),
+            (151.23, -33.86),
+        ],
+    },
+]
+
+
+@pytest.fixture
+def fake_sa2_gdf_edition_2() -> gpd.GeoDataFrame:
+    """Three-polygon synthetic SA2 GeoDataFrame in EPSG:4283 (GDA94)."""
+    return gpd.GeoDataFrame(
+        {
+            "SA2_MAIN16": [r["SA2_MAIN16"] for r in _FAKE_SA2_E2_RECORDS],
+            "SA2_NAME16": [r["SA2_NAME16"] for r in _FAKE_SA2_E2_RECORDS],
+            "geometry": [Polygon(r["polygon"]) for r in _FAKE_SA2_E2_RECORDS],
+        },
+        crs="EPSG:4283",
+    )
+
+
+@pytest.fixture
+def fake_boundary_zip_bytes_edition_2(
+    tmp_path: Path, fake_sa2_gdf_edition_2: gpd.GeoDataFrame
+) -> bytes:
+    """In-memory ZIP mirroring ABS Edition 2 SA2 shapefile layout.
+
+    The .shp filename inside is the bare ``SA2_2016_AUST.shp`` form ABS
+    used in the 2016 era — no ``SHP`` token, no datum suffix on the
+    inner files (only on the outer ZIP filename in some releases).
+    """
+    work_dir = tmp_path / "_fixture_boundary_e2"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    shp_path = work_dir / "SA2_2016_AUST.shp"
+    fake_sa2_gdf_edition_2.to_file(shp_path, driver="ESRI Shapefile")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for sidecar in work_dir.iterdir():
+            zf.write(sidecar, arcname=sidecar.name)
+    return buf.getvalue()
+
+
 # ---- DataPack fixtures (synthetic 3-row tables + realistic metadata) -------
 
 # Synthetic G01 table (population) for the same 3 SA2 codes used in fake_sa2_gdf
