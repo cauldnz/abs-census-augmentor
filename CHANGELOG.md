@@ -9,6 +9,64 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase F.2 — Cross-edition orchestrator (lifts the single-edition gate)
+
+Builds on F.1's per-edition boundary scaffolding to actually *run*
+temporal-mode buckets that span ASGS editions. Phase E.2 had hard-coded
+a ``NotImplementedError`` for any release on an edition other than the
+configured ``reference_edition``; that gate is now lifted, replaced
+with per-bucket fan-out across source editions.
+
+**Mechanics (spec-temporal.md §2, §9.3):** the orchestrator now
+computes the set of editions referenced by a bucket's resolved
+releases. For each non-reference edition E, it looks up the
+source-edition SA2 code for every bucket row against that edition's
+SpatialIndex. The bucket's variables are then split into per-edition
+groups and run through a sub-enricher each — keyed against the right
+edition's SA2 code. GCP and PRESET variables ride along with the
+reference-edition group (GCP 2016 isn't registered yet; every PRESET's
+source columns are GCP).
+
+**New output columns (temporal mode only):**
+
+- ``sa2_code_edition`` — the reference ASGS edition number; constant
+  per run. Tells downstream consumers which edition the canonical
+  ``sa2_code`` is reported in.
+- ``<dataset_id>_sa2_code_source`` — per-dataset source-edition SA2
+  code. Only emitted when at least one dataset's source edition
+  differs from the reference edition (matches the spec-temporal.md
+  §11 Q5 ruling: surface the per-dataset source SA2 so downstream
+  consumers can decide whether to aggregate by canonical or by
+  source).
+
+Both slot into the output column order per spec-temporal.md §11:
+``sa2_code, sa2_name, sa2_resolution, sa2_code_edition,
+<dataset>_release..., <dataset>_sa2_code_source..., enrichment...``.
+
+**Pipeline API additions** (internal — public surface unchanged):
+
+- ``Pipeline.__init__`` gains optional ``extra_spatial_indices:
+  dict[int, SpatialIndex]`` and ``spatial_index_factory:
+  Callable[[int], SpatialIndex]`` kwargs. ``from_config`` wires the
+  factory with a closure that constructs the right
+  ``BoundariesDataSource`` per ASGS edition; tests pre-populate
+  ``extra_spatial_indices`` instead.
+- A clear ``RuntimeError`` surfaces when the orchestrator needs an
+  edition it can't construct — most likely a test-built pipeline that
+  forgot to wire the factory or supply the index for that edition.
+
+**What still doesn't work after this PR:** Phase F.2 unblocks
+*cross-edition* lookups but doesn't *populate* any Edition-2 datasets.
+Until SEIFA 2016 / GCP 2016 / ERP-back-to-2016 land (Phase F.3 / F.4
+in subsequent PRs), the cross-edition path is exercised in tests but
+won't yield real Edition-2 values for users. Cross-edition PRESETs
+(PRESETs whose source columns span editions) are still single-edition
+in this PR — when Edition-2 GCP lands, we'll need per-source-column
+edition resolution; not in scope here since no such PRESET exists yet.
+
+2 new cross-edition tests; 2 existing tests updated to reflect the
+lifted gate; 637 pass; ruff + mypy clean.
+
 ### Temporal Phase F.1 — ASGS Edition 2 boundary support (scaffolding)
 
 Scaffolding to land historical (pre-2021) datasets without breaking the

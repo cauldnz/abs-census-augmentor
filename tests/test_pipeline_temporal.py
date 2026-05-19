@@ -5,8 +5,12 @@ get bucketed, and the output gains per-dataset release columns. Tests
 are hermetic — they stub the enricher / datasets so no real ABS data
 is touched.
 
-Phase E.2 scope: single-edition only. Cross-edition input raises a
-clear `NotImplementedError` pointing at Phase F.
+Phase F.2 (this PR) lifts the prior single-edition restriction:
+cross-edition input is now supported via per-edition spatial indices
+plus per-source-edition sub-enricher fan-out (spec-temporal.md §2).
+The cross-edition tests below exercise both the success path (Edition
+2 SpatialIndex pre-supplied via ``extra_spatial_indices``) and the
+factory-missing failure path.
 """
 
 from __future__ import annotations
@@ -197,13 +201,84 @@ def test_temporal_multi_bucket(tmp_path: Path) -> None:
     assert result.releases_used == {"erp_by_sa2": ["2023", "2024"]}
 
 
-# ---- cross-edition: Phase E.2 raises clear error ------------------------
+# ---- cross-edition: Phase F.2 succeeds with per-edition spatial index ----
 
 
-def test_temporal_cross_edition_raises_not_implemented(tmp_path: Path) -> None:
-    """A row dated 2020 resolves ERP to a 2020 release (Edition 2).
-    With reference_edition=3 (default), Phase E.2 raises a clear
-    NotImplementedError pointing at Phase F."""
+def _edition_2_synthetic_spatial_index() -> Any:
+    """Build a SpatialIndex over a synthetic Edition 2 boundary GDF.
+
+    Uses Edition 2 column conventions (``SA2_MAIN16`` / ``SA2_NAME16``,
+    EPSG:4283 / GDA94) so the temporal orchestrator's call to
+    ``SpatialIndex.lookup_many`` succeeds without touching the real
+    ABS Edition 2 download.
+    """
+    from census_augment.spatial import SpatialIndex
+
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_MAIN16": ["117011326"],
+            "SA2_NAME16": ["Test SA2 (2016)"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4283",
+    )
+    return SpatialIndex(
+        boundaries,
+        code_column="SA2_MAIN16",
+        name_column="SA2_NAME16",
+    )
+
+
+def _make_pipeline_with_edition_2(tmp_path: Path, **temporal_overrides: Any) -> Pipeline:
+    """Same wiring as ``_make_pipeline`` but with an Edition 2 SpatialIndex
+    pre-supplied via ``extra_spatial_indices``. Enough to exercise the
+    cross-edition fan-out without a real boundary fetch.
+    """
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = _make_config(tmp_path, **temporal_overrides)
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(),
+        base_url="https://x",
+        root=tmp_path / "ds",
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+
+    return Pipeline(
+        config=config,
+        geocoders=[_FakeGeocoder()],
+        spatial=spatial,
+        enricher=enricher,
+        extra_spatial_indices={2: _edition_2_synthetic_spatial_index()},
+    )
+
+
+def test_temporal_cross_edition_raises_without_spatial_index(tmp_path: Path) -> None:
+    """A row resolving to an Edition 2 release with no Edition 2
+    SpatialIndex wired raises a clear RuntimeError naming the missing
+    edition. Replaces the prior Phase E.2 ``NotImplementedError`` —
+    Phase F.2 lifts the cross-edition block but still surfaces a loud
+    failure when the orchestrator can't construct the boundary for
+    the resolved release's edition."""
     pipeline = _make_pipeline(tmp_path)
 
     df = pd.DataFrame(
@@ -213,8 +288,71 @@ def test_temporal_cross_edition_raises_not_implemented(tmp_path: Path) -> None:
             "transaction_date": pd.to_datetime(["2020-06-01"]),
         }
     )
-    with pytest.raises(NotImplementedError, match="Cross-edition"):
+    with pytest.raises(RuntimeError, match="Edition 2"):
         pipeline.augment(df)
+
+
+def test_temporal_cross_edition_succeeds_with_extra_spatial_index(tmp_path: Path) -> None:
+    """A row dated 2020 resolves ERP to a 2020 release (Edition 2).
+    With ``extra_spatial_indices={2: SpatialIndex(...)}`` supplied, the
+    cross-edition orchestrator looks up the Edition-2 SA2 code and the
+    bucket's sub-enricher merges on it. Output gains the new
+    ``sa2_code_edition`` + ``<dataset>_sa2_code_source`` columns."""
+    pipeline = _make_pipeline_with_edition_2(tmp_path)
+
+    df = pd.DataFrame(
+        {
+            "lat": [-33.86],
+            "lon": [151.21],
+            "transaction_date": pd.to_datetime(["2020-06-01"]),
+        }
+    )
+    result = pipeline.augment(df)
+
+    # Cross-edition: source edition is 2, reference edition is 3.
+    assert "sa2_code_edition" in result.df.columns
+    assert result.df["sa2_code_edition"].iloc[0] == 3
+    # Per-dataset source-SA2 column (only emitted when source != reference).
+    assert "erp_by_sa2_sa2_code_source" in result.df.columns
+    assert result.df["erp_by_sa2_sa2_code_source"].iloc[0] == "117011326"
+    # Release column shows the Edition-2 release.
+    assert result.df["erp_by_sa2_release"].iloc[0] == "2020"
+    assert result.releases_used == {"erp_by_sa2": ["2020"]}
+    # The canonical ``sa2_code`` is in the reference edition.
+    assert result.df["sa2_code"].iloc[0] == "117011326"
+    # Private per-edition columns are dropped before returning.
+    assert "_sa2_code_edition_2" not in result.df.columns
+    assert "_sa2_code_edition_3" not in result.df.columns
+
+
+def test_temporal_mixed_edition_buckets(tmp_path: Path) -> None:
+    """One row on Edition 3 + one row on Edition 2 → two buckets, each
+    looked up against its own edition. The Edition-3 row gets no
+    ``<dataset>_sa2_code_source`` (source == reference); the Edition-2
+    row does."""
+    pipeline = _make_pipeline_with_edition_2(tmp_path)
+
+    df = pd.DataFrame(
+        {
+            "lat": [-33.86, -33.86],
+            "lon": [151.21, 151.21],
+            # 2020 → Edition 2; 2024 → Edition 3.
+            "transaction_date": pd.to_datetime(["2020-06-01", "2024-06-01"]),
+        }
+    )
+    result = pipeline.augment(df)
+
+    releases = result.df["erp_by_sa2_release"].tolist()
+    assert releases == ["2020", "2024"]
+    # When ANY row uses a non-reference edition, the per-dataset
+    # source-SA2 column is emitted; reference-edition rows still get a
+    # value (same as canonical sa2_code).
+    assert "erp_by_sa2_sa2_code_source" in result.df.columns
+    source_codes = result.df["erp_by_sa2_sa2_code_source"].tolist()
+    assert source_codes == ["117011326", "117011326"]
+    # Same canonical reference-edition sa2_code.
+    assert result.df["sa2_code"].tolist() == ["117011326", "117011326"]
+    assert result.releases_used == {"erp_by_sa2": ["2020", "2024"]}
 
 
 # ---- temporal config: closest rule respected ----------------------------
@@ -259,23 +397,26 @@ def test_temporal_out_of_range_fail_default(tmp_path: Path) -> None:
 
 
 def test_temporal_out_of_range_nearest_clamps(tmp_path: Path) -> None:
-    """`out_of_range: nearest` clamps to the earliest release.
-    Pre-2016 dates raise cross-edition NotImplementedError (Phase F)."""
-    pipeline = _make_pipeline(tmp_path, out_of_range="nearest")
+    """``out_of_range: nearest`` clamps to the earliest release. Earliest
+    ERP release is 2016 (Edition 2); now that Phase F.2 lifts the
+    single-edition block, the pipeline succeeds and the clamped row
+    rides the cross-edition path."""
+    pipeline = _make_pipeline_with_edition_2(tmp_path, out_of_range="nearest")
 
     df = pd.DataFrame(
         {
             "lat": [-33.86],
             "lon": [151.21],
-            "transaction_date": pd.to_datetime(
-                ["2017-06-01"]
-            ),  # before 2016 ERP earliest -> nope, 2018 is earliest
+            # Pre-2016 → clamped to earliest ERP release (2016, Edition 2).
+            "transaction_date": pd.to_datetime(["2010-01-01"]),
         }
     )
-    # Earliest ERP release is 2016 (ASGS edition 2). Phase E.2 single-
-    # edition constraint raises here.
-    with pytest.raises(NotImplementedError, match="Cross-edition"):
-        pipeline.augment(df)
+    result = pipeline.augment(df)
+    # Clamped to ERP 2016.
+    assert result.df["erp_by_sa2_release"].iloc[0] == "2016"
+    assert result.df["sa2_code_edition"].iloc[0] == 3
+    # Source-edition SA2 emitted (2016 → Edition 2 ≠ reference 3).
+    assert "erp_by_sa2_sa2_code_source" in result.df.columns
 
 
 # ---- input-validation -----------------------------------------------------

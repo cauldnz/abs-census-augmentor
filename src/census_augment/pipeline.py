@@ -11,6 +11,7 @@ Two entry points (spec §3, §7, §18):
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -268,6 +269,8 @@ class Pipeline:
         spatial: SpatialIndex,
         enricher: CensusEnricher,
         mb_lookup: dict[str, MbInfo] | None = None,
+        extra_spatial_indices: dict[int, SpatialIndex] | None = None,
+        spatial_index_factory: Callable[[int], SpatialIndex] | None = None,
     ) -> None:
         """Construct directly. Tests use this; production code typically
         goes through :meth:`from_config` or :meth:`create`.
@@ -282,6 +285,22 @@ class Pipeline:
         SA2 in O(1) without a spatial join. When ``None`` (or when a
         geocoder doesn't produce ``mb_code``), the spatial-join fallback
         is used.
+
+        ``extra_spatial_indices`` (spec-temporal.md §2, Phase F.2):
+        per-edition spatial indices for cross-edition temporal mode,
+        keyed by ASGS edition number (1/2/3/...). ``spatial`` itself
+        carries the index for ``config.temporal.reference_edition``;
+        any other edition the temporal orchestrator needs is looked up
+        here. Cross-sectional runs never touch this dict.
+
+        ``spatial_index_factory`` (spec-temporal.md §2, Phase F.2):
+        callable that returns a :class:`SpatialIndex` for a given ASGS
+        edition number. Used by the temporal orchestrator when the
+        bucket dispatcher needs an edition not already in
+        ``extra_spatial_indices``. ``from_config`` wires this with a
+        closure that constructs a :class:`BoundariesDataSource` per
+        edition; tests can pre-populate ``extra_spatial_indices``
+        instead.
         """
         if not geocoders:
             raise ValueError(
@@ -294,6 +313,14 @@ class Pipeline:
         self._spatial = spatial
         self._enricher = enricher
         self._mb_lookup = mb_lookup if mb_lookup is not None else {}
+        # Per-edition spatial-index cache (Phase F.2). Seeded with the
+        # reference edition's index so a single dict-lookup covers the
+        # common case. Lazy-fills via ``_spatial_index_factory`` for
+        # other editions touched by the temporal orchestrator.
+        self._extra_spatial_indices: dict[int, SpatialIndex] = dict(extra_spatial_indices or {})
+        ref_edition = config.temporal.reference_edition
+        self._extra_spatial_indices.setdefault(ref_edition, spatial)
+        self._spatial_index_factory: Callable[[int], SpatialIndex] | None = spatial_index_factory
         self._validate_no_column_collisions()
 
     @classmethod
@@ -335,6 +362,42 @@ class Pipeline:
             code_column=edition.sa2_code_column,
             name_column=edition.sa2_name_column,
         )
+
+        # Per-edition spatial-index factory (Phase F.2 / spec-temporal.md §2).
+        # Constructs a SpatialIndex for any ASGS edition the temporal
+        # orchestrator asks for. We capture ``data_dir`` and the boundaries
+        # base URL here so the closure stands on its own.
+        captured_data_dir = data_dir
+        captured_boundaries_url = config.data_sources.boundaries_base_url
+
+        def _spatial_index_factory(asgs_edition: int) -> SpatialIndex:
+            # Lazily build a fresh BoundariesDataSource configured for
+            # the requested edition. The (edition, year, datum) triples
+            # below mirror config.CensusConfig's cross-field validators.
+            from .config import CensusConfig as _CensusCfg  # noqa: PLC0415
+
+            if asgs_edition == 2:
+                extra_census = _CensusCfg(year=2016, asgs_edition=2, datum="GDA94")
+                year_for_edition = 2016
+            elif asgs_edition == 3:
+                extra_census = _CensusCfg(year=2021, asgs_edition=3, datum="GDA2020")
+                year_for_edition = 2021
+            else:
+                raise NotImplementedError(
+                    f"No boundary source configured for ASGS edition "
+                    f"{asgs_edition}. Only editions {{2, 3}} are wired today."
+                )
+            extra_ds = BoundariesDataSource(
+                census=extra_census,
+                base_url=captured_boundaries_url,
+                root=captured_data_dir / "boundaries" / str(year_for_edition),
+            )
+            extra_spec = extra_ds.edition
+            return SpatialIndex(
+                extra_ds.load(),
+                code_column=extra_spec.sa2_code_column,
+                name_column=extra_spec.sa2_name_column,
+            )
 
         datapacks_ds = DataPacksDataSource(
             census=config.census,
@@ -422,6 +485,7 @@ class Pipeline:
             spatial=spatial,
             enricher=enricher,
             mb_lookup=mb_lookup,
+            spatial_index_factory=_spatial_index_factory,
         )
 
     @classmethod
@@ -920,16 +984,25 @@ class Pipeline:
 
     def _reorder_output_columns(self, df: pd.DataFrame, original_cols: list[str]) -> pd.DataFrame:
         prefix = self._config.output.prefix
-        # Per-dataset <dataset_id>_release columns added by temporal mode
-        # (spec-temporal.md §11). In cross-sectional mode these don't
-        # exist; in temporal mode they slot in after the SA2 trio and
-        # before the enrichment values.
+        # Temporal-mode additions, in canonical order (spec-temporal.md §11):
+        # - ``sa2_code_edition`` (constant per run)
+        # - ``<dataset_id>_release`` columns
+        # - ``<dataset_id>_sa2_code_source`` columns (only emitted when at
+        #   least one dataset's source edition differs from reference)
+        #
+        # In cross-sectional mode none of these exist and the
+        # ``[c for c in desired if c in df.columns]`` filter drops them
+        # cleanly.
         release_cols = sorted(c for c in df.columns if c.endswith("_release"))
+        source_sa2_cols = sorted(c for c in df.columns if c.endswith("_sa2_code_source"))
+        edition_col = ["sa2_code_edition"] if "sa2_code_edition" in df.columns else []
         desired = (
             original_cols
             + [_GEO_LAT_COL, _GEO_LON_COL, _GEO_SOURCE_COL, _GEO_MATCH_SCORE_COL]
             + [_SA2_CODE_COL, _SA2_NAME_COL, _SA2_RESOLUTION_COL]
+            + edition_col
             + release_cols
+            + source_sa2_cols
             + [f"{prefix}{name}" for name in self._config.variables]
         )
         existing = [c for c in desired if c in df.columns]
@@ -998,25 +1071,38 @@ class Pipeline:
             sa2_resolution_counts=sa2_resolution_counts,
         )
 
-    # ---- temporal-mode orchestrator (spec-temporal.md §9) ----------------
+    # ---- temporal-mode orchestrator (spec-temporal.md §9, §2) ------------
+
+    #: Internal column-name template for per-edition SA2 codes computed by
+    #: the temporal orchestrator. These are stashed on the bucket frame so
+    #: sub-enrichers can join against the right edition's key. Dropped
+    #: before returning to the caller; the public output column is
+    #: ``sa2_code`` (reference edition) and optional per-dataset
+    #: ``<dataset>_sa2_code_source`` when source differs from reference.
+    _SA2_CODE_PER_EDITION_PREFIX = "_sa2_code_edition_"
 
     def _enrich_temporal(
         self,
         original_df: pd.DataFrame,
         df_out: pd.DataFrame,
     ) -> tuple[pd.DataFrame, dict[str, list[str]]]:
-        """Per-bucket enrichment for temporal mode.
+        """Per-bucket, per-edition enrichment for temporal mode.
 
         Resolves a per-dataset release for each row, buckets rows by the
-        per-dataset release tuple, then for each bucket runs the
-        configured enricher with that bucket's release overrides and
-        concatenates the results.
+        per-dataset release tuple, and for each bucket fans out the
+        enrichment by *dataset source edition* (spec-temporal.md §2).
+        Each edition group is enriched against an edition-specific SA2
+        code so that values come from the lookup at the right boundary
+        edition for each release.
 
-        Adds per-dataset ``<dataset_id>_release`` columns to the output.
+        Output columns added:
 
-        Phase E.2 scope: single-edition only. If any resolved release
-        is on an ASGS edition other than ``temporal.reference_edition``,
-        raises a clear error pointing at Phase F (cross-edition support).
+        - ``<dataset_id>_release`` — per-dataset release used for each row.
+        - ``sa2_code_edition`` — the canonical reference ASGS edition (a
+          constant per run).
+        - ``<dataset_id>_sa2_code_source`` — only when at least one
+          dataset's source edition differs from the reference edition;
+          carries the per-dataset source-edition SA2 code per row.
 
         Returns ``(enriched_df, releases_used)`` where ``releases_used``
         maps dataset id → sorted list of releases touched.
@@ -1048,8 +1134,6 @@ class Pipeline:
 
         # Identify which datasets the configured variables touch, and
         # for each, fetch the registered TemporalDatasetMetadata.
-        # PRESET refs are also expanded — they're stored at the
-        # PRESET registry level and reference underlying datasets.
         touched_dataset_ids = self._touched_dataset_ids()
 
         dataset_metadata: dict[str, "TemporalDatasetMetadata"] = {}
@@ -1095,9 +1179,11 @@ class Pipeline:
                 row_releases.append((did, rel))
             row_release_tuples.append(tuple(row_releases))
 
-        # Single-edition validation (Phase E.2 scope).
-        # Walk every (dataset, release) used; check each release's
-        # asgs_edition_by_release entry matches reference_edition.
+        # Resolve the source-edition per (dataset, release) tuple. A
+        # missing ``asgs_edition_by_release`` entry assumes the reference
+        # edition (matches prior behaviour; logged once per occurrence).
+        edition_per_dataset_release: dict[tuple[str, str], int] = {}
+        editions_in_use: set[int] = {reference_edition}
         for did, md in dataset_metadata.items():
             used_releases = {rel for tup in row_release_tuples for d2, rel in tup if d2 == did}
             for rel in used_releases:
@@ -1110,37 +1196,83 @@ class Pipeline:
                         rel,
                         reference_edition,
                     )
-                    continue
-                if src_edition != reference_edition:
-                    raise NotImplementedError(
-                        f"Temporal-mode row resolved {did!r} → release {rel!r} "
-                        f"(ASGS Edition {src_edition}), but the configured "
-                        f"reference_edition is {reference_edition}. "
-                        f"Cross-edition boundary lookup is Phase F work — until "
-                        f"then, every resolved release must be on the reference "
-                        f"edition. Either pin earlier ASGS-edition data out of "
-                        f"the input, or pre-filter rows to dates that all "
-                        f"resolve to Edition-{reference_edition} releases."
-                    )
+                    src_edition = reference_edition
+                edition_per_dataset_release[(did, rel)] = src_edition
+                editions_in_use.add(src_edition)
+
+        # Per-edition SA2 lookup. The reference edition's codes are already
+        # on df_out as ``sa2_code``; any other edition gets its own column
+        # via a fresh SpatialIndex lookup against that edition's boundary.
+        lats: list[float | None] = df_out[_GEO_LAT_COL].tolist()
+        lons: list[float | None] = df_out[_GEO_LON_COL].tolist()
+
+        sa2_codes_by_edition: dict[int, list[str | None]] = {
+            reference_edition: df_out[_SA2_CODE_COL].tolist()
+        }
+        for ed in sorted(editions_in_use - {reference_edition}):
+            spatial = self._get_spatial_index(ed)
+            ed_codes, _ed_names = spatial.lookup_many(lats, lons)
+            sa2_codes_by_edition[ed] = ed_codes
+
+        # Stash per-edition codes on df_out under private columns so
+        # sub-enrichers can pick them up. Dropped before returning.
+        df_out = df_out.copy()
+        per_edition_cols: dict[int, str] = {}
+        for ed, codes in sa2_codes_by_edition.items():
+            col = f"{self._SA2_CODE_PER_EDITION_PREFIX}{ed}"
+            df_out[col] = codes
+            per_edition_cols[ed] = col
 
         # Bucket rows by release tuple.
         buckets: dict[tuple[tuple[str, str], ...], list[int]] = defaultdict(list)
         for i, tup in enumerate(row_release_tuples):
             buckets[tup].append(i)
 
-        # Per-bucket: build a sub-enricher with the bucket's release
-        # overrides, run add_enrichment_columns, concat.
+        # Per-bucket: fan out by source edition. Each edition's slice of
+        # the bucket's variables goes through its own sub-enricher with
+        # the right sa2_code column.
         enriched_parts: list[pd.DataFrame] = []
         releases_used: dict[str, set[str]] = defaultdict(set)
         for bucket_releases, row_positions in buckets.items():
-            sub_enricher = self._enricher_for_bucket(dict(bucket_releases))
             bucket_df = df_out.iloc[row_positions]
-            enriched_bucket = sub_enricher.add_enrichment_columns(
-                bucket_df, sa2_code_col=_SA2_CODE_COL
-            )
-            enriched_parts.append(enriched_bucket)
+
+            # Group this bucket's (dataset_id, release) tuples by source
+            # edition.
+            by_edition: dict[int, dict[str, str]] = defaultdict(dict)
             for did, rel in bucket_releases:
-                releases_used[did].add(rel)
+                src_edition = edition_per_dataset_release.get((did, rel), reference_edition)
+                by_edition[src_edition][did] = rel
+
+            # Run a sub-enricher per source edition. Ordering: start with
+            # the reference edition so PRESETs and GCP variables (always
+            # on reference edition today) materialise first. Other
+            # editions slot in afterwards; column-name collisions
+            # would surface as `merge` errors loudly.
+            edition_order = sorted(by_edition, key=lambda e: (e != reference_edition, e))
+            for src_edition in edition_order:
+                dataset_releases = by_edition[src_edition]
+                edition_vars = self._variables_for_datasets(
+                    set(dataset_releases.keys()),
+                    include_gcp_and_preset=(src_edition == reference_edition),
+                )
+                if not edition_vars:
+                    # No user-visible variables in this edition group.
+                    # Still record the releases used so the output's
+                    # ``<dataset>_release`` column is complete.
+                    for did, rel in dataset_releases.items():
+                        releases_used[did].add(rel)
+                    continue
+                sub_enricher = self._enricher_for_bucket(
+                    dataset_releases,
+                    variables_override=edition_vars,
+                )
+                bucket_df = sub_enricher.add_enrichment_columns(
+                    bucket_df, sa2_code_col=per_edition_cols[src_edition]
+                )
+                for did, rel in dataset_releases.items():
+                    releases_used[did].add(rel)
+
+            enriched_parts.append(bucket_df)
 
         # Concat in original row order.
         enriched_full = pd.concat(enriched_parts).sort_index()
@@ -1148,7 +1280,6 @@ class Pipeline:
         # Append per-dataset release columns.
         for did in sorted(releases_used):
             col_name = f"{did}_release"
-            # Build per-row release for this dataset by indexing back.
             release_per_row: list[str | None] = [None] * len(original_df)
             for i, tup in enumerate(row_release_tuples):
                 for d2, rel in tup:
@@ -1157,7 +1288,117 @@ class Pipeline:
                         break
             enriched_full[col_name] = release_per_row
 
+        # Canonical reference-edition stamp (constant per run).
+        enriched_full["sa2_code_edition"] = reference_edition
+
+        # Per-dataset ``<did>_sa2_code_source`` columns — only emitted
+        # when at least one dataset's source edition differs from the
+        # reference edition. Per spec-temporal.md §11 Q5 ("emit with
+        # per-dataset source-SA2 column").
+        non_reference_datasets = {
+            did
+            for (did, _rel), src_ed in edition_per_dataset_release.items()
+            if src_ed != reference_edition
+        }
+        for did in sorted(non_reference_datasets):
+            col_name = f"{did}_sa2_code_source"
+            # For each row, find this dataset's resolved release and
+            # therefore its source edition; emit the row's source-edition
+            # sa2_code.
+            source_per_row: list[str | None] = [None] * len(original_df)
+            for i, tup in enumerate(row_release_tuples):
+                for d2, rel in tup:
+                    if d2 != did:
+                        continue
+                    src_ed = edition_per_dataset_release.get((did, rel), reference_edition)
+                    source_per_row[i] = sa2_codes_by_edition[src_ed][i]
+                    break
+            enriched_full[col_name] = source_per_row
+
+        # Drop the private per-edition sa2 columns before returning.
+        for col in per_edition_cols.values():
+            if col in enriched_full.columns:
+                enriched_full = enriched_full.drop(columns=col)
+
         return enriched_full, {did: sorted(rels) for did, rels in releases_used.items()}
+
+    def _get_spatial_index(self, edition: int) -> SpatialIndex:
+        """Return the :class:`SpatialIndex` for ``edition``.
+
+        Hits the per-edition cache first; falls back to the factory
+        wired by :meth:`from_config`. Raises a clear error when the
+        caller needs an edition the pipeline can't construct (e.g.
+        test-built pipelines with no factory and no pre-populated
+        ``extra_spatial_indices`` entry).
+        """
+        idx = self._extra_spatial_indices.get(edition)
+        if idx is not None:
+            return idx
+        if self._spatial_index_factory is None:
+            raise RuntimeError(
+                f"Temporal-mode bucket requires a SpatialIndex for ASGS "
+                f"Edition {edition}, but this Pipeline was constructed "
+                f"without a spatial_index_factory and without an "
+                f"extra_spatial_indices entry for that edition. "
+                f"Either use Pipeline.from_config (which wires the "
+                f"factory automatically) or pass "
+                f"extra_spatial_indices={{{edition}: SpatialIndex(...)}} "
+                f"to Pipeline(...)."
+            )
+        idx = self._spatial_index_factory(edition)
+        self._extra_spatial_indices[edition] = idx
+        return idx
+
+    def _variables_for_datasets(
+        self,
+        dataset_ids: set[str],
+        *,
+        include_gcp_and_preset: bool,
+    ) -> dict[str, str]:
+        """Filter the configured variables map to those owned by
+        ``dataset_ids``.
+
+        ``include_gcp_and_preset`` is set when iterating the *reference
+        edition* group: GCP and PRESET variables are always on the
+        reference edition today (GCP 2016 isn't registered yet; every
+        PRESET references GCP columns) so they ride along with whatever
+        group is being processed for that edition.
+        """
+        from .datasets import registry  # noqa: PLC0415
+        from .datasets._registry import RegistryError  # noqa: PLC0415
+
+        out: dict[str, str] = {}
+        for friendly, ref in self._config.variables.items():
+            if "." not in ref:
+                continue
+            namespace = ref.split(".", 1)[0]
+            # GCP-shape ``G##.col`` refs → gcp_2021 dataset (today only).
+            is_gcp = bool(namespace) and namespace[0] == "G" and namespace[1:].isdigit()
+            if is_gcp:
+                if include_gcp_and_preset:
+                    out[friendly] = ref
+                continue
+            # PRESET refs (``PRESET.<id>``) are treated as living on the
+            # reference edition for now — every PRESET's source columns
+            # are GCP. See _enrich_temporal docstring + spec-temporal.md
+            # §9 PRESET note.
+            if namespace == "PRESET":
+                if include_gcp_and_preset:
+                    out[friendly] = ref
+                continue
+            # Otherwise resolve the namespace to a registered dataset id
+            # and include this ref iff that dataset is in the group.
+            try:
+                spec, _field = registry.resolve_variable(ref)
+            except RegistryError:
+                # Unknown namespace — fall through to GCP path if the
+                # reference-edition group is being built; otherwise skip.
+                if include_gcp_and_preset:
+                    out[friendly] = ref
+                continue
+            if spec.id in dataset_ids:
+                out[friendly] = ref
+        return out
 
     def _touched_dataset_ids(self) -> set[str]:
         """Set of dataset ids the configured variables resolve to.
@@ -1185,15 +1426,25 @@ class Pipeline:
     def _enricher_for_bucket(
         self,
         release_overrides: dict[str, str],
+        *,
+        variables_override: dict[str, str] | None = None,
     ) -> CensusEnricher:
         """Build a per-bucket :class:`CensusEnricher` with the given
-        release overrides. Other state (catalog, variables, output
-        prefix, data_dir) is inherited from the configured enricher.
+        release overrides. Other state (catalog, output prefix, data_dir)
+        is inherited from the configured enricher.
+
+        ``variables_override`` is used by the temporal orchestrator's
+        per-source-edition fan-out (Phase F.2): each edition group only
+        sees its own slice of the variables map. Cross-sectional and
+        single-edition temporal runs pass ``None`` and get the full
+        variables map.
         """
         return CensusEnricher(
             datapacks=self._enricher._datapacks,
             catalog=self._enricher._catalog,
-            variables=self._enricher._variables,
+            variables=variables_override
+            if variables_override is not None
+            else self._enricher._variables,
             output_prefix=self._enricher._output_prefix,
             data_dir=self._enricher._data_dir,
             dataset_release_overrides=release_overrides,
