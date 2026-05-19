@@ -271,6 +271,9 @@ class Pipeline:
         mb_lookup: dict[str, MbInfo] | None = None,
         extra_spatial_indices: dict[int, SpatialIndex] | None = None,
         spatial_index_factory: Callable[[int], SpatialIndex] | None = None,
+        extra_gnaf_geocoders: dict[str, Geocoder] | None = None,
+        gnaf_geocoder_factory: Callable[[str], Geocoder] | None = None,
+        gnaf_available_releases: list[str] | None = None,
     ) -> None:
         """Construct directly. Tests use this; production code typically
         goes through :meth:`from_config` or :meth:`create`.
@@ -301,6 +304,21 @@ class Pipeline:
         closure that constructs a :class:`BoundariesDataSource` per
         edition; tests can pre-populate ``extra_spatial_indices``
         instead.
+
+        ``extra_gnaf_geocoders`` / ``gnaf_geocoder_factory`` /
+        ``gnaf_available_releases`` (spec-temporal.md §12, Phase G):
+        per-release G-NAF geocoders for temporal mode. The pipeline
+        resolves a G-NAF release per row (closest at-or-before the
+        row's date by default), buckets rows by that release, and
+        dispatches geocoding through a release-specific chain. The
+        factory mirrors ``spatial_index_factory``: ``from_config``
+        wires it with a closure that constructs a fresh
+        :class:`GnafDataSource` + :class:`GnafGeocoder` for the
+        requested release; tests pre-populate ``extra_gnaf_geocoders``
+        instead. ``gnaf_available_releases`` is the sorted-ASC list of
+        YYYYMM releases the data source can serve; if ``None``,
+        per-row resolution is disabled and the configured release is
+        used for every row (matching the Phase E.2 / F.2 behaviour).
         """
         if not geocoders:
             raise ValueError(
@@ -321,6 +339,15 @@ class Pipeline:
         ref_edition = config.temporal.reference_edition
         self._extra_spatial_indices.setdefault(ref_edition, spatial)
         self._spatial_index_factory: Callable[[int], SpatialIndex] | None = spatial_index_factory
+        # Per-release G-NAF dispatch (Phase G). Empty extras + None
+        # factory + None releases together mean "Phase G inactive,
+        # behave like F.2": geocoding uses the configured chain
+        # regardless of row date.
+        self._gnaf_geocoders_by_release: dict[str, Geocoder] = dict(extra_gnaf_geocoders or {})
+        self._gnaf_geocoder_factory: Callable[[str], Geocoder] | None = gnaf_geocoder_factory
+        self._gnaf_available_releases: list[str] | None = (
+            list(gnaf_available_releases) if gnaf_available_releases is not None else None
+        )
         self._validate_no_column_collisions()
 
     @classmethod
@@ -433,6 +460,11 @@ class Pipeline:
         # avoids forcing a G-NAF download on Nominatim-only users.
         geocoders: list[Geocoder] = []
         mb_lookup: dict[str, MbInfo] | None = None
+        # Phase G: lazily-resolved per-release G-NAF state. Populated
+        # below when ``gnaf`` is in the provider chain; left ``None``
+        # for Nominatim-only configs.
+        gnaf_factory: Callable[[str], Geocoder] | None = None
+        gnaf_available: list[str] | None = None
         for provider in config.geocoding.providers:
             if provider == "gnaf":
                 gnaf_ds = GnafDataSource(
@@ -452,6 +484,55 @@ class Pipeline:
                         fuzzy_threshold=config.geocoding.gnaf.fuzzy_threshold,
                     )
                 )
+
+                # Phase G: per-release G-NAF dispatch (spec-temporal.md §12).
+                # Only useful in temporal mode (``input.date_column`` set),
+                # but cheap to wire here regardless — the available-releases
+                # list comes from the same data source instance, and the
+                # factory builds fresh per-release G-NAF data sources from
+                # the same config knobs that produced the chain default
+                # above.
+                if config.input.date_column is not None:
+                    try:
+                        gnaf_available = gnaf_ds.list_available_releases()
+                    except Exception as e:  # noqa: BLE001 — S3 + boto failures
+                        _log.warning(
+                            "Phase G: could not list G-NAF releases — per-row "
+                            "release dispatch disabled, falling back to the "
+                            "configured release for every row. Cause: %s",
+                            e,
+                        )
+
+                    # Capture knobs as locals so the closure's signature
+                    # stays narrow (mypy can't widen kwargs unpacks safely).
+                    captured_datum = config.geocoding.gnaf.datum
+                    captured_mode = config.geocoding.gnaf.mode
+                    captured_data_dir_g = data_dir
+                    captured_s3_base_url = config.data_sources.gnaf_s3_base_url
+                    captured_s3_https_endpoint = config.data_sources.gnaf_s3_https_endpoint
+                    captured_parquet_filter = config.data_sources.gnaf_parquet_filter
+                    captured_census_year = config.census.year
+                    captured_official_base_url = config.data_sources.gnaf_official_base_url
+                    captured_fuzzy = config.geocoding.gnaf.fuzzy_threshold
+
+                    def _gnaf_factory(release: str) -> Geocoder:
+                        per_release_ds = GnafDataSource(
+                            release=release,
+                            datum=captured_datum,
+                            mode=captured_mode,
+                            data_dir=captured_data_dir_g,
+                            s3_base_url=captured_s3_base_url,
+                            s3_https_endpoint=captured_s3_https_endpoint,
+                            parquet_filter=captured_parquet_filter,
+                            census_year=captured_census_year,
+                            official_base_url=captured_official_base_url,
+                        )
+                        return GnafGeocoder(
+                            data_source=per_release_ds,
+                            fuzzy_threshold=captured_fuzzy,
+                        )
+
+                    gnaf_factory = _gnaf_factory
                 # MB→SA2 fast-path lookup is shared by every G-NAF row
                 # the chain produces. Built once per pipeline; the .dbf
                 # is small enough that re-fetching per call would be
@@ -486,6 +567,8 @@ class Pipeline:
             enricher=enricher,
             mb_lookup=mb_lookup,
             spatial_index_factory=_spatial_index_factory,
+            gnaf_geocoder_factory=gnaf_factory,
+            gnaf_available_releases=gnaf_available,
         )
 
     @classmethod
@@ -638,13 +721,34 @@ class Pipeline:
         df_out = df.copy()
         original_cols = list(df_out.columns)
 
-        lats, lons, sources, mb_codes, match_scores = self._resolve_coordinates(
-            df_out, addr_col=addr_col, lat_col=lat_col, lon_col=lon_col
-        )
+        # Phase G: when temporal mode is active AND the chain has a G-NAF
+        # geocoder AND we know the available releases, dispatch geocoding
+        # per row's resolved G-NAF release. Otherwise use the single
+        # configured chain.
+        gnaf_releases_per_row: list[str | None] | None = None
+        if (
+            self._config.input.date_column is not None
+            and self._gnaf_available_releases
+            and self._has_gnaf_in_chain()
+        ):
+            lats, lons, sources, mb_codes, match_scores, gnaf_releases_per_row = (
+                self._resolve_coordinates_per_release(
+                    df_out,
+                    addr_col=addr_col,
+                    lat_col=lat_col,
+                    lon_col=lon_col,
+                )
+            )
+        else:
+            lats, lons, sources, mb_codes, match_scores = self._resolve_coordinates(
+                df_out, addr_col=addr_col, lat_col=lat_col, lon_col=lon_col
+            )
         df_out[_GEO_LAT_COL] = lats
         df_out[_GEO_LON_COL] = lons
         df_out[_GEO_SOURCE_COL] = sources
         df_out[_GEO_MATCH_SCORE_COL] = match_scores
+        if gnaf_releases_per_row is not None:
+            df_out["gnaf_release"] = gnaf_releases_per_row
 
         codes, names, sa2_resolution = self._resolve_sa2(lats=lats, lons=lons, mb_codes=mb_codes)
         df_out[_SA2_CODE_COL] = codes
@@ -823,6 +927,7 @@ class Pipeline:
         addr_col: str | None,
         lat_col: str | None,
         lon_col: str | None,
+        geocoders: list[Geocoder] | None = None,
     ) -> tuple[
         list[float | None],
         list[float | None],
@@ -834,16 +939,22 @@ class Pipeline:
 
         Returns parallel lists ``(lats, lons, sources, mb_codes,
         match_scores)``. Precedence: lat/lon > address. For address
-        rows, geocoders in ``self._geocoders`` are tried in order; the
-        first non-failed result wins (spec §7.2). On miss across the
-        whole chain, the row is marked ``failed`` and lat/lon are
-        ``None``.
+        rows, the supplied ``geocoders`` are tried in order; the first
+        non-failed result wins (spec §7.2). On miss across the whole
+        chain, the row is marked ``failed`` and lat/lon are ``None``.
+
+        ``geocoders`` defaults to ``self._geocoders`` (the pipeline's
+        configured chain). The temporal G-NAF orchestrator (Phase G)
+        passes a per-bucket chain whose G-NAF geocoder is bound to the
+        bucket's resolved release.
 
         ``mb_codes`` carries the geocoder's ABS Mesh Block code where
         produced (G-NAF rows). ``match_scores`` carries the fuzzy
         similarity score for ``gnaf_fuzzy`` rows; everything else gets
         ``None``.
         """
+        if geocoders is None:
+            geocoders = self._geocoders
         has_latlon = lat_col is not None and lon_col is not None
         has_address = addr_col is not None
 
@@ -868,7 +979,7 @@ class Pipeline:
             if has_address:
                 addr_val = row[cast(str, addr_col)]
                 if pd.notna(addr_val) and str(addr_val).strip():
-                    result = self._geocode_with_chain(str(addr_val))
+                    result = self._geocode_with_chain(str(addr_val), geocoders=geocoders)
                     lats.append(result.lat)
                     lons.append(result.lon)
                     sources.append(result.source)
@@ -884,16 +995,26 @@ class Pipeline:
 
         return lats, lons, sources, mb_codes, match_scores
 
-    def _geocode_with_chain(self, address: str) -> GeocodeResult:
-        """Walk ``self._geocoders`` in order; first non-failed wins.
+    def _geocode_with_chain(
+        self,
+        address: str,
+        *,
+        geocoders: list[Geocoder] | None = None,
+    ) -> GeocodeResult:
+        """Walk ``geocoders`` in order; first non-failed wins.
 
         Returns the last failure if every provider fails — that way the
         caller still gets a well-formed ``GeocodeResult`` carrying the
         original input. Logs at DEBUG when a provider falls through to
         the next.
+
+        Defaults to ``self._geocoders``; the temporal G-NAF orchestrator
+        passes a per-bucket chain.
         """
+        if geocoders is None:
+            geocoders = self._geocoders
         last: GeocodeResult | None = None
-        for provider in self._geocoders:
+        for provider in geocoders:
             result = provider.geocode(address)
             last = result
             if result.is_success:
@@ -985,22 +1106,29 @@ class Pipeline:
     def _reorder_output_columns(self, df: pd.DataFrame, original_cols: list[str]) -> pd.DataFrame:
         prefix = self._config.output.prefix
         # Temporal-mode additions, in canonical order (spec-temporal.md §11):
-        # - ``sa2_code_edition`` (constant per run)
-        # - ``<dataset_id>_release`` columns
-        # - ``<dataset_id>_sa2_code_source`` columns (only emitted when at
-        #   least one dataset's source edition differs from reference)
+        # - ``sa2_code_edition`` (constant per run, Phase F.2)
+        # - ``gnaf_release`` (per-row resolved G-NAF release, Phase G)
+        # - ``<dataset_id>_release`` columns (Phase E.2)
+        # - ``<dataset_id>_sa2_code_source`` columns (Phase F.2; only
+        #   emitted when at least one dataset's source edition differs
+        #   from reference)
         #
-        # In cross-sectional mode none of these exist and the
-        # ``[c for c in desired if c in df.columns]`` filter drops them
-        # cleanly.
-        release_cols = sorted(c for c in df.columns if c.endswith("_release"))
-        source_sa2_cols = sorted(c for c in df.columns if c.endswith("_sa2_code_source"))
+        # The ``_release`` sort below would otherwise drag
+        # ``gnaf_release`` along with the dataset-release block. Keep
+        # G-NAF distinct because it's per-row from the geocoding tier,
+        # not a dataset enrichment release.
         edition_col = ["sa2_code_edition"] if "sa2_code_edition" in df.columns else []
+        gnaf_release_col = ["gnaf_release"] if "gnaf_release" in df.columns else []
+        release_cols = sorted(
+            c for c in df.columns if c.endswith("_release") and c != "gnaf_release"
+        )
+        source_sa2_cols = sorted(c for c in df.columns if c.endswith("_sa2_code_source"))
         desired = (
             original_cols
             + [_GEO_LAT_COL, _GEO_LON_COL, _GEO_SOURCE_COL, _GEO_MATCH_SCORE_COL]
             + [_SA2_CODE_COL, _SA2_NAME_COL, _SA2_RESOLUTION_COL]
             + edition_col
+            + gnaf_release_col
             + release_cols
             + source_sa2_cols
             + [f"{prefix}{name}" for name in self._config.variables]
@@ -1449,3 +1577,156 @@ class Pipeline:
             data_dir=self._enricher._data_dir,
             dataset_release_overrides=release_overrides,
         )
+
+    # ---- temporal-mode G-NAF dispatch (spec-temporal.md §12, Phase G) ----
+
+    def _has_gnaf_in_chain(self) -> bool:
+        """True iff any configured geocoder is a :class:`GnafGeocoder`.
+
+        Cheap predicate used to gate Phase G's per-release dispatch on
+        chains that actually contain G-NAF.
+        """
+        return any(isinstance(g, GnafGeocoder) for g in self._geocoders)
+
+    def _resolve_coordinates_per_release(
+        self,
+        df: pd.DataFrame,
+        *,
+        addr_col: str | None,
+        lat_col: str | None,
+        lon_col: str | None,
+    ) -> tuple[
+        list[float | None],
+        list[float | None],
+        list[str],
+        list[str | None],
+        list[float | None],
+        list[str | None],
+    ]:
+        """Bucket rows by per-row G-NAF release, then dispatch geocoding
+        through a release-specific chain (spec-temporal.md §12).
+
+        Returns the same five-tuple as :meth:`_resolve_coordinates` plus
+        an additional ``gnaf_releases`` list (per-row YYYYMM or ``None``
+        for rows that couldn't be assigned a release — e.g. unparseable
+        date column values, or rows that bypassed geocoding entirely
+        via lat/lon input).
+        """
+        from collections import defaultdict  # noqa: PLC0415
+
+        from ._temporal import resolve_gnaf_release, to_date  # noqa: PLC0415
+
+        date_col = self._config.input.date_column
+        assert date_col is not None  # narrowed by augment()
+        assert self._gnaf_available_releases is not None  # narrowed by augment()
+
+        if date_col not in df.columns:
+            raise ValueError(
+                f"input.date_column {date_col!r} is not in the input DataFrame; "
+                f"columns are: {list(df.columns)}"
+            )
+
+        try:
+            row_dates = [to_date(v) for v in df[date_col].tolist()]
+        except ValueError as e:
+            raise ValueError(f"input.date_column {date_col!r} has unparseable values: {e}") from e
+
+        temporal_cfg = self._config.temporal
+        # Per-dataset overrides target *dataset* resolution; G-NAF uses
+        # the global rule unless we add a dedicated override. Kept simple
+        # for v1; users wanting `closest` for G-NAF specifically set the
+        # global rule.
+        rule = temporal_cfg.resolution
+
+        # Per-row release resolution.
+        per_row_release: list[str] = []
+        for i, d in enumerate(row_dates):
+            rel = resolve_gnaf_release(
+                d,
+                available_releases=self._gnaf_available_releases,
+                rule=rule,
+                out_of_range=temporal_cfg.out_of_range,
+                row_index=int(df.index[i]) if isinstance(df.index[i], (int, str)) else i,
+            )
+            per_row_release.append(rel)
+
+        # Pre-allocate output. Each row's position is its index into the
+        # original DataFrame; we'll fill the per-bucket results back in
+        # at those positions to preserve order.
+        n = len(df)
+        lats: list[float | None] = [None] * n
+        lons: list[float | None] = [None] * n
+        sources: list[str] = ["failed"] * n
+        mb_codes: list[str | None] = [None] * n
+        match_scores: list[float | None] = [None] * n
+
+        # Bucket positions by release.
+        buckets: dict[str, list[int]] = defaultdict(list)
+        for i, rel in enumerate(per_row_release):
+            buckets[rel].append(i)
+
+        for release, positions in buckets.items():
+            chain = self._geocoder_chain_for_release(release)
+            sliced = df.iloc[positions]
+            b_lats, b_lons, b_sources, b_mbs, b_scores = self._resolve_coordinates(
+                sliced,
+                addr_col=addr_col,
+                lat_col=lat_col,
+                lon_col=lon_col,
+                geocoders=chain,
+            )
+            for offset, orig_idx in enumerate(positions):
+                lats[orig_idx] = b_lats[offset]
+                lons[orig_idx] = b_lons[offset]
+                sources[orig_idx] = b_sources[offset]
+                mb_codes[orig_idx] = b_mbs[offset]
+                match_scores[orig_idx] = b_scores[offset]
+
+        # The per-row release is meaningful even for rows that didn't
+        # hit G-NAF (lat/lon-input or Nominatim-tier rows). It reflects
+        # "the G-NAF release this row WOULD have been dispatched
+        # against" — useful for downstream reproducibility, and the
+        # cost of computing it is one resolve_gnaf_release call per
+        # row regardless.
+        return lats, lons, sources, mb_codes, match_scores, list(per_row_release)
+
+    def _geocoder_chain_for_release(self, release: str) -> list[Geocoder]:
+        """Return ``self._geocoders`` with the :class:`GnafGeocoder` slot
+        replaced by a release-specific one.
+
+        Cached per-release on ``self._gnaf_geocoders_by_release``.
+        Lazy-fills via ``self._gnaf_geocoder_factory`` when not in the
+        cache. Non-G-NAF entries pass through unchanged.
+        """
+        chain: list[Geocoder] = []
+        for g in self._geocoders:
+            if isinstance(g, GnafGeocoder):
+                chain.append(self._get_gnaf_geocoder(release))
+            else:
+                chain.append(g)
+        return chain
+
+    def _get_gnaf_geocoder(self, release: str) -> Geocoder:
+        """Return the :class:`GnafGeocoder` for ``release``.
+
+        Cache first; factory second. Raises a clear error when the
+        caller needs a release the pipeline can't construct (test-built
+        pipelines without a factory and without a pre-populated
+        ``extra_gnaf_geocoders`` entry).
+        """
+        cached = self._gnaf_geocoders_by_release.get(release)
+        if cached is not None:
+            return cached
+        if self._gnaf_geocoder_factory is None:
+            raise RuntimeError(
+                f"Temporal-mode bucket requires a G-NAF geocoder for release "
+                f"{release!r}, but this Pipeline was constructed without a "
+                f"gnaf_geocoder_factory and without an extra_gnaf_geocoders "
+                f"entry for that release. Either use Pipeline.from_config "
+                f"(which wires the factory automatically) or pass "
+                f"extra_gnaf_geocoders={{{release!r}: GnafGeocoder(...)}} "
+                f"to Pipeline(...)."
+            )
+        built = self._gnaf_geocoder_factory(release)
+        self._gnaf_geocoders_by_release[release] = built
+        return built

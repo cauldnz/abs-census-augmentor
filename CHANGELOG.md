@@ -9,6 +9,73 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase G — G-NAF release-per-row
+
+Builds on Phase F.2 by lifting the *other* implicit single-release
+assumption in temporal mode: G-NAF. Until this PR, every row in a
+temporal-mode run was geocoded against the pipeline's configured
+G-NAF release regardless of date — so a 2020-dated row would hit the
+2025 G-NAF snapshot and silently use addresses that didn't exist in
+2020 (or miss addresses that have since been retired). Per
+spec-temporal.md §12, the geocoder's release should match the row's
+date.
+
+**What changed:**
+
+- New ``resolve_gnaf_release(row_date, available_releases, rule, ...)``
+  helper in ``_temporal.py`` — same shape as the dataset
+  ``resolve_release`` but for the flat YYYYMM list G-NAF publishes.
+  Treats each release as an instant at the first of its month
+  (matches gnaf-loader's quarterly publication cadence).
+- ``GnafDataSource.list_available_releases()`` — public API exposing
+  whichever of cache / S3 / official can answer (cache mode prefers
+  local; remote always hits S3). Used by the pipeline to know what
+  the per-row resolver gets to pick from.
+- ``Pipeline.augment`` now branches into a per-release dispatch path
+  when (1) ``input.date_column`` is set, (2) the geocoder chain
+  contains a G-NAF geocoder, and (3) ``gnaf_available_releases`` was
+  wired (either supplied directly or discovered by ``from_config``).
+  Rows bucket by their resolved G-NAF release; each bucket geocodes
+  through a release-specific :class:`GnafGeocoder` while non-G-NAF
+  chain entries (Nominatim, custom providers) pass through unchanged.
+- New output column ``gnaf_release`` (temporal mode + G-NAF only) —
+  the per-row YYYYMM release the dispatcher chose. Slots in directly
+  after ``sa2_code_edition`` per spec-temporal.md §11 column order.
+- ``Pipeline.__init__`` gains optional ``extra_gnaf_geocoders``
+  ``gnaf_geocoder_factory`` and ``gnaf_available_releases`` kwargs.
+  ``from_config`` wires the factory + populates the available list
+  automatically from the data source; tests pre-populate the dict
+  instead. ``_resolve_coordinates`` and ``_geocode_with_chain`` now
+  take an optional ``geocoders`` parameter so the per-bucket chain
+  can be threaded through (default behaviour unchanged).
+
+**Backward compatibility:**
+
+- Cross-sectional runs are bit-identical.
+- Temporal runs without G-NAF (Nominatim-only chains) are
+  bit-identical — Phase G's branch is gated on
+  ``_has_gnaf_in_chain()``.
+- Temporal runs that *do* have G-NAF but where ``from_config`` can't
+  list available releases (e.g. S3 listing fails) log a WARNING and
+  fall back to the configured release for every row (matching the
+  Phase F.2 behaviour).
+- ``RuntimeError`` surfaces only when a row resolves to a release
+  that has no entry in ``extra_gnaf_geocoders`` AND no factory was
+  wired — the message names the missing release.
+
+**Deferred:**
+
+- Address-retirement awareness (per spec-temporal.md §17): "address X
+  existed in 2018 but was retired in 2022; row dated 2020 should hit
+  X even though X is missing from the 2025 release." Today an
+  unmatched address falls through to fuzzy / Nominatim — same as
+  Phase F.2.
+- Per-dataset G-NAF resolution rule (the global ``temporal.resolution``
+  applies; ``temporal.per_dataset["gnaf"]`` is not yet recognised).
+  Trivial to add when the need surfaces.
+
+11 new tests (7 unit, 4 integration); no regressions; 649 pass.
+
 ### Temporal Phase F.2 — Cross-edition orchestrator (lifts the single-edition gate)
 
 Builds on F.1's per-edition boundary scaffolding to actually *run*
