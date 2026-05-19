@@ -9,6 +9,36 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### CI: speed up `Render demos` PR validation
+
+Two focused changes to the demo-render PR workflow, addressing the
+"~5–7 minutes on every temporal-mode PR" cost flagged in BACKLOG
+("Slow `Render demos` CI workflow"):
+
+- **Tightened `paths:` filter.** Dropped
+  `src/census_augment/pipeline.py` and `src/census_augment/enrich.py`
+  from the trigger list. Internal-orchestration edits there rarely
+  change what any tape records — all of the Phase F.1 / F.2 / G work
+  forced a 5-7 minute render that surfaced no visual delta. PRs that
+  *do* affect demos via those files can still trigger render on demand
+  via `workflow_dispatch` in the Actions tab. The remaining triggers
+  cover the cases where the demos actually shift: tape edits,
+  `cli.py`, registered dataset / PRESET specs, the workflow file
+  itself.
+- **Cached the ABS pre-warm.** New `actions/cache@v4` step persists
+  `~/.cache/census-augment/data/` across runs, keyed on the
+  `pyproject.toml` hash plus every YAML config under `tools/demo/`.
+  The render script's pre-warm becomes a no-op on cache hit, skipping
+  the SA2 boundary ZIP (~50 MB), GCP DataPack ZIP (~50 MB), and each
+  registered-dataset XLSX. Also reduces the workflow's exposure to
+  transient ABS-download flakes on later commits in a PR.
+
+The same cache step is mirrored into `demo-publish.yml` so the manual
+post-merge render benefits from whatever cache the PR validation
+built. BACKLOG entry updated to reflect what shipped; the
+heavier-touch "pull render out of PR CI entirely" remains on the
+table if cost regresses.
+
 ### Temporal Phase G — G-NAF release-per-row
 
 Builds on Phase F.2 by lifting the *other* implicit single-release
