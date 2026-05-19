@@ -9,6 +9,32 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Tier B follow-ups to #65 / #66
+
+Two small post-merge follow-ups to the spec-drift lock-down work.
+
+**PRESET ↔ GCP-schema lock-door test.** Issue #65's #66 fix closed the
+spec-vs-fetcher loop for non-GCP datasets. This adds the analogous
+loop for PRESETs against the checked-in GCP schema reference dumps
+under `tests/fixtures/gcp-schemas/`. Every PRESET source-field GCP
+ref now gets a parametrized test asserting the referenced column
+exists in the matching `G*.txt` dump. Plus a coverage guardrail
+(`test_every_registered_preset_has_at_least_one_resolvable_ref`)
+that ensures future cross-dataset PRESETs declare themselves
+explicitly when they bypass GCP. 22 new tests under
+`tests/test_preset_columns_match_gcp_schema.py`. No drift found in
+the current 6 PRESETs.
+
+**SEIFA — document the 16 bonus columns.** PR #66's lock-door test
+flagged that `SeifaDataSource.load()` emits 16 columns the spec didn't
+document (per-index `sa1_min`, `sa1_max`, `pct_urp_no_score`, and
+`sa2_name` × 4 indexes). Spec table now carries all of them with
+descriptions. The `_sa1_min` / `_sa1_max` / `_pct_urp_no_score`
+columns are useful within-SA2-variation signals; the per-index
+`_sa2_name` variants are duplicates of the canonical key, retained
+for join-debugging convenience. SEIFA's lock-door warning count
+drops from 16 → 0.
+
 ### Temporal Phase H — Examples + docs polish
 
 - New `examples/temporal_augmentation.py` — runnable 4-row script
