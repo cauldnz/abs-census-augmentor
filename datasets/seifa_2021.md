@@ -91,6 +91,22 @@ publication for SA2 modelling.
 | `SEIFA.ieo_state_percentile` | int | IEO state percentile |
 | `SEIFA.urp` | int | Usual resident population (URP) of the SA2 (denominator for area-vs-population deciles) |
 | `SEIFA.state_abbreviation` | str | State/territory abbreviation (NSW, VIC, ...) — sourced from the workbook's state column |
+| `SEIFA.irsd_sa1_min` | float | Minimum SA1-level IRSD score observed within this SA2 (within-SA2 spread) |
+| `SEIFA.irsd_sa1_max` | float | Maximum SA1-level IRSD score observed within this SA2 |
+| `SEIFA.irsd_pct_urp_no_score` | float | Percentage of this SA2's URP whose SA1s were excluded from IRSD scoring (per-variable exclusion; see Technical Paper §4.5) |
+| `SEIFA.irsad_sa1_min` | float | Minimum SA1-level IRSAD score observed within this SA2 |
+| `SEIFA.irsad_sa1_max` | float | Maximum SA1-level IRSAD score observed within this SA2 |
+| `SEIFA.irsad_pct_urp_no_score` | float | Percentage of this SA2's URP whose SA1s were excluded from IRSAD scoring |
+| `SEIFA.ier_sa1_min` | float | Minimum SA1-level IER score observed within this SA2 |
+| `SEIFA.ier_sa1_max` | float | Maximum SA1-level IER score observed within this SA2 |
+| `SEIFA.ier_pct_urp_no_score` | float | Percentage of this SA2's URP whose SA1s were excluded from IER scoring |
+| `SEIFA.ieo_sa1_min` | float | Minimum SA1-level IEO score observed within this SA2 |
+| `SEIFA.ieo_sa1_max` | float | Maximum SA1-level IEO score observed within this SA2 |
+| `SEIFA.ieo_pct_urp_no_score` | float | Percentage of this SA2's URP whose SA1s were excluded from IEO scoring |
+| `SEIFA.irsd_sa2_name` | str | SA2 name as read from the IRSD sheet (duplicate of `sa2_name` in the canonical join key — kept for join-debugging convenience) |
+| `SEIFA.irsad_sa2_name` | str | SA2 name as read from the IRSAD sheet (duplicate) |
+| `SEIFA.ier_sa2_name` | str | SA2 name as read from the IER sheet (duplicate) |
+| `SEIFA.ieo_sa2_name` | str | SA2 name as read from the IEO sheet (duplicate) |
 
 ## Fetch notes
 
