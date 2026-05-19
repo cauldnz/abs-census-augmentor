@@ -14,6 +14,7 @@ import pytest
 from census_augment._temporal import (
     OutOfRangeDateError,
     release_window,
+    resolve_gnaf_release,
     resolve_release,
     to_date,
 )
@@ -236,3 +237,118 @@ def test_out_of_range_error_carries_context() -> None:
     assert e.row_index == 42
     assert "2018" in str(e)
     assert "42" in str(e)
+
+
+# ---- resolve_gnaf_release (Phase G) --------------------------------------
+
+
+_GNAF_RELEASES_SAMPLE = [
+    "202003",
+    "202006",
+    "202009",
+    "202012",
+    "202103",
+    "202106",
+    "202109",
+    "202112",
+    "202203",
+    "202206",
+    "202209",
+    "202212",
+    "202303",
+    "202306",
+    "202309",
+    "202312",
+    "202403",
+    "202406",
+]
+
+
+def test_resolve_gnaf_release_closest_at_or_before_typical() -> None:
+    """Mid-2022 date → latest at-or-before release is 202206."""
+    out = resolve_gnaf_release(
+        date(2022, 7, 15),
+        available_releases=_GNAF_RELEASES_SAMPLE,
+        rule="closest_at_or_before",
+    )
+    assert out == "202206"
+
+
+def test_resolve_gnaf_release_closest_at_or_before_boundary() -> None:
+    """Row date exactly on a release's nominal publication day picks
+    that release (start-of-month convention)."""
+    out = resolve_gnaf_release(
+        date(2022, 6, 1),
+        available_releases=_GNAF_RELEASES_SAMPLE,
+        rule="closest_at_or_before",
+    )
+    assert out == "202206"
+
+
+def test_resolve_gnaf_release_closest_picks_nearest() -> None:
+    """`closest` can pick a release published AFTER the row date when
+    it's closer in days than the latest at-or-before."""
+    # Row date 2022-05-25: 202206 is +7 days; 202203 is -85 days.
+    out = resolve_gnaf_release(
+        date(2022, 5, 25),
+        available_releases=_GNAF_RELEASES_SAMPLE,
+        rule="closest",
+    )
+    assert out == "202206"
+
+
+def test_resolve_gnaf_release_out_of_range_fail_default() -> None:
+    """Pre-earliest dates raise without explicit ``out_of_range``."""
+    with pytest.raises(OutOfRangeDateError) as exc_info:
+        resolve_gnaf_release(
+            date(2015, 1, 1),
+            available_releases=_GNAF_RELEASES_SAMPLE,
+            rule="closest_at_or_before",
+            row_index=7,
+        )
+    e = exc_info.value
+    assert e.dataset_id == "<gnaf>"
+    assert e.earliest_release == "202003"
+    assert e.row_index == 7
+
+
+def test_resolve_gnaf_release_out_of_range_nearest_clamps() -> None:
+    """`out_of_range='nearest'` clamps to the earliest release."""
+    out = resolve_gnaf_release(
+        date(2015, 1, 1),
+        available_releases=_GNAF_RELEASES_SAMPLE,
+        rule="closest_at_or_before",
+        out_of_range="nearest",
+    )
+    assert out == "202003"
+
+
+def test_resolve_gnaf_release_empty_releases_raises() -> None:
+    """No releases at all → OutOfRangeDateError with earliest=None."""
+    with pytest.raises(OutOfRangeDateError) as exc_info:
+        resolve_gnaf_release(
+            date(2024, 1, 1),
+            available_releases=[],
+            rule="closest_at_or_before",
+        )
+    assert exc_info.value.earliest_release is None
+
+
+def test_resolve_gnaf_release_malformed_id_raises() -> None:
+    """Non-YYYYMM entries in the release list raise loudly."""
+    with pytest.raises(ValueError, match="6-digit YYYYMM"):
+        resolve_gnaf_release(
+            date(2024, 1, 1),
+            available_releases=["2024-Q1"],
+            rule="closest_at_or_before",
+        )
+
+
+def test_resolve_gnaf_release_month_out_of_range_raises() -> None:
+    """Month=00 / Month=13 entries raise loudly."""
+    with pytest.raises(ValueError, match="month must be 01-12"):
+        resolve_gnaf_release(
+            date(2024, 1, 1),
+            available_releases=["202413"],
+            rule="closest_at_or_before",
+        )

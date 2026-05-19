@@ -299,6 +299,30 @@ class GnafDataSource:
         """True if at least one valid release is cached locally."""
         return bool(self._find_cached_releases())
 
+    def list_available_releases(self) -> list[str]:
+        """Return every release the data source can serve, sorted ASC.
+
+        For ``mode='cache'``: returns locally cached releases; falls
+        back to listing S3 only when the local cache is empty.
+        For ``mode='remote'``: always lists S3 (no local cache by
+        definition).
+        For ``mode='official'``: raises :class:`NotImplementedError`.
+
+        Used by the temporal-mode pipeline (Phase G) to pick a per-row
+        G-NAF release. Returns ``YYYYMM`` strings.
+        """
+        if self._mode == "official":
+            raise NotImplementedError("GnafDataSource mode='official' is not yet implemented.")
+        if self._mode == "cache":
+            cached = self._find_cached_releases()
+            if cached:
+                return cached
+            # Empty cache → fall back to S3 listing so we still have
+            # *something* to pick from in temporal mode.
+            return self._list_releases_on_s3()
+        # mode == 'remote'
+        return self._list_releases_on_s3()
+
     # ---- public methods -------------------------------------------------
 
     def fetch(self, refresh: bool = False) -> Path:

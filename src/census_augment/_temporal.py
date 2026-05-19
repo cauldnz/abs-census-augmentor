@@ -266,6 +266,86 @@ def resolve_release(
     raise ValueError(f"Unknown resolution rule: {rule!r}")  # pragma: no cover
 
 
+def resolve_gnaf_release(
+    row_date: date,
+    *,
+    available_releases: list[str],
+    rule: Literal["closest_at_or_before", "closest"],
+    out_of_range: Literal["fail", "nearest"] = "fail",
+    row_index: int | str | None = None,
+) -> str:
+    """Pick a G-NAF release for ``row_date`` per ``rule`` (Phase G).
+
+    G-NAF releases are ``YYYYMM`` strings (e.g. ``"202602"``). The
+    implied coverage rule: a release published in ``YYYYMM`` reflects
+    the address corpus *as of* the first of that month. Treat each
+    release as an instant on that publication date — older addresses
+    appear and retired addresses persist in releases published before
+    a row's date.
+
+    Mirrors :func:`resolve_release` for the dataset case but doesn't
+    need a :class:`TemporalDatasetMetadata`: G-NAF's available
+    releases come from
+    :meth:`census_augment.data_sources.gnaf.GnafDataSource.list_available_releases`,
+    not from a spec markdown block.
+
+    Raises :class:`OutOfRangeDateError` when ``out_of_range="fail"`` and
+    no release satisfies the rule. Returns the earliest available
+    release with a WARNING when ``out_of_range="nearest"``.
+    """
+    if not available_releases:
+        raise OutOfRangeDateError(
+            dataset_id="<gnaf>",
+            row_date=row_date,
+            earliest_release=None,
+            row_index=row_index,
+        )
+
+    # Normalise to (release_id, publication_date) and sort.
+    indexed: list[tuple[str, date]] = []
+    for rid in available_releases:
+        if len(rid) != 6 or not rid.isdigit():
+            raise ValueError(
+                f"G-NAF release id {rid!r} is not 6-digit YYYYMM; "
+                f"available_releases must be sorted YYYYMM strings."
+            )
+        year = int(rid[:4])
+        month = int(rid[4:])
+        if month < 1 or month > 12:
+            raise ValueError(f"G-NAF release id {rid!r}: month must be 01-12")
+        indexed.append((rid, date(year, month, 1)))
+    indexed.sort(key=lambda pair: pair[1])
+
+    if rule == "closest_at_or_before":
+        eligible = [pair for pair in indexed if pair[1] <= row_date]
+        if not eligible:
+            if out_of_range == "nearest":
+                _log.warning(
+                    "Row %s date %s predates earliest G-NAF release %r; clamping",
+                    row_index,
+                    row_date,
+                    indexed[0][0],
+                )
+                return indexed[0][0]
+            raise OutOfRangeDateError(
+                dataset_id="<gnaf>",
+                row_date=row_date,
+                earliest_release=indexed[0][0],
+                row_index=row_index,
+            )
+        # Most recent eligible release.
+        return max(eligible, key=lambda pair: pair[1])[0]
+
+    if rule == "closest":
+
+        def distance(pair: tuple[str, date]) -> int:
+            return abs((row_date - pair[1]).days)
+
+        return min(indexed, key=distance)[0]
+
+    raise ValueError(f"Unknown resolution rule: {rule!r}")  # pragma: no cover
+
+
 def to_date(value: object) -> date:
     """Coerce one of (date, datetime, pandas-Timestamp, str) to a `date`.
 

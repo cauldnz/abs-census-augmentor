@@ -115,6 +115,42 @@ pending work. When picking either up, start by reading §6 and §12
 of the spec, then walk through the Phase E.2 orchestrator in
 `pipeline.py::_enrich_temporal` to understand the pattern.
 
+## Slow `Render demos` CI workflow
+
+The `.github/workflows/demo-render.yml` PR-validation step takes
+~5–7 minutes (per the workflow's own comment) and we've watched it
+dominate CI wall-clock time on every PR that touches
+`src/census_augment/cli.py` / `pipeline.py` / `enrich.py` /
+`datasets/**` / `features/**` — i.e. most non-test-only PRs in the
+temporal-mode work.
+
+The render uploads a non-committed artifact for reviewer inspection;
+nothing about it gates merge. It's pure "nice to see the visual delta"
+optics. Three levers to pull, ordered cheapest-first:
+
+1. **Tighten the `paths:` filter.** The current filter triggers on
+   any change to `pipeline.py` or `enrich.py`. Many edits there
+   (e.g. the temporal orchestrator's per-edition fan-out) don't
+   affect what any tape records. Either narrow to `cli.py` only,
+   or invert: skip render on PRs labelled `no-demo-render` (or
+   matching `temporal/**` branches).
+2. **Cache the ABS pre-warm.** Each render run re-downloads the
+   2021 boundary + DataPack ZIP via the production fetcher (per
+   `render.sh`'s pre-warm step). That's ~50 MB / ~30 s. A
+   `actions/cache@v4` keyed on `pyproject.toml` could persist
+   `~/.cache/census-augment/data/boundaries/` and
+   `~/.cache/census-augment/data/census/` across runs.
+3. **Pull render out of PR CI entirely.** Keep `demo-publish.yml`
+   (manual, run from `main` post-merge) as the only render path;
+   PR reviewers wanting to see visual deltas trigger
+   `workflow_dispatch` on the rendered tape. Cuts CI cost to zero
+   for the common path at the cost of one extra click for the
+   rarer "I want to see how this PR changes the demos" review.
+
+Pick (1) + (2) for a fast win; (3) is the heavier change but
+arguably the right end state given how rarely demo-affecting PRs
+land.
+
 ## Other deferred items
 
 - **Exclude `_template.md` from the built wheel.** Hatchling's

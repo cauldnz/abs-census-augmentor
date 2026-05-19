@@ -37,6 +37,7 @@ from census_augment.config import (
 from census_augment.data_sources.datapacks import DataPackMetadata
 from census_augment.geocoding.base import GeocodeResult
 from census_augment.geocoding.cache import normalize_address
+from census_augment.geocoding.gnaf import GnafGeocoder
 from census_augment.pipeline import Pipeline
 
 
@@ -323,6 +324,270 @@ def test_temporal_cross_edition_succeeds_with_extra_spatial_index(tmp_path: Path
     # Private per-edition columns are dropped before returning.
     assert "_sa2_code_edition_2" not in result.df.columns
     assert "_sa2_code_edition_3" not in result.df.columns
+
+
+# ---- Phase G: per-row G-NAF release dispatch -----------------------------
+
+
+class _FakeGnafGeocoder(GnafGeocoder):
+    """Test double that passes ``isinstance(_, GnafGeocoder)`` without
+    needing a real DuckDB-backed :class:`GnafDataSource`.
+
+    Records the addresses it was asked to geocode under the supplied
+    release tag so the test can assert which release each input row was
+    dispatched against.
+    """
+
+    def __init__(self, release: str, calls: list[tuple[str, str]]) -> None:  # noqa: D401
+        # Intentionally don't call super().__init__ — skip the GnafDataSource
+        # wiring; we only need this fake to satisfy isinstance + geocode().
+        self._release_tag = release
+        self._calls = calls
+        self._fuzzy_threshold = 0.85
+
+    def geocode(self, address: str) -> GeocodeResult:
+        self._calls.append((self._release_tag, address))
+        # Deterministic Sydney-CBD-style hit so SA2 spatial join works.
+        return GeocodeResult(
+            address_input=address,
+            address_normalized=normalize_address(address),
+            lat=-33.86,
+            lon=151.21,
+            source="gnaf_exact",
+            provider="gnaf",
+            timestamp=datetime(2024, 6, 1),
+            mb_code=None,
+        )
+
+
+def _make_pipeline_with_per_release_gnaf(
+    tmp_path: Path,
+    *,
+    available_releases: list[str],
+    calls: list[tuple[str, str]],
+    **temporal_overrides: Any,
+) -> Pipeline:
+    """Pipeline wired with a fake G-NAF geocoder and per-release dispatch.
+
+    ``available_releases`` is the YYYYMM list the per-row resolver picks
+    from; ``calls`` is a shared list that every per-release fake appends
+    its (release, address) tuples to as it's asked to geocode.
+    """
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = _make_config(tmp_path, **temporal_overrides)
+    # Switch to address-only so the geocoder is actually invoked
+    # (lat/lon input shortcuts the geocoder).
+    config.input.latitude_column = None
+    config.input.longitude_column = None
+    config.input.address_column = "address"
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(),
+        base_url="https://x",
+        root=tmp_path / "ds",
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+
+    # Default chain entry is a placeholder fake; per-release fakes get
+    # picked up by Pipeline._get_gnaf_geocoder when it consults the
+    # ``extra_gnaf_geocoders`` cache below.
+    default_gnaf = _FakeGnafGeocoder(release="<default>", calls=calls)
+    extras = {rel: _FakeGnafGeocoder(release=rel, calls=calls) for rel in available_releases}
+
+    return Pipeline(
+        config=config,
+        geocoders=[default_gnaf],
+        spatial=spatial,
+        enricher=enricher,
+        extra_gnaf_geocoders=extras,
+        gnaf_available_releases=list(available_releases),
+    )
+
+
+def test_temporal_gnaf_per_row_release_single_bucket(tmp_path: Path) -> None:
+    """All rows resolve to the same G-NAF release → one fake gets all
+    the calls, gnaf_release column is uniform."""
+    calls: list[tuple[str, str]] = []
+    pipeline = _make_pipeline_with_per_release_gnaf(
+        tmp_path,
+        available_releases=["202312", "202403", "202406"],
+        calls=calls,
+    )
+
+    df = pd.DataFrame(
+        {
+            "address": ["1 Macquarie St", "2 Macquarie St"],
+            "transaction_date": pd.to_datetime(["2024-05-01", "2024-04-15"]),
+        }
+    )
+    result = pipeline.augment(df)
+
+    # Both dates ≥ 2024-03-01 (release 202403's "date"); 202406 is in the
+    # future for them. Closest at-or-before → 202403.
+    assert "gnaf_release" in result.df.columns
+    assert result.df["gnaf_release"].tolist() == ["202403", "202403"]
+    # Both calls landed on the 202403 fake.
+    assert {tag for tag, _addr in calls} == {"202403"}
+
+
+def test_temporal_gnaf_per_row_release_multi_bucket(tmp_path: Path) -> None:
+    """Two rows with dates straddling a release boundary → two buckets,
+    each routed to its own per-release fake geocoder."""
+    calls: list[tuple[str, str]] = []
+    pipeline = _make_pipeline_with_per_release_gnaf(
+        tmp_path,
+        available_releases=["202312", "202403", "202406"],
+        calls=calls,
+    )
+
+    df = pd.DataFrame(
+        {
+            "address": ["1 Macquarie St", "200 George St"],
+            # 2024-02-15: closest-at-or-before is 202312 (Mar 2024 hasn't
+            # dropped yet). 2024-05-15: closest-at-or-before is 202403.
+            "transaction_date": pd.to_datetime(["2024-02-15", "2024-05-15"]),
+        }
+    )
+    result = pipeline.augment(df)
+    assert result.df["gnaf_release"].tolist() == ["202312", "202403"]
+    # Each release fake got exactly one call.
+    by_release: dict[str, int] = {}
+    for tag, _addr in calls:
+        by_release[tag] = by_release.get(tag, 0) + 1
+    assert by_release == {"202312": 1, "202403": 1}
+
+
+def test_temporal_gnaf_per_row_release_falls_back_when_no_available(
+    tmp_path: Path,
+) -> None:
+    """When ``gnaf_available_releases`` is ``None``, the per-row dispatch
+    is inactive and the default chain handles every row. No
+    ``gnaf_release`` column is emitted."""
+    calls: list[tuple[str, str]] = []
+    # Constructor without gnaf_available_releases set.
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = _make_config(tmp_path)
+    config.input.latitude_column = None
+    config.input.longitude_column = None
+    config.input.address_column = "address"
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(), base_url="https://x", root=tmp_path / "ds"
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+    default_gnaf = _FakeGnafGeocoder(release="<default>", calls=calls)
+    pipeline = Pipeline(
+        config=config,
+        geocoders=[default_gnaf],
+        spatial=spatial,
+        enricher=enricher,
+        # gnaf_available_releases left None — Phase G inactive.
+    )
+
+    df = pd.DataFrame(
+        {
+            "address": ["1 Macquarie St"],
+            "transaction_date": pd.to_datetime(["2024-05-01"]),
+        }
+    )
+    result = pipeline.augment(df)
+    assert "gnaf_release" not in result.df.columns
+    # Default geocoder absorbed the call.
+    assert calls == [("<default>", "1 Macquarie St")]
+
+
+def test_temporal_gnaf_missing_release_in_factory_raises(tmp_path: Path) -> None:
+    """A row resolves to a release that has no fake in ``extra_gnaf_geocoders``
+    AND no factory wired → clear RuntimeError naming the missing release."""
+    calls: list[tuple[str, str]] = []
+    # Only 202312 has a fake; 202403/202406 are listed as available but
+    # NOT in extras — and no factory is wired.
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = _make_config(tmp_path)
+    config.input.latitude_column = None
+    config.input.longitude_column = None
+    config.input.address_column = "address"
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(), base_url="https://x", root=tmp_path / "ds"
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+    default_gnaf = _FakeGnafGeocoder(release="<default>", calls=calls)
+    pipeline = Pipeline(
+        config=config,
+        geocoders=[default_gnaf],
+        spatial=spatial,
+        enricher=enricher,
+        extra_gnaf_geocoders={"202312": _FakeGnafGeocoder(release="202312", calls=calls)},
+        gnaf_available_releases=["202312", "202403", "202406"],
+        # No gnaf_geocoder_factory.
+    )
+
+    df = pd.DataFrame(
+        {
+            "address": ["1 Macquarie St"],
+            "transaction_date": pd.to_datetime(["2024-05-15"]),  # resolves 202403
+        }
+    )
+    with pytest.raises(RuntimeError, match=r"G-NAF geocoder for release '202403'"):
+        pipeline.augment(df)
 
 
 def test_temporal_mixed_edition_buckets(tmp_path: Path) -> None:
