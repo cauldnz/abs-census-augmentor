@@ -9,6 +9,69 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase F.1 — ASGS Edition 2 boundary support (scaffolding)
+
+Scaffolding to land historical (pre-2021) datasets without breaking the
+Edition-3 (current) path. Per spec-temporal.md §2, point-correct
+enrichment for a 2016-era release requires looking up SA2 codes against
+the 2016 boundary file — not the 2021 one. This PR wires that fetch
+path; the actual historical datasets (SEIFA 2016, GCP 2016, ...) land
+in follow-up PRs.
+
+**New: `BoundaryEditionSpec` + Edition 2/3 factories.** Per-edition
+URL, filename, datum, and DBF column-name choices now live in
+`src/census_augment/data_sources/_edition.py`. `BoundariesDataSource`
+delegates to the spec instead of constructing filenames inline. The
+default behaviour for Edition 3 is unchanged (still
+`SA2_2021_AUST_SHP_GDA2020.zip` under the existing
+`boundaries_base_url`); Edition 2 uses the ABS Lotus Notes "openagent"
+URL form captured via WebFetch against the 2016 ASGS landing page
+(`1270055001_sa2_2016_aust_shape.zip`, GDA94 only).
+
+**`CensusConfig` now accepts year=2016.** `year`, `asgs_edition`, and
+`datum` Literal types expanded. Cross-field validators enforce the
+two valid combinations: `(2021, 3, GDA2020|GDA94)` and
+`(2016, 2, GDA94)`. Misconfigurations fail loudly at config-load.
+
+**Pipeline picks up per-edition column names automatically.** The
+`SpatialIndex` constructor already accepted `code_column`/`name_column`
+kwargs; `Pipeline.from_config` now passes them from the boundary
+source's edition spec, so Edition 2's `SA2_MAIN16` / `SA2_NAME16`
+columns flow through the spatial join without further changes.
+
+**Deferred and called out at config-load:** Two combinations
+intentionally raise rather than half-work:
+
+- `year=2016 + 'gnaf' in geocoding.providers` — ABS publishes 2016
+  Mesh Block shapefiles per state, not nationally, so the §7.3
+  fast-path concat across 8 state files is follow-up work.
+- `year=2016 + any GCP-shape variable` — the 2016 GCP DataPack
+  lives at a different URL with a different filename pattern;
+  registering it is Phase F.4 work.
+
+Both error messages name the missing piece so users hit a hard wall
+with a clear pointer rather than a 404 deep in the network layer.
+
+**`tools/`**: `fetch_real_data.py` gains `--edition 2` for a
+boundary-only fetch; `verify_real_parsers.py` adds a self-skipping
+probe that opens the live Edition 2 boundary and confirms the
+`SA2_MAIN16` / `SA2_NAME16` / GDA94 / EPSG:4283 contract holds. Real
+Data First (CLAUDE.md): the Edition 2 URL and column names are
+captured from live ABS pages; the verifier is the ongoing drift
+detector if ABS changes the openagent URL or renames the DBF columns.
+
+**What still doesn't work after this PR**: a Phase F.1 user can fetch
+the 2016 boundary file via the CLI and write code against the
+`BoundariesDataSource` API directly, but the pipeline can't yet *do*
+anything with year=2016 because no Edition 2 dataset (SEIFA 2016, GCP
+2016, etc.) is registered. The cross-edition temporal orchestrator
+(currently raises `NotImplementedError` for mixed-edition runs) is
+unchanged here — it lifts in Phase F.2. Historical dataset
+registrations come in Phase F.3 / F.4. G-NAF release-per-row comes in
+Phase G.
+
+29 new tests; no regressions.
+
 ### Tier B follow-ups to #65 / #66
 
 Two small post-merge follow-ups to the spec-drift lock-down work.

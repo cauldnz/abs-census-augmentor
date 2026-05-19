@@ -286,3 +286,99 @@ def test_feather_cache_corrupt_falls_back_to_shp(
 
     gdf = ds.load()  # falls back to read_file, doesn't raise
     assert len(gdf) == 3
+
+
+# ---------- Edition 2 (2016) boundary support (Phase F.1) -----------------
+#
+# These tests exercise the Edition 2 code path: the URL is the ABS Lotus
+# Notes openagent form (not base_url + filename), the filename is the
+# `1270055001_sa2_2016_aust_shape.zip` form, and the DBF columns are
+# ``SA2_MAIN16`` / ``SA2_NAME16``. The fixture lives in conftest as
+# ``fake_boundary_zip_bytes_edition_2``.
+
+
+EDITION_2_URL_PREFIX = "https://www.ausstats.abs.gov.au/ausstats/subscriber.nsf/log?openagent"
+EDITION_2_FILENAME = "1270055001_sa2_2016_aust_shape.zip"
+
+
+def _make_edition_2_data_source(tmp_path: Path) -> BoundariesDataSource:
+    return BoundariesDataSource(
+        census=CensusConfig(year=2016, asgs_edition=2, datum="GDA94"),
+        base_url="https://unused.test/boundaries",  # Edition 2 ignores base_url
+        root=tmp_path / "data" / "boundaries" / "2016",
+    )
+
+
+def test_edition_2_filename_and_url(tmp_path: Path) -> None:
+    ds = _make_edition_2_data_source(tmp_path)
+    assert ds.filename == EDITION_2_FILENAME
+    assert ds.url.startswith(EDITION_2_URL_PREFIX)
+    assert EDITION_2_FILENAME in ds.url
+
+
+def test_edition_2_edition_property_reflects_spec(tmp_path: Path) -> None:
+    ds = _make_edition_2_data_source(tmp_path)
+    spec = ds.edition
+    assert spec.edition == 2
+    assert spec.year == 2016
+    assert spec.datum == "GDA94"
+    assert spec.sa2_code_column == "SA2_MAIN16"
+    assert spec.sa2_name_column == "SA2_NAME16"
+
+
+def test_edition_2_url_does_not_use_base_url(tmp_path: Path) -> None:
+    """Edition 2's URL is fixed — base_url is ignored."""
+    ds = _make_edition_2_data_source(tmp_path)
+    assert "unused.test" not in ds.url
+
+
+@responses.activate
+def test_edition_2_fetch_extracts_and_returns_shapefile(
+    tmp_path: Path, fake_boundary_zip_bytes_edition_2: bytes
+) -> None:
+    ds = _make_edition_2_data_source(tmp_path)
+    responses.add(responses.GET, ds.url, body=fake_boundary_zip_bytes_edition_2, status=200)
+
+    shp = ds.fetch()
+    assert shp.exists()
+    assert shp.suffix == ".shp"
+    assert ds.is_cached()
+
+
+@responses.activate
+def test_edition_2_load_returns_geodataframe_with_e2_columns(
+    tmp_path: Path, fake_boundary_zip_bytes_edition_2: bytes
+) -> None:
+    ds = _make_edition_2_data_source(tmp_path)
+    responses.add(responses.GET, ds.url, body=fake_boundary_zip_bytes_edition_2, status=200)
+
+    gdf = ds.load()
+
+    assert isinstance(gdf, gpd.GeoDataFrame)
+    assert len(gdf) == 3
+    # Edition 2 DBF columns — NOT Edition 3's SA2_CODE21/SA2_NAME21
+    assert "SA2_MAIN16" in gdf.columns
+    assert "SA2_NAME16" in gdf.columns
+    assert "SA2_CODE21" not in gdf.columns
+    # CRS should be GDA94 / EPSG:4283. Fixture-written shapefiles may
+    # lose the EPSG identifier on round-trip but preserve the datum
+    # in `crs.name`.
+    crs_epsg = gdf.crs.to_epsg() if gdf.crs is not None else None
+    crs_name = ((gdf.crs.name if gdf.crs is not None else "") or "").upper()
+    assert crs_epsg == 4283 or "GDA94" in crs_name
+
+
+def test_explicit_edition_spec_overrides_config(tmp_path: Path) -> None:
+    """Passing ``edition_spec=`` explicitly takes priority over the config-
+    derived spec. Useful for future temporal-mode multi-edition orchestrators."""
+    from census_augment.data_sources._edition import edition_2_spec
+
+    ds = BoundariesDataSource(
+        census=CensusConfig(),  # year=2021 by default
+        base_url="https://abs.test/boundaries",
+        root=tmp_path / "data" / "override",
+        edition_spec=edition_2_spec(),
+    )
+    # The injected Edition 2 spec wins despite the Edition 3 config.
+    assert ds.edition.edition == 2
+    assert ds.filename == EDITION_2_FILENAME
