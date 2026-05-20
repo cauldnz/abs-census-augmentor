@@ -65,3 +65,26 @@ Exits non-zero on any failure.
 - After initial dev environment setup.
 - After ABS publishes new versions of the boundaries / DataPacks (e.g. when 2026 Census lands).
 - Whenever code touches the parsers.
+
+## One-off discovery probes (Phase F.3 / F.4)
+
+Two scripts hand-rolled to capture the schema of a *new* historical
+release before its fetcher is written, per CLAUDE.md "Real Data First".
+Each downloads (or accepts) one file and dumps everything the parser
+will need to know — sheet names, header row position, column codes,
+sample data rows — so the maintainer-facing PR can build a fetcher
+against a known shape rather than guess.
+
+| Script | Phase | What it does |
+|---|---|---|
+| `inspect_seifa_2016.py` | F.3 | Fetches the live SEIFA 2016 SA2 `.xls` from the ABS legacy catalogue page and dumps every sheet's preamble + header + 3 sample rows. Requires `xlrd==1.2.0` for `.xls` support (`uv pip install 'xlrd==1.2.0'`). |
+| `inspect_gcp_2016.py <zip-path>` | F.4 | Takes a path to a locally-downloaded 2016 GCP DataPack ZIP and dumps the internal layout, descriptor xlsx structure, and a representative table CSV's header + sample rows. The 2016 GCP isn't reachable via static URL — see the script's docstring for download options. |
+
+Run via `uv run python tools/inspect_<name>.py [args]`, paste the stdout
+into the chat / PR thread driving the Phase F.3 or F.4 fetcher PR.
+Both scripts are idempotent (cache the artefact under `data/` so reruns
+don't re-fetch unless `--refresh` is passed).
+
+Once the fetcher lands, the equivalent post-fetch shape check moves into
+`verify_real_parsers.py` as a permanent drift detector and the
+`inspect_*.py` scripts retire.
