@@ -66,9 +66,26 @@
     // The dev container runs trusted, user-attached code; this is the
     // same security posture every Playwright/Puppeteer Docker workflow
     // uses. Not appropriate for untrusted multi-tenant CI.
+    //
+    // The third flag mounts a fresh tmpfs at /tmp with the correct
+    // 1777 (sticky + world-writable) mode. Why it's needed: under
+    // Podman, buildah drops /tmp's sticky + world-write bits (1777 ->
+    // 0755, owned by root) when it commits the devcontainer-feature
+    // layers. The non-root `vscode` user then can't write to /tmp, so
+    // VS Code's attach-time `mkdir /tmp/.X11-unix` fails with
+    //   mkdir: cannot create directory '/tmp/.X11-unix': Permission denied
+    // and the attach stalls. (Verified: base image /tmp is 1777, the
+    // built image's is 0755.) A Dockerfile `chmod 1777 /tmp` doesn't
+    // help — features layer on *after* the Dockerfile and re-trigger
+    // the buildah perm-drop. Mounting the tmpfs at runtime guarantees
+    // /tmp is always 1777 regardless of what the image build left
+    // behind. Docker/BuildKit preserves 1777, so this is a harmless
+    // no-op there. `exec` keeps script execution from /tmp allowed
+    // (vhs/chromium during demo rendering touch /tmp).
     "runArgs": [
         "--security-opt", "seccomp=unconfined",
-        "--ipc=host"
+        "--ipc=host",
+        "--tmpfs", "/tmp:exec,mode=1777"
     ],
 
     "containerEnv": {
