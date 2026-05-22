@@ -77,7 +77,7 @@ against a known shape rather than guess.
 
 | Script | Phase | What it does |
 |---|---|---|
-| `inspect_seifa_2016.py` | F.3 | Fetches the live SEIFA 2016 SA2 `.xls` from the ABS legacy catalogue page and dumps every sheet's preamble + header + 3 sample rows. Requires `xlrd==1.2.0` for `.xls` support (`uv pip install 'xlrd==1.2.0'`). |
+| `inspect_seifa_2016.py` | F.3 | Fetches the live SEIFA 2016 SA2 `.xls` from the ABS legacy catalogue page and dumps every sheet's preamble + header + 3 sample rows. Reads `.xls` via `python-calamine` (`uv pip install python-calamine`) — preferred over the legacy `xlrd` because it ships no console scripts, so it installs cleanly into a bind-mounted `.venv` under Podman (xlrd's `runxlrd.py` script trips `Operation not permitted` there). Falls back to `xlrd` if calamine isn't installed. |
 | `inspect_gcp_2016.py <zip-path>` | F.4 | Takes a path to a locally-downloaded 2016 GCP DataPack ZIP and dumps the internal layout, descriptor xlsx structure, and a representative table CSV's header + sample rows. The 2016 GCP isn't reachable via static URL — see the script's docstring for download options. |
 
 Run via `uv run python tools/inspect_<name>.py [args]`, paste the stdout
