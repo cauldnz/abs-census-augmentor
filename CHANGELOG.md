@@ -9,6 +9,27 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### devcontainer: fix `/tmp` permission denial under Podman
+
+The dev container failed to attach under Podman with:
+
+```
+mkdir: cannot create directory '/tmp/.X11-unix': Permission denied
+```
+
+Root cause: Podman's buildah drops `/tmp`'s sticky + world-write bits
+(1777 → 0755, root-owned) when it commits the devcontainer-feature
+layers — so the non-root `vscode` user can't write to `/tmp`, and VS
+Code's attach-time `/tmp/.X11-unix` setup fails. (Verified: the base
+image's `/tmp` is 1777; the built image's is 0755. Docker/BuildKit
+preserves 1777, so only Podman users hit this.) A Dockerfile `chmod`
+doesn't stick because features layer on *after* the Dockerfile.
+
+Fix: added `--tmpfs /tmp:exec,mode=1777` to `runArgs`, mounting a
+fresh correctly-permissioned tmpfs at runtime regardless of what the
+image build left behind. Harmless no-op under Docker. Requires a
+"Rebuild Container" to take effect (runArgs change).
+
 ### tools: Phase F.3 / F.4 inspection probes
 
 Two one-off discovery scripts to capture the schema of SEIFA 2016 and
