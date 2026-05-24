@@ -1,8 +1,13 @@
-"""Tests for the SEIFA dataset fetcher (spec §20, dataset id ``seifa_2021``).
+"""Tests for the SEIFA dataset fetcher (spec §20, dataset id ``seifa``).
 
 Hermetic tests use a synthetic XLSX whose layout mirrors the real ABS
 publication (Tables 2-5 each carry one index with the full flavour
 set). Real-network checks live in ``tools/verify_real_parsers.py``.
+
+2016-release parsing is tested via ``_parse_grids`` directly (the pure
+function that accepts a pre-read grid dict) to avoid needing a real .xls
+binary in the test suite.  Download-path tests for 2016 verify URL and
+filename behaviour only (no actual calamine parse).
 """
 
 from __future__ import annotations
@@ -17,8 +22,10 @@ import requests
 import responses
 
 from census_augment.datasets._seifa import (
+    DEFAULT_SEIFA_2016_URL,
     DEFAULT_SEIFA_2021_URL,
     SeifaDataSource,
+    _parse_grids,
 )
 
 
@@ -287,6 +294,16 @@ def test_invalid_release_raises(seifa_data_dir: Path) -> None:
         SeifaDataSource(release="2026", root=seifa_data_dir)
 
 
+def test_supported_releases(seifa_data_dir: Path) -> None:
+    """2016 and 2021 are the only supported releases; others raise."""
+    # These should not raise.
+    SeifaDataSource(release="2021", root=seifa_data_dir)
+    SeifaDataSource(release="2016", root=seifa_data_dir)
+    # Anything else should.
+    with pytest.raises(ValueError, match="release must be"):
+        SeifaDataSource(release="2011", root=seifa_data_dir)
+
+
 # ---- parse ---------------------------------------------------------------
 
 
@@ -492,3 +509,215 @@ def test_load_handles_suppressed_cells_as_null(
     assert pd.isna(df.loc["117011326", "irsd_aus_decile"])
     # Real values intact
     assert df.loc["117011327", "irsd_score"] == 950
+
+
+# ===========================================================================
+# 2016 release tests
+# ===========================================================================
+
+
+def _build_synthetic_grid(
+    sa2_records: list[tuple[object, str, dict]],
+    prefix: str,
+) -> list[list[object]]:
+    """Build a raw row grid (list of lists) for one SEIFA index sheet.
+
+    Mirrors the structure that :func:`_read_grids` returns for a real
+    workbook — suitable for testing :func:`_parse_grids` directly without
+    any file I/O.
+
+    ``sa2_records`` is ``[(sa2_code, sa2_name, fields_dict), ...]``.
+    ``sa2_code`` can be an integer (as calamine returns for .xls) or a
+    string (as openpyxl returns for .xlsx).
+    """
+    preamble: list[list[object]] = [
+        ["Australian Bureau of Statistics"],
+        [f"Index of {prefix.upper()} -- SEIFA 2016"],
+        ["Released 27 March 2018"],
+        [f"Table for {prefix} index"],
+        # Group row (spacer).
+        ["", "", "", "", "", "Ranking within Australia", "", "", "",
+         "Ranking within State or Territory", "", "", "", "", "", ""],
+        # Header row (row index 5 == _DEFAULT_HEADER_ROW).
+        [
+            "2016 Statistical Area Level 2 (SA2) 9-Digit Code",
+            "2016 Statistical Area Level 2 (SA2) Name",
+            "Usual Resident Population",
+            "Score",
+            "",
+            "Rank",
+            "Decile",
+            "Percentile",
+            "",
+            "State",
+            "Rank",
+            "Decile",
+            "Percentile",
+            "Minimum score for SA1s in area",
+            "Maximum score for SA1s in area",
+            "% Usual Resident Population without a score",
+        ],
+    ]
+    data: list[list[object]] = []
+    for sa2_code, sa2_name, f in sa2_records:
+        data.append([
+            sa2_code,
+            sa2_name,
+            f["urp"],
+            f["score"],
+            None,
+            f["aus_rank"],
+            f["aus_decile"],
+            f["aus_percentile"],
+            None,
+            f["state"],
+            f["state_rank"],
+            f["state_decile"],
+            f["state_percentile"],
+            f.get("sa1_min", 0),
+            f.get("sa1_max", 0),
+            f.get("pct_urp_no_score", 0),
+        ])
+    return preamble + data
+
+
+def _build_synthetic_grids_2016() -> dict[str, list[list[object]]]:
+    """Build a minimal synthetic grid dict for 2016-style tests.
+
+    SA2 codes are integers (as calamine returns from an .xls integer cell).
+    Two SA2s; one aggregate row (non-9-digit) that should be filtered.
+    """
+    # Edition-2 SA2 codes (9-digit integers).
+    sa2_a_code = 101021007  # integer, as calamine returns from .xls
+    sa2_b_code = 101021008
+
+    fields_a = {
+        "urp": 12000, "score": 1042, "aus_rank": 1500, "aus_decile": 8,
+        "aus_percentile": 75, "state": "NSW", "state_rank": 800,
+        "state_decile": 8, "state_percentile": 78, "sa1_min": 1000,
+        "sa1_max": 1080, "pct_urp_no_score": 0,
+    }
+    fields_b = {
+        "urp": 9500, "score": 950, "aus_rank": 7000, "aus_decile": 5,
+        "aus_percentile": 50, "state": "NSW", "state_rank": 3000,
+        "state_decile": 5, "state_percentile": 50, "sa1_min": 920,
+        "sa1_max": 985, "pct_urp_no_score": 0,
+    }
+    aggregate = {
+        "urp": 999999, "score": 1000, "aus_rank": 0, "aus_decile": 5,
+        "aus_percentile": 50, "state": "AUS", "state_rank": 0,
+        "state_decile": 5, "state_percentile": 50,
+    }
+
+    grids: dict[str, list[list[object]]] = {"Contents": [["Contents (skipped)"]]}
+    offsets = {"irsd": 0, "irsad": 38, "ier": -32, "ieo": 58}
+    for sheet_idx, (sheet_name, prefix) in enumerate(
+        [("Table 2", "irsd"), ("Table 3", "irsad"), ("Table 4", "ier"), ("Table 5", "ieo")],
+        start=2,
+    ):
+        offset = offsets[prefix]
+        a = dict(fields_a, score=fields_a["score"] + offset)
+        b = dict(fields_b, score=fields_b["score"] + offset)
+        grids[sheet_name] = _build_synthetic_grid(
+            [
+                (sa2_a_code, "Area A", a),
+                (sa2_b_code, "Area B", b),
+                ("Australia", "Australia", aggregate),  # should be filtered
+            ],
+            prefix,
+        )
+    return grids
+
+
+# ---- _parse_grids unit tests (pure; no file I/O) --------------------------
+
+
+def test_parse_grids_2016_integer_codes() -> None:
+    """Calamine returns integer SA2 codes from .xls; verify they are
+    converted to 9-digit strings and used as the DataFrame index."""
+    grids = _build_synthetic_grids_2016()
+    df = _parse_grids(grids, sa2_index_name="sa2_code_2016")
+
+    assert df.index.name == "sa2_code_2016"
+    assert "101021007" in df.index
+    assert "101021008" in df.index
+    assert "Australia" not in df.index
+
+
+def test_parse_grids_2016_all_four_indexes() -> None:
+    """All four index prefixes appear in the columns."""
+    grids = _build_synthetic_grids_2016()
+    df = _parse_grids(grids, sa2_index_name="sa2_code_2016")
+    for prefix in ("irsd", "irsad", "ier", "ieo"):
+        for flavour in ("score", "aus_rank", "aus_decile", "aus_percentile",
+                        "state_rank", "state_decile", "state_percentile"):
+            col = f"{prefix}_{flavour}"
+            assert col in df.columns, f"missing column {col}"
+
+
+def test_parse_grids_2016_score_values() -> None:
+    """Each index gets the offset applied in the fixture."""
+    grids = _build_synthetic_grids_2016()
+    df = _parse_grids(grids, sa2_index_name="sa2_code_2016")
+    row = df.loc["101021007"]
+    assert row["irsd_score"] == 1042        # offset 0
+    assert row["irsad_score"] == 1080       # offset +38
+    assert row["ier_score"] == 1010         # offset -32
+    assert row["ieo_score"] == 1100         # offset +58
+
+
+def test_parse_grids_2016_suppressed_cells() -> None:
+    """None cells from calamine (empty/np) come through as NaN."""
+    grids = _build_synthetic_grids_2016()
+    # Patch one cell in the irsd grid to None (simulates suppression).
+    # Data rows start after the 6-row preamble; first data row = index 6.
+    data_row = grids["Table 2"][6]
+    data_row[3] = None  # score column (index 3)
+    df = _parse_grids(grids, sa2_index_name="sa2_code_2016")
+    assert pd.isna(df.loc["101021007", "irsd_score"])
+
+
+# ---- 2016 fetcher-level tests (URL / filename; no calamine parse) ---------
+
+
+def test_seifa_2016_uses_correct_url(seifa_data_dir: Path) -> None:
+    ds = SeifaDataSource(release="2016", root=seifa_data_dir)
+    assert ds._resolved_url == DEFAULT_SEIFA_2016_URL
+
+
+def test_seifa_2016_sa2_index_name(seifa_data_dir: Path) -> None:
+    ds = SeifaDataSource(release="2016", root=seifa_data_dir)
+    assert ds._sa2_index_name == "sa2_code_2016"
+
+
+def test_seifa_2016_filename_has_xls_extension(seifa_data_dir: Path) -> None:
+    """The cached file for the 2016 release is saved with .xls suffix."""
+    ds = SeifaDataSource(release="2016", root=seifa_data_dir)
+    assert ds._xlsx_path.suffix == ".xls"
+    assert "seifa-2016" in ds._xlsx_path.name
+
+
+def test_seifa_2021_filename_has_xlsx_extension(seifa_data_dir: Path) -> None:
+    ds = SeifaDataSource(release="2021", root=seifa_data_dir)
+    assert ds._xlsx_path.suffix == ".xlsx"
+    assert "seifa-2021" in ds._xlsx_path.name
+
+
+@responses.activate
+def test_fetch_2016_downloads_to_xls_path(
+    seifa_data_dir: Path,
+) -> None:
+    """The 2016 fetcher hits the right URL and saves to seifa-2016.xls."""
+    dummy_bytes = b"PK\x03\x04"  # minimal ZIP magic (just needs non-empty bytes)
+    responses.add(
+        responses.GET,
+        DEFAULT_SEIFA_2016_URL,
+        body=dummy_bytes,
+        status=200,
+    )
+    ds = SeifaDataSource(release="2016", root=seifa_data_dir)
+    path = ds.fetch()
+    assert path.exists()
+    assert path.suffix == ".xls"
+    assert path.name == "seifa-2016.xls"
+    assert len(responses.calls) == 1

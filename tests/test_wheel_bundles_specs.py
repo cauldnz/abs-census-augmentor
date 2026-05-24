@@ -154,7 +154,7 @@ def test_wheel_install_populates_both_registries(tmp_path: Path) -> None:
     )
     out = probe.stdout
 
-    assert "DATASETS=abs_personal_income,dss_payments,erp_by_sa2,gcp_2021,seifa_2021" in out, (
+    assert "DATASETS=abs_personal_income,dss_payments,erp_by_sa2,gcp_2021,seifa" in out, (
         f"dataset registry empty or missing entries on wheel install:\n{out}"
     )
     assert (

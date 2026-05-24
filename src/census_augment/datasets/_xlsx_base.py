@@ -58,11 +58,6 @@ class _AbsXlsxDataset:
     #: ``resolved_release`` is known. Subclasses override.
     _cache_glob: ClassVar[str] = "*.xlsx"
 
-    #: Name of the SA2 code column in the parsed DataFrame; used as
-    #: the parquet sidecar's index. Subclasses can override (e.g.
-    #: future releases that move to SA2 2026 codes).
-    _sa2_index_name: ClassVar[str] = "sa2_code_2021"
-
     def __init__(
         self,
         *,
@@ -79,6 +74,11 @@ class _AbsXlsxDataset:
         self._timeout = timeout
         self._resolved_release: str | None = None
         self._resolved_url: str | None = None
+        #: Name of the SA2 code column in the parsed DataFrame; used as
+        #: the parquet sidecar's index.  Subclasses can override in their
+        #: own ``__init__`` (e.g. SEIFA sets this per-release to reflect
+        #: the ASGS edition: ``sa2_code_2016`` vs ``sa2_code_2021``).
+        self._sa2_index_name: str = "sa2_code_2021"
 
     # ---- DatasetFetcher protocol --------------------------------------
 
