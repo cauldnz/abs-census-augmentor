@@ -307,14 +307,26 @@ def main() -> int:
     from census_augment.datasets._seifa import SeifaDataSource
 
     def _check_seifa() -> None:
-        ds = SeifaDataSource(root=data_dir / "seifa_2021")
+        # 2021 release (XLSX).
+        ds = SeifaDataSource(release="2021", root=data_dir / "seifa")
         df = ds.load()
-        assert len(df) >= 2000, f"only {len(df)} SA2s (expected ~2,366)"
+        assert len(df) >= 2000, f"only {len(df)} SA2s in 2021 (expected ~2,366)"
         assert "irsd_score" in df.columns
         assert "ieo_aus_decile" in df.columns
+        assert df.index.name == "sa2_code_2021"
         print(
-            f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
-            f"{len(df.columns)} columns"
+            f"         -> 2021: {len(df):,} SA2s, {len(df.columns)} columns, "
+            f"index={df.index.name}"
+        )
+        # 2016 release (XLS).
+        ds16 = SeifaDataSource(release="2016", root=data_dir / "seifa")
+        df16 = ds16.load()
+        assert len(df16) >= 2000, f"only {len(df16)} SA2s in 2016 (expected ~2,196)"
+        assert "irsd_score" in df16.columns
+        assert df16.index.name == "sa2_code_2016"
+        print(
+            f"         -> 2016: {len(df16):,} SA2s, {len(df16.columns)} columns, "
+            f"index={df16.index.name}"
         )
 
     def _check_erp() -> None:
@@ -352,8 +364,8 @@ def main() -> int:
             f"${df['median_total_income'].iloc[0]:.0f}"
         )
 
-    if not _check("SEIFA 2021 (~2,366 SA2s, 4 indexes)", _check_seifa):
-        failures.append("seifa_2021")
+    if not _check("SEIFA 2016+2021 (~2,196/2,366 SA2s, 4 indexes)", _check_seifa):
+        failures.append("seifa")
     if not _check("ERP by SA2 (~2,454 SA2s, 25-year history)", _check_erp):
         failures.append("erp_by_sa2")
     if not _check("DSS payments (~2,454 SA2s, 22 payment types)", _check_dss):

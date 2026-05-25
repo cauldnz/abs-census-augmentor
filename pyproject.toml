@@ -24,6 +24,7 @@ dependencies = [
     "pandas",
     "requests",
     "openpyxl",
+    "python-calamine",  # Rust-based reader for .xls (SEIFA 2016) and .xlsx; no console-script conflicts
     "platformdirs",
     # G-NAF support (spec §19, added in v1.0):
     "duckdb",       # G-NAF indexing + FTS, native Parquet reads
@@ -112,6 +113,7 @@ module = [
     "tqdm.*",
     "openpyxl",
     "openpyxl.*",
+    "python_calamine",
 ]
 ignore_missing_imports = true
 

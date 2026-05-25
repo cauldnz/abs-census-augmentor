@@ -9,6 +9,46 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase F.3 — SEIFA 2016 release + dataset rename
+
+**Breaking:** the `seifa_2021` dataset id is renamed to `seifa`.
+Any config YAML or code that references `seifa_2021` by id must be
+updated. The variable namespace (`SEIFA.*`) is unchanged.
+
+**What changed:**
+
+- `datasets/seifa_2021.md` → `datasets/seifa.md` (`id: seifa`).
+  The spec's `temporal.available_releases` now includes both
+  `"2016"` and `"2021"`; `asgs_edition_by_release` maps
+  `"2016" → 2` and `"2021" → 3`.
+- `SeifaDataSource` now accepts `release="2016"` in addition to
+  `"2021"`. The 2016 workbook is the legacy `.xls` format; the
+  fetcher uses **python-calamine** (Rust-based reader, added to
+  project dependencies) rather than openpyxl so that no console
+  scripts land in the `.venv` (avoids the `chmod` EPERM on
+  bind-mounted dev containers).
+- Parser refactored into a format-agnostic `_read_grids()` /
+  `_parse_grids()` split: `_read_grids(path, release)` selects the
+  reader (openpyxl for 2021, CalamineWorkbook for 2016) and returns
+  a `dict[sheet_name → row grid]`; `_parse_grids(grids, …)` is
+  pure Python — no I/O — so 2016 parsing is covered by unit tests
+  that pass raw grids directly.
+- The SA2 index column is now **release-aware**:
+  `"sa2_code_2016"` for the 2016 release (ASGS Edition 2 codes);
+  `"sa2_code_2021"` for the 2021 release (ASGS Edition 3 codes).
+  The `_AbsXlsxDataset` base's `_sa2_index_name` is now an
+  instance attribute (set in `__init__`) rather than a ClassVar,
+  so subclasses can override it per-release in their own
+  `__init__`.
+- 2016 column positions confirmed against the live ABS file on
+  2026-05-22 and are identical to the 2021 layout — same sheet
+  names, same fixed-position columns, same header-row preamble
+  length, same null sentinels. No schema drift between releases.
+- `verify_real_parsers.py` updated to probe both 2016 and 2021
+  under the shared `data/seifa/` cache directory.
+- `python-calamine` added to `[project.dependencies]` in
+  `pyproject.toml`.
+
 ### devcontainer: fix `/tmp` permission denial under Podman
 
 The dev container failed to attach under Podman with:

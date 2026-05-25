@@ -1,6 +1,6 @@
 ---
-id: seifa_2021
-name: ABS Socio-Economic Indexes for Areas (SEIFA) 2021
+id: seifa
+name: ABS Socio-Economic Indexes for Areas (SEIFA)
 status: active
 custodian: Australian Bureau of Statistics
 licence: CC-BY-4.0
@@ -18,12 +18,14 @@ temporal:
   cover_basis: census_reference_date
   release_id_format: YYYY (Census year)
   available_releases:
+    - "2016"
     - "2021"
   asgs_edition_by_release:
+    "2016": 2
     "2021": 3
 ---
 
-# ABS Socio-Economic Indexes for Areas (SEIFA) 2021
+# ABS Socio-Economic Indexes for Areas (SEIFA)
 
 ABS's headline socio-economic typology, published once per Census.
 Four indexes, each published as score (~600–1200, mean=1000, sd=100),
@@ -41,21 +43,26 @@ scale is arbitrary.
 
 ## Source
 
-ABS publishes the SA2 file as `Statistical Area Level 2, Indexes,
-SEIFA 2021.xlsx` from the latest-release page. The fetcher downloads
-that single file (~150 KB compressed; ~1 MB uncompressed) and parses
-the relevant sheet into a SA2-keyed parquet.
+- **2021**: ABS publishes the SA2 file as `Statistical Area Level 2,
+  Indexes, SEIFA 2021.xlsx` (~150 KB compressed; ~1 MB uncompressed).
+  Direct-link XLSX download.
+- **2016**: ABS publishes `2033055001 - sa2 indexes.xls` (~700 KB).
+  Same sheet structure as 2021 but in legacy .xls format (requires
+  `python-calamine` for parsing); uses ASGS Edition 2 SA2 codes.
 
 ## Update cadence
 
-Once per Census (five-yearly). 2021 file is final; 2026 will land as
-`seifa_2026` when ABS publishes it.
+Once per Census (five-yearly). Available releases: 2016 (ASGS Edition 2,
+SA2 .xls) and 2021 (ASGS Edition 3, SA2 .xlsx). 2026 will be added to
+this dataset when ABS publishes it.
 
 ## Granularity
 
-SA2 native on 2021_ASGS_Edition_3. ABS computes scores at SA1 first
-then aggregates to higher levels; the SA2 file is the canonical
-publication for SA2 modelling.
+SA2 native. ABS computes scores at SA1 first then aggregates to higher
+levels; the SA2 file is the canonical publication for SA2 modelling.
+The 2016 release uses ASGS Edition 2 SA2 codes (9-digit integers); the
+2021 release uses ASGS Edition 3 SA2 codes (also 9-digit integers but
+a different geography).
 
 ## Schema (variables exposed by the augmentor)
 
@@ -110,14 +117,19 @@ publication for SA2 modelling.
 
 ## Fetch notes
 
-- The XLSX has multiple sheets; the relevant SA2 sheet has SA2 code
-  in column A and the four indexes in subsequent columns. The header
-  row is preceded by a multi-row preamble (disclaimer, source notes);
-  the parser detects the data table by looking for the SA2-code header.
+- Both the 2016 (.xls) and 2021 (.xlsx) workbooks have the same sheet
+  structure (Contents, Table 1 summary, Tables 2-5 per-index detail,
+  Table 6 exclusions, Explanatory Notes). Column positions are
+  identical across releases; the parser selects the reader (openpyxl
+  for .xlsx, python-calamine for .xls) based on the release.
+- The SA2-code header row is preceded by a multi-row preamble; the
+  parser detects the data table by scanning for the SA2-code header
+  text rather than trusting a fixed row offset.
 - "Australia" / state-level summary rows appear at the bottom of the
-  data sheet in some releases — filter by SA2 code length (= 9).
+  data sheets — filtered by requiring exactly 9 consecutive digits in
+  the SA2 code column.
 - ABS may publish revisions; the augmentor pins to release year via
-  `census_year` (default 2021).
+  `release` (default "2021").
 
 ## Suppression / privacy notes
 
@@ -134,6 +146,7 @@ publication for SA2 modelling.
 
 ## Sources / citations
 
-- Landing: https://www.abs.gov.au/statistics/people/people-and-communities/socio-economic-indexes-areas-seifa-australia/latest-release
-- Technical paper: https://www.abs.gov.au/statistics/detailed-methodology-information/concepts-sources-methods/socio-economic-indexes-areas-seifa-technical-paper/2021
+- Landing (latest): https://www.abs.gov.au/statistics/people/people-and-communities/socio-economic-indexes-areas-seifa-australia/latest-release
+- Landing (2016): https://www.abs.gov.au/ausstats/abs@.nsf/mf/2033.0.55.001
+- Technical paper (2021): https://www.abs.gov.au/statistics/detailed-methodology-information/concepts-sources-methods/socio-economic-indexes-areas-seifa-technical-paper/2021
 - Licence: CC-BY-4.0

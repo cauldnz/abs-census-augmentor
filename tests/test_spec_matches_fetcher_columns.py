@@ -214,7 +214,7 @@ def test_spec_matches_fetcher__seifa(tmp_path: Path) -> None:
     )
 
     df = SeifaDataSource(root=tmp_path / "seifa-cache").load()
-    _check_spec_matches("seifa_2021", set(df.columns))
+    _check_spec_matches("seifa", set(df.columns))
 
 
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
@@ -230,7 +230,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "erp_by_sa2",
         "dss_payments",
         "abs_personal_income",
-        "seifa_2021",
+        "seifa",
     }
     intentionally_skipped = {
         "gcp_2021",  # multi-table loader; covered via VariableCatalog tests

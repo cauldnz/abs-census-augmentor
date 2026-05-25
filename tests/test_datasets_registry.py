@@ -265,14 +265,17 @@ def test_parse_temporal_block_rejects_unknown_asgs_edition(tmp_path: Path) -> No
         parse_dataset_spec(spec_path)
 
 
-def test_existing_seifa_2021_spec_has_temporal_block() -> None:
-    """The registered SEIFA 2021 spec markdown now includes its
-    temporal metadata block — sanity-check the on-disk file."""
+def test_existing_seifa_spec_has_temporal_block() -> None:
+    """The renamed ``seifa.md`` spec includes a temporal block covering
+    both the 2016 and 2021 releases."""
     repo_root = Path(__file__).resolve().parents[1]
-    spec = parse_dataset_spec(repo_root / "datasets" / "seifa_2021.md")
+    spec = parse_dataset_spec(repo_root / "datasets" / "seifa.md")
+    assert spec.id == "seifa"
     assert spec.temporal is not None
     assert spec.temporal.cadence == "per_census"
-    assert spec.temporal.asgs_edition_by_release == {"2021": 3}
+    assert spec.temporal.asgs_edition_by_release == {"2016": 2, "2021": 3}
+    assert "2016" in spec.temporal.available_releases
+    assert "2021" in spec.temporal.available_releases
 
 
 def test_existing_erp_spec_has_temporal_block_with_edition_transition() -> None:
@@ -399,7 +402,7 @@ def test_registry_loads_repo_specs_on_import() -> None:
     ids = {s.id for s in registry.list_datasets()}
     assert {
         "gcp_2021",
-        "seifa_2021",
+        "seifa",
         "erp_by_sa2",
         "dss_payments",
         "abs_personal_income",
@@ -408,7 +411,7 @@ def test_registry_loads_repo_specs_on_import() -> None:
 
 def test_repo_specs_resolve_known_namespaces() -> None:
     spec, field = registry.resolve_variable("SEIFA.irsd_aus_decile")
-    assert spec.id == "seifa_2021"
+    assert spec.id == "seifa"
     assert field == "irsd_aus_decile"
 
     spec, field = registry.resolve_variable("ERP.population_total")
