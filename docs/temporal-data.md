@@ -57,7 +57,7 @@ Each of those lookups uses the SA2 boundary file the release was compiled agains
 
 ## What temporal mode adds to the output
 
-- A `<dataset_id>_release` column per dataset that was used (e.g. `seifa_2021_release`, `erp_by_sa2_release`, `dss_payments_release`).
+- A `<dataset_id>_release` column per dataset that was used (e.g. `seifa_release`, `erp_by_sa2_release`, `dss_payments_release`).
 - A `sa2_code_edition` column naming the reference edition the canonical `sa2_code` is in (constant per run).
 - When a row's dataset release was on a different ASGS edition than `reference_edition`, a `<dataset_id>_sa2_code_source` column carrying the source-edition SA2 code (so downstream consumers can do per-dataset groupby if they need to).
 

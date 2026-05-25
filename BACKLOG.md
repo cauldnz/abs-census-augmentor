@@ -20,7 +20,7 @@ lands at `docs/<slug>.gif`. Easiest:
 - **`docs/demo.gif`** — headline demo. Shows mixing GCP + SEIFA in one
   config. Replaces the v1.0-era headline demo.
 - **`docs/discover-datasets.gif`** — walks `census-augment discover
-  --datasets` / `--dataset seifa_2021` / `--features` and shows the
+  --datasets` / `--dataset seifa` / `--features` and shows the
   underlying markdown spec format. No augmentation run, so cache is
   unused.
 - **`docs/preset-features.gif`** — shows a PRESET spec, then a config

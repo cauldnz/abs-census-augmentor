@@ -14,8 +14,8 @@ fully laid out (just before the next `clear`).
 | `demo-3-run.png`          | `demo.tape` | `census-augment run` output |
 | `demo-4-output.png`       | `demo.tape` | Projected output table |
 | `discover-datasets-1-list.png`    | `discover-datasets.tape` | `--datasets` output |
-| `discover-datasets-2-schema.png`  | `discover-datasets.tape` | `--dataset seifa_2021` output |
-| `discover-datasets-3-spec.png`    | `discover-datasets.tape` | `head -25 datasets/seifa_2021.md` |
+| `discover-datasets-2-schema.png`  | `discover-datasets.tape` | `--dataset seifa` output |
+| `discover-datasets-3-spec.png`    | `discover-datasets.tape` | `head -25 datasets/seifa.md` |
 | `discover-datasets-4-presets.png` | `discover-datasets.tape` | `--features` output |
 | `preset-features-1-spec.png`      | `preset-features.tape` | `head -22 features/pct_renters.md` |
 | `preset-features-2-config.png`    | `preset-features.tape` | `cat preset-config.yaml` |
