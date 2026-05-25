@@ -142,7 +142,10 @@ def _read_grids(path: Path, release: str) -> dict[str, list[list[object]]]:
         from python_calamine import CalamineWorkbook  # noqa: PLC0415
 
         wb = CalamineWorkbook.from_path(str(path))
-        return {name: wb.get_sheet_by_name(name).to_python() for name in wb.sheet_names}
+        return {
+            name: wb.get_sheet_by_name(name).to_python()  # type: ignore[misc]
+            for name in wb.sheet_names
+        }
 
 
 # ---------------------------------------------------------------------------

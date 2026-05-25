@@ -201,7 +201,7 @@ def _open_excel(path: Path) -> pd.ExcelFile:
     last_error: Exception | None = None
     for engine in candidates:
         try:
-            excel = pd.ExcelFile(path, engine=engine)
+            excel = pd.ExcelFile(path, engine=engine)  # type: ignore[arg-type]
             print(f"  engine: {engine}")
             return excel
         except ImportError as e:
