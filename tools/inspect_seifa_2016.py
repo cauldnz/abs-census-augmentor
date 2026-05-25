@@ -19,10 +19,18 @@ back so the maintainer-facing Phase F.3 PR can build a hermetic
 fresh and re-prints. Pass ``--refresh`` to force re-download.
 
 The ABS 2016 file is in legacy ``.xls`` (Excel 97-2003 binary) format,
-not ``.xlsx``. openpyxl can't read ``.xls``; this script uses
-``pandas.read_excel`` which auto-routes to the right backend (xlrd 1.2.0
-for .xls, openpyxl for .xlsx). If your venv doesn't have xlrd, install
-it: ``uv pip install 'xlrd==1.2.0'``.
+not ``.xlsx``. openpyxl can't read ``.xls``; this script reads it via
+``python-calamine`` (a maintained Rust reader that handles both ``.xls``
+and ``.xlsx``). Install it first:
+
+    uv pip install python-calamine
+
+calamine is preferred over the legacy ``xlrd`` because it ships **no**
+console scripts — ``xlrd``'s ``runxlrd.py`` script trips an
+``Operation not permitted`` error when uv copies it into a
+bind-mounted ``.venv`` under Podman. The probe falls back to ``xlrd``
+if calamine isn't installed but the file is ``.xls`` (works fine on a
+native filesystem, e.g. directly on a host venv).
 
 Not part of the pytest suite; this is a one-off discovery probe (same
 class as ``tools/fetch_real_data.py`` and ``verify_real_parsers.py``).
@@ -34,7 +42,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
 import requests
@@ -100,19 +108,29 @@ def _download(url: str, dest: Path) -> Path:
     return dest
 
 
-def _pick_engine(path: Path) -> Literal["xlrd", "openpyxl"] | None:
-    """Map the file extension to a pandas Excel engine.
+def _candidate_engines(path: Path) -> list[str]:
+    """Ordered pandas Excel engines to try for ``path``.
 
-    .xls → xlrd; .xlsx → openpyxl. ``None`` (passed to
-    ``pd.ExcelFile(engine=None)``) lets pandas auto-detect for other
-    extensions (.xlsm, .xlsb).
+    ``python-calamine`` (a maintained Rust reader) is tried first for
+    every format — it reads legacy ``.xls`` *and* modern ``.xlsx`` and,
+    crucially, installs as a plain binary wheel with **no** console
+    scripts. That matters inside the dev container: the unmaintained
+    ``xlrd==1.2.0`` ships a ``runxlrd.py`` console script, and copying
+    a script into the bind-mounted ``.venv`` fails under Podman with
+    ``Operation not permitted`` (the bind mount rejects the chmod).
+    calamine sidesteps that entirely.
+
+    Format-specific fallbacks follow so the probe still works if only
+    the older engine is installed: ``xlrd`` for ``.xls`` (the ABS 2016
+    file's format), ``openpyxl`` for ``.xlsx`` (always available — it's
+    a project dependency).
     """
     suffix = path.suffix.lower()
     if suffix == ".xls":
-        return "xlrd"
+        return ["calamine", "xlrd"]
     if suffix == ".xlsx":
-        return "openpyxl"
-    return None
+        return ["calamine", "openpyxl"]
+    return ["calamine"]
 
 
 def _row_repr(values: list[Any]) -> str:
@@ -173,19 +191,38 @@ def _dump_sheet(name: str, df: pd.DataFrame) -> None:
         print(f"    [{i + 1:>3}] {_row_repr(df.iloc[i].tolist())}")
 
 
+def _open_excel(path: Path) -> pd.ExcelFile:
+    """Open ``path`` as a pandas ExcelFile, trying engines in order.
+
+    Returns the first engine that loads. Raises :class:`RuntimeError`
+    with install guidance if none are available / can read the file.
+    """
+    candidates = _candidate_engines(path)
+    last_error: Exception | None = None
+    for engine in candidates:
+        try:
+            excel = pd.ExcelFile(path, engine=engine)
+            print(f"  engine: {engine}")
+            return excel
+        except ImportError as e:
+            # Engine not installed — try the next candidate.
+            last_error = e
+            continue
+        except Exception as e:  # noqa: BLE001 — engine may reject the file
+            last_error = e
+            continue
+    raise RuntimeError(
+        f"None of the Excel engines {candidates} could open {path}. "
+        f"Install the recommended reader: `uv pip install python-calamine` "
+        f"(maintained, reads .xls + .xlsx, no console scripts so it "
+        f"installs cleanly into a bind-mounted .venv under Podman). "
+        f"Last error: {type(last_error).__name__}: {last_error}"
+    )
+
+
 def _dump_workbook(path: Path) -> None:
     print(f"\n[open]  {path}")
-    engine = _pick_engine(path)
-    print(f"  engine: {engine or '(auto)'}")
-    try:
-        excel = pd.ExcelFile(path, engine=engine)
-    except ImportError as e:
-        sys.stderr.write(
-            f"[fail]  Couldn't load pandas Excel engine for {path.suffix}: {e}\n"
-            f"        For .xls files: ``uv pip install 'xlrd==1.2.0'`` (the "
-            f"        newer xlrd 2.x dropped .xls support).\n"
-        )
-        raise
+    excel = _open_excel(path)
     print(f"  sheet count: {len(excel.sheet_names)}")
     print(f"  sheet names: {excel.sheet_names}")
     for name in excel.sheet_names:

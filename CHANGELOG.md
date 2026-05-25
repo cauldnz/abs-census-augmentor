@@ -41,10 +41,14 @@ off the captured shape.
 - **`tools/inspect_seifa_2016.py`** — fetches the live ABS SEIFA 2016
   SA2 `.xls` (URL captured via WebFetch from the legacy catalogue
   page 2033.0.55.001) and dumps every sheet's preamble, candidate
-  data header row, and 3 sample data rows. Requires `xlrd==1.2.0`
-  for the legacy `.xls` format (`uv pip install 'xlrd==1.2.0'`);
-  not added to project deps because it's a one-off discovery
-  prerequisite.
+  data header row, and 3 sample data rows. Reads the legacy `.xls`
+  via `python-calamine` (`uv pip install python-calamine`); not added
+  to project deps because it's a one-off discovery prerequisite.
+  calamine is preferred over the unmaintained `xlrd` because it ships
+  no console scripts — `xlrd`'s `runxlrd.py` trips `Operation not
+  permitted` when uv copies it into a bind-mounted `.venv` under
+  Podman. The probe falls back to `xlrd` when calamine is absent and
+  the venv is on a native filesystem.
 - **`tools/inspect_gcp_2016.py <zip-path>`** — accepts a locally
   downloaded 2016 GCP DataPack ZIP and dumps the internal layout,
   descriptor xlsx structure, table-CSV inventory, and a
