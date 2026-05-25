@@ -9,6 +9,34 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### devcontainer: isolate `.venv` in a named volume
+
+Fixes a host–container filesystem collision that broke the Windows host's
+Python tooling every time the devcontainer ran `uv sync`.
+
+**Root cause.** The workspace is bind-mounted from the Windows host.
+`uv sync` inside the container creates a Linux `.venv/` (with `lib64`
+symlink, ELF binaries) directly inside that bind-mounted path. Windows
+sees the resulting `.venv/` as broken: `lib64` is a dangling POSIX
+symlink, and `.exe` lookups fail. A subsequent Windows-side `uv sync`
+fails with `Access is denied` trying to remove `lib64`.
+
+**Fix.** Add a `"mounts"` entry in `devcontainer.json` that overlays
+a named Docker/Podman volume at `${containerWorkspaceFolder}/.venv`.
+The named volume takes precedence over the bind mount for that
+subdirectory only; the rest of the workspace still comes from the
+bind mount. From inside the container nothing changes. From the
+Windows host, `.venv/` simply doesn't appear — it's stored in the
+container runtime's own volume storage. `uv sync` (post-create) writes
+into the volume; the interpreter path in VS Code settings
+(`"python.defaultInterpreterPath"`) continues to point at
+`${containerWorkspaceFolder}/.venv/bin/python` unchanged.
+
+**Lifecycle.** The named volume (`abs-census-augmentor-venv`) survives
+`devcontainer rebuild` (image rebuild, volume retained). To force a
+clean re-provision: `docker volume rm abs-census-augmentor-venv` (or
+Podman equivalent) then rebuild.
+
 ### Temporal Phase F.3 — SEIFA 2016 release + dataset rename
 
 **Breaking:** the `seifa_2021` dataset id is renamed to `seifa`.

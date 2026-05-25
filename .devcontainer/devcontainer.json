@@ -88,25 +88,54 @@
         "--tmpfs", "/tmp:exec,mode=1777"
     ],
 
+    // Mount a named volume at .venv/ so the virtualenv lives in the
+    // container's own storage rather than in the bind-mounted workspace.
+    //
+    // Why this matters on Windows hosts:
+    //   The workspace directory is bind-mounted from the Windows host
+    //   filesystem. When `uv sync` runs inside the container it creates
+    //   a Linux .venv/ (with lib64 symlink, ELF binaries, ...) directly
+    //   inside that bind-mounted path. The host-side `.venv/` then looks
+    //   broken from Windows: `lib64` is a dangling POSIX symlink, and
+    //   scripts are ELF, not .exe. If the user runs `uv sync` from their
+    //   Windows shell it tries to overwrite the Linux venv and fails with
+    //   `error: failed to remove file .venv\lib64: Access is denied`
+    //   (Windows can't delete a dangling symlink it didn't create).
+    //
+    // The named volume takes precedence over the bind mount for the
+    // .venv/ subdirectory specifically. The rest of the workspace still
+    // comes from the bind mount. From inside the container nothing
+    // changes — .venv/ is still at ${containerWorkspaceFolder}/.venv.
+    // From the Windows host, .venv/ no longer exists at all (the named
+    // volume is stored in the container runtime's own storage; Docker
+    // Desktop exposes it under \\wsl$\docker-desktop-data, Podman under
+    // ~/.local/share/containers/storage/volumes/). Host-side Python
+    // tooling (IDEs, linters) should use the container interpreter;
+    // see "python.defaultInterpreterPath" in customizations below.
+    //
+    // Lifecycle: the named volume persists across `devcontainer rebuild`
+    // (the image is rebuilt but volumes survive). Run
+    //   docker volume rm abs-census-augmentor-venv
+    // (or the Podman equivalent) to force a clean venv re-provision.
+    // The post-create script's `uv sync` will repopulate it on the
+    // next attach.
+    "mounts": [
+        {
+            "source": "abs-census-augmentor-venv",
+            "target": "${containerWorkspaceFolder}/.venv",
+            "type": "volume"
+        }
+    ],
+
     "containerEnv": {
         // Tell uv to use a project-local venv at .venv/ (matches
         // `uv sync` defaults; documented for clarity).
         "UV_PROJECT_ENVIRONMENT": "${containerWorkspaceFolder}/.venv",
-        // Force uv to copy files instead of hardlinking when
-        // populating .venv/. uv's cache lives under ~/.cache/uv/
-        // on the container's overlayfs, but .venv/ lives in the
-        // bind-mounted workspace (a separate filesystem). Cross-
-        // filesystem hardlinks fail, so uv falls back to copy and
-        // prints a warning on every operation. This flag tells uv
-        // "we know, use copy mode, don't warn":
-        //
-        //   warning: Failed to hardlink files; falling back to full
-        //   copy. ... set `export UV_LINK_MODE=copy` ... to suppress
-        //   this warning.
-        //
-        // The performance "degradation" is negligible for our
-        // dependency tree (the cache still avoids re-downloads;
-        // only the install hop changes).
+        // With .venv/ on a named volume (same filesystem as ~/.cache/uv/),
+        // uv can use hardlinks instead of copies for fast installs.
+        // Keeping UV_LINK_MODE=copy is harmless and safe as a fallback
+        // for container runtimes where the cache and venv end up on
+        // different storage drivers.
         "UV_LINK_MODE": "copy",
         // Force colour output in tools that respect this — the GIF
         // demo renders look better when ruff / pytest stay coloured.
