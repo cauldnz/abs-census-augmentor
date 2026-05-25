@@ -142,10 +142,7 @@ def _read_grids(path: Path, release: str) -> dict[str, list[list[object]]]:
         from python_calamine import CalamineWorkbook  # noqa: PLC0415
 
         wb = CalamineWorkbook.from_path(str(path))
-        return {
-            name: wb.get_sheet_by_name(name).to_python()
-            for name in wb.sheet_names
-        }
+        return {name: wb.get_sheet_by_name(name).to_python() for name in wb.sheet_names}
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +172,7 @@ def _parse_grids(
                 prefix,
             )
             continue
-        df_one = _parse_index_sheet(
-            grids[sheet_name], prefix, sa2_index_name=sa2_index_name
-        )
+        df_one = _parse_index_sheet(grids[sheet_name], prefix, sa2_index_name=sa2_index_name)
         per_index_dfs.append(df_one)
 
     if not per_index_dfs:
@@ -188,9 +183,7 @@ def _parse_grids(
     merged = per_index_dfs[0]
     for df_more in per_index_dfs[1:]:
         df_more = df_more.drop(
-            columns=[
-                c for c in ("urp", "state_abbreviation") if c in df_more.columns
-            ],
+            columns=[c for c in ("urp", "state_abbreviation") if c in df_more.columns],
             errors="ignore",
         )
         merged = merged.join(df_more, how="outer")
@@ -237,9 +230,7 @@ def _parse_index_sheet(
         records.append(rec)
 
     if not records:
-        raise RuntimeError(
-            f"No data rows found below the header for prefix {prefix!r}"
-        )
+        raise RuntimeError(f"No data rows found below the header for prefix {prefix!r}")
 
     df = pd.DataFrame.from_records(records)
     return df.set_index(sa2_index_name)
@@ -349,8 +340,7 @@ class SeifaDataSource(_AbsXlsxDataset):
     ) -> None:
         if release not in _SUPPORTED_RELEASES:
             raise ValueError(
-                f"release must be one of {sorted(_SUPPORTED_RELEASES)}; "
-                f"got {release!r}"
+                f"release must be one of {sorted(_SUPPORTED_RELEASES)}; got {release!r}"
             )
         super().__init__(
             release=release,

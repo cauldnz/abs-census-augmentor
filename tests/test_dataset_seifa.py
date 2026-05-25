@@ -536,8 +536,24 @@ def _build_synthetic_grid(
         ["Released 27 March 2018"],
         [f"Table for {prefix} index"],
         # Group row (spacer).
-        ["", "", "", "", "", "Ranking within Australia", "", "", "",
-         "Ranking within State or Territory", "", "", "", "", "", ""],
+        [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "Ranking within Australia",
+            "",
+            "",
+            "",
+            "Ranking within State or Territory",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
         # Header row (row index 5 == _DEFAULT_HEADER_ROW).
         [
             "2016 Statistical Area Level 2 (SA2) 9-Digit Code",
@@ -560,24 +576,26 @@ def _build_synthetic_grid(
     ]
     data: list[list[object]] = []
     for sa2_code, sa2_name, f in sa2_records:
-        data.append([
-            sa2_code,
-            sa2_name,
-            f["urp"],
-            f["score"],
-            None,
-            f["aus_rank"],
-            f["aus_decile"],
-            f["aus_percentile"],
-            None,
-            f["state"],
-            f["state_rank"],
-            f["state_decile"],
-            f["state_percentile"],
-            f.get("sa1_min", 0),
-            f.get("sa1_max", 0),
-            f.get("pct_urp_no_score", 0),
-        ])
+        data.append(
+            [
+                sa2_code,
+                sa2_name,
+                f["urp"],
+                f["score"],
+                None,
+                f["aus_rank"],
+                f["aus_decile"],
+                f["aus_percentile"],
+                None,
+                f["state"],
+                f["state_rank"],
+                f["state_decile"],
+                f["state_percentile"],
+                f.get("sa1_min", 0),
+                f.get("sa1_max", 0),
+                f.get("pct_urp_no_score", 0),
+            ]
+        )
     return preamble + data
 
 
@@ -592,21 +610,43 @@ def _build_synthetic_grids_2016() -> dict[str, list[list[object]]]:
     sa2_b_code = 101021008
 
     fields_a = {
-        "urp": 12000, "score": 1042, "aus_rank": 1500, "aus_decile": 8,
-        "aus_percentile": 75, "state": "NSW", "state_rank": 800,
-        "state_decile": 8, "state_percentile": 78, "sa1_min": 1000,
-        "sa1_max": 1080, "pct_urp_no_score": 0,
+        "urp": 12000,
+        "score": 1042,
+        "aus_rank": 1500,
+        "aus_decile": 8,
+        "aus_percentile": 75,
+        "state": "NSW",
+        "state_rank": 800,
+        "state_decile": 8,
+        "state_percentile": 78,
+        "sa1_min": 1000,
+        "sa1_max": 1080,
+        "pct_urp_no_score": 0,
     }
     fields_b = {
-        "urp": 9500, "score": 950, "aus_rank": 7000, "aus_decile": 5,
-        "aus_percentile": 50, "state": "NSW", "state_rank": 3000,
-        "state_decile": 5, "state_percentile": 50, "sa1_min": 920,
-        "sa1_max": 985, "pct_urp_no_score": 0,
+        "urp": 9500,
+        "score": 950,
+        "aus_rank": 7000,
+        "aus_decile": 5,
+        "aus_percentile": 50,
+        "state": "NSW",
+        "state_rank": 3000,
+        "state_decile": 5,
+        "state_percentile": 50,
+        "sa1_min": 920,
+        "sa1_max": 985,
+        "pct_urp_no_score": 0,
     }
     aggregate = {
-        "urp": 999999, "score": 1000, "aus_rank": 0, "aus_decile": 5,
-        "aus_percentile": 50, "state": "AUS", "state_rank": 0,
-        "state_decile": 5, "state_percentile": 50,
+        "urp": 999999,
+        "score": 1000,
+        "aus_rank": 0,
+        "aus_decile": 5,
+        "aus_percentile": 50,
+        "state": "AUS",
+        "state_rank": 0,
+        "state_decile": 5,
+        "state_percentile": 50,
     }
 
     grids: dict[str, list[list[object]]] = {"Contents": [["Contents (skipped)"]]}
@@ -649,8 +689,15 @@ def test_parse_grids_2016_all_four_indexes() -> None:
     grids = _build_synthetic_grids_2016()
     df = _parse_grids(grids, sa2_index_name="sa2_code_2016")
     for prefix in ("irsd", "irsad", "ier", "ieo"):
-        for flavour in ("score", "aus_rank", "aus_decile", "aus_percentile",
-                        "state_rank", "state_decile", "state_percentile"):
+        for flavour in (
+            "score",
+            "aus_rank",
+            "aus_decile",
+            "aus_percentile",
+            "state_rank",
+            "state_decile",
+            "state_percentile",
+        ):
             col = f"{prefix}_{flavour}"
             assert col in df.columns, f"missing column {col}"
 
@@ -660,10 +707,10 @@ def test_parse_grids_2016_score_values() -> None:
     grids = _build_synthetic_grids_2016()
     df = _parse_grids(grids, sa2_index_name="sa2_code_2016")
     row = df.loc["101021007"]
-    assert row["irsd_score"] == 1042        # offset 0
-    assert row["irsad_score"] == 1080       # offset +38
-    assert row["ier_score"] == 1010         # offset -32
-    assert row["ieo_score"] == 1100         # offset +58
+    assert row["irsd_score"] == 1042  # offset 0
+    assert row["irsad_score"] == 1080  # offset +38
+    assert row["ier_score"] == 1010  # offset -32
+    assert row["ieo_score"] == 1100  # offset +58
 
 
 def test_parse_grids_2016_suppressed_cells() -> None:
