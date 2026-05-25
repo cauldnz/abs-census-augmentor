@@ -38,7 +38,7 @@ populated during cross-sectional runs.
 | `boundaries/<year>/` | ASGS SA2 shapefile ZIP (`SA2_<year>_AUST_SHP_<datum>.zip`) + extracted `.shp` / `.dbf` / `.prj` / `.shx` + a `<shp>.feather` sidecar. | ~50 MB per edition | `census-augment fetch --refresh --boundaries`. |
 | `census/<year>/` | GCP DataPack ZIP + extracted CSVs (one per G## table) + metadata XLSX + a `<metadata-xlsx>.<descriptor>.parsed.pkl` sidecar for fast openpyxl-skipping re-reads. | ~40 MB per edition | `census-augment fetch --refresh --census`. |
 | `mb/<year>/` | Mesh Block correspondence shapefile (MB→SA2 fast-path resolver). | ~50 MB per edition | `census-augment fetch --refresh --boundaries`. |
-| `seifa_2021/` | SEIFA SA2 XLSX (`seifa-2021.xlsx`) + parsed parquet sidecar (`seifa-2021.parquet`). | ~150 KB | Dataset-level refresh. |
+| `seifa/` | SEIFA SA2 workbooks per release (`seifa-2021.xlsx`, `seifa-2016.xls`) + parsed parquet sidecars. | ~150 KB (2021) / ~700 KB (2016) | Dataset-level refresh. |
 | `erp_by_sa2/` | ERP SA2 XLSX (`erp-sa2-{year}.xlsx`) per release + parsed parquet sidecar. | ~1 MB per release | Same. |
 | `dss_payments/` | DSS quarterly XLSX (`dss-{YYYY-Qn}.xlsx`) per release + parsed parquet sidecar. | ~3 MB per release | Same. |
 | `abs_personal_income/` | ABS Personal Income Table 1 XLSX (`abs-personal-income-{FY}.xlsx`) per release + parsed parquet sidecar. | ~500 KB per release | Same. |
@@ -117,6 +117,6 @@ For a one-glance overview of the four registered datasets' cache state, the data
 from census_augment.datasets._seifa import SeifaDataSource
 from pathlib import Path
 
-ds = SeifaDataSource(root=Path.home() / ".cache" / "census-augment" / "data" / "seifa_2021")
+ds = SeifaDataSource(root=Path.home() / ".cache" / "census-augment" / "data" / "seifa")
 print(ds.is_cached)  # bool
 ```

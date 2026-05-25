@@ -19,7 +19,7 @@ census-augment discover --config config.yaml --datasets
 census-augment discover --config config.yaml --features
 
 # Inspect a single dataset's resolved schema
-census-augment discover --config config.yaml --dataset seifa_2021
+census-augment discover --config config.yaml --dataset seifa
 
 # Validate a config (with --full also checks variable refs against the DataPack)
 census-augment validate --config config.yaml --full

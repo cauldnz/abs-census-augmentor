@@ -38,7 +38,7 @@ Env PYTHONUNBUFFERED "1"
 # each executing a 35 s `census-augment run` — CPU is hot, Python
 # startup gets stretched. 18 s absorbs the contention margin.
 #
-# Scene 3 (`head -25 datasets/seifa_2021.md`) is pure bash and
+# Scene 3 (`head -25 datasets/seifa.md`) is pure bash and
 # returns in microseconds — keeps its existing Sleep 6 s with
 # no Hide / Show.
 Type "# What ABS datasets does the augmentor know about?"
@@ -60,7 +60,7 @@ Sleep 300ms
 Type "# Each dataset has a markdown spec — let's look at SEIFA's schema:"
 Enter
 Sleep 800ms
-Type "census-augment discover --config tools/demo/config.yaml --dataset seifa_2021"
+Type "census-augment discover --config tools/demo/config.yaml --dataset seifa"
 Enter
 Sleep 1s
 Hide
@@ -76,7 +76,7 @@ Sleep 300ms
 Type "# That schema came from this single markdown file:"
 Enter
 Sleep 800ms
-Type "head -25 datasets/seifa_2021.md"
+Type "head -25 datasets/seifa.md"
 Enter
 Sleep 6s
 Screenshot docs/frames/discover-datasets-3-spec.png
