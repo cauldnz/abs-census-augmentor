@@ -315,8 +315,7 @@ def main() -> int:
         assert "ieo_aus_decile" in df.columns
         assert df.index.name == "sa2_code_2021"
         print(
-            f"         -> 2021: {len(df):,} SA2s, {len(df.columns)} columns, "
-            f"index={df.index.name}"
+            f"         -> 2021: {len(df):,} SA2s, {len(df.columns)} columns, index={df.index.name}"
         )
         # 2016 release (XLS).
         ds16 = SeifaDataSource(release="2016", root=data_dir / "seifa")
