@@ -44,7 +44,7 @@ census-augment run --config examples/cli/config.yaml
 # v1.3 — discover registered datasets and PRESET features
 census-augment discover --config examples/cli/config.yaml --datasets
 census-augment discover --config examples/cli/config.yaml --features
-census-augment discover --config examples/cli/config.yaml --dataset seifa_2021
+census-augment discover --config examples/cli/config.yaml --dataset seifa
 ```
 
 All examples talk to real ABS endpoints. **First run downloads ~90 MB** into the platform user cache (~50 MB SA2 boundaries + ~40 MB Census 2021 GCP DataPack). v1.3 dataset examples additionally fetch their respective sources on first use:
