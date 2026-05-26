@@ -207,6 +207,76 @@ def main() -> int:
     if not _check("Load G01 table", _load_g01):
         failures.append("datapacks.load_table")
 
+    # ------ DataPacks 2016 (F.4) -------------------------------------
+    # The 2016 GCP DataPack lives at the same URL pattern as 2021
+    # (just the year prefix changes). Only short-header is hosted.
+    # Treat the check as optional: if the 2016 ZIP isn't in the cache
+    # (the default ``fetch_real_data.py`` invocation only fetches the
+    # configured year), skip silently. When ``fetch_real_data.py
+    # --census-year 2016`` is run, this becomes a live drift probe.
+    print("=== DataPacks (2016, F.4) ===")
+    census_2016 = CensusConfig(year=2016, asgs_edition=2, datum="GDA94", descriptor="short-header")
+    datapacks_2016 = DataPacksDataSource(
+        census=census_2016,
+        base_url=DEFAULT_DATAPACKS_URL,
+        root=data_dir / "census" / "2016",
+    )
+    if not datapacks_2016.is_cached():
+        print(
+            "  (skipped; no 2016 DataPack cached. "
+            "Run `uv run python tools/fetch_real_data.py --census-year 2016` "
+            "to populate it.)"
+        )
+    else:
+
+        def _list_tables_2016() -> None:
+            tables = datapacks_2016.list_tables()
+            # 2016 GCP has G01..G59 (no G60-G62 which 2021 added).
+            assert len(tables) >= 50, f"only {len(tables)} tables (expected ~59)"
+            assert "G62" not in tables, "G62 should not exist in 2016 GCP"
+            print(f"         -> {len(tables)} tables (G62 correctly absent)")
+
+        def _parse_metadata_2016() -> None:
+            md = datapacks_2016.load_metadata()
+            cols = list(md.all_columns())
+            assert len(cols) >= 1000, f"only {len(cols)} columns in 2016 metadata"
+            # 2016 metadata XLSX has sentence-case sheet names — confirms
+            # the candidate-list extension introduced in F.4.
+            assert md.has_table("G02"), "G02 missing from 2016 metadata"
+            assert md.has_column("G02", "Median_tot_hhd_inc_weekly"), (
+                "G02.Median_tot_hhd_inc_weekly missing from 2016 metadata"
+            )
+            assert not md.has_table("G62"), "G62 should be absent from 2016"
+            print(
+                f"         -> {len(cols)} columns across {len(md.tables)} tables; "
+                f"G62 correctly absent"
+            )
+
+        def _load_g02_2016() -> None:
+            df = datapacks_2016.load_table("G02")
+            # 2016 had ~2,310 SA2s (fewer than 2021's ~2,473).
+            assert len(df) >= 1000, f"only {len(df)} rows in G02 2016"
+            # SA2 code column for 2016 is SA2_MAINCODE_2016 — the F.4
+            # candidate-list extension.
+            assert df.index.name == "SA2_MAINCODE_2016", (
+                f"unexpected SA2 column for 2016: {df.index.name!r}"
+            )
+            assert "Median_tot_hhd_inc_weekly" in df.columns, (
+                "Median_tot_hhd_inc_weekly missing from 2016 G02"
+            )
+            sample = df["Median_tot_hhd_inc_weekly"].dropna().iloc[0]
+            print(
+                f"         -> G02: {len(df)} rows, index={df.index.name}, "
+                f"sample median income ${sample}"
+            )
+
+        if not _check("List tables (2016, ~59, no G62)", _list_tables_2016):
+            failures.append("datapacks_2016.list_tables")
+        if not _check("Parse metadata (2016, sentence-case sheets)", _parse_metadata_2016):
+            failures.append("datapacks_2016.load_metadata")
+        if not _check("Load G02 table (2016, SA2_MAINCODE_2016)", _load_g02_2016):
+            failures.append("datapacks_2016.load_g02")
+
     # ------ Mesh Block correspondence ------
     print("=== Mesh Block correspondence ===")
     mb_ds = MbCorrespondenceDataSource(

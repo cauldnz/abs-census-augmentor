@@ -179,6 +179,41 @@ def test_load_table_returns_dataframe_indexed_by_sa2(
     assert df.loc["117011326", "Tot_P_P"] == 10200
 
 
+@pytest.mark.parametrize(
+    "sa2_column_name",
+    [
+        "SA2_CODE_2021",  # 2021 CSV header (existing)
+        "SA2_CODE21",  # 2021 boundary-file style header
+        "SA2_MAINCODE_2021",  # 2021 alternative (some releases)
+        "SA2_CODE_2016",  # F.4: 2016 CSV header style 1
+        "SA2_CODE16",  # F.4: 2016 boundary-style header
+        "SA2_MAINCODE_2016",  # F.4: 2016 actual CSV header
+    ],
+)
+def test_detect_sa2_column_recognises_each_release_variant(
+    sa2_column_name: str,
+) -> None:
+    """F.4: the SA2-code candidate list must accept 2016 and 2021 forms.
+
+    ABS uses ``SA2_MAINCODE_2016`` in the 2016 GCP DataPack CSVs and
+    ``SA2_MAINCODE_2021`` / ``SA2_CODE_2021`` in 2021. Without the F.4
+    candidate-list extension, 2016 CSVs error out at load with
+    "No SA2 code column found".
+
+    This is a static-method check rather than an end-to-end ZIP test
+    because the detection logic is independent of the ZIP / metadata
+    pipeline above.
+    """
+    df = pd.DataFrame(
+        {
+            sa2_column_name: ["101021007", "101021008"],
+            "Median_tot_hhd_inc_weekly": [1083, 1692],
+        }
+    )
+    detected = DataPacksDataSource._detect_sa2_column(df)
+    assert detected == sa2_column_name
+
+
 @responses.activate
 def test_load_table_unknown_raises_keyerror(tmp_path: Path, fake_datapack_zip_bytes: bytes) -> None:
     responses.add(responses.GET, EXPECTED_URL, body=fake_datapack_zip_bytes, status=200)
@@ -247,6 +282,52 @@ def test_metadata_table_names_populated_from_table_sheet(
     ds = _make_data_source(tmp_path)
     metadata = ds.load_metadata()
 
+    assert metadata.tables["G01"].name == "Selected Person Characteristics by Sex"
+    assert metadata.tables["G02"].name == "Selected Medians and Averages"
+
+
+# ---------- F.4: 2016 metadata-sheet sentence-case variants ----------
+#
+# The 2016 GCP DataPack metadata XLSX uses sentence case for both sheet
+# names ("Cell descriptors information" / "Table number, name,
+# population") where 2021 uses Title Case. The candidate-list extension
+# in F.4 makes the parser tolerate both shapes against one synthetic
+# fixture per variant. Live verification of the actual 2016 ZIP lives
+# in tools/verify_real_parsers.py (the F.4 _list_tables_2016 / _parse_metadata_2016
+# probes there) — these tests lock down the candidate-list semantics so
+# the live probe is the only thing that ever needs to flap on schema
+# drift.
+
+
+@responses.activate
+def test_metadata_handles_2016_sentence_case_sheet_names(
+    tmp_path: Path,
+    fake_g01_df: pd.DataFrame,
+    fake_descriptor_rows: list[tuple[Any, ...]],
+    fake_table_rows: list[tuple[Any, ...]],
+) -> None:
+    """2016 XLSX uses sentence case for both sheet names.
+
+    The descriptor sheet name ("Cell descriptors information") was
+    already in the candidate list for the v1.5 work; the table sheet
+    name ("Table number, name, population") is the F.4 addition. Both
+    must resolve cleanly through the same parser as 2021.
+    """
+    xlsx = build_metadata_xlsx(
+        fake_descriptor_rows,
+        fake_table_rows,
+        descriptor_sheet_name="Cell descriptors information",
+        table_sheet_name="Table number, name, population",
+    )
+    zip_bytes = _build_zip_with_metadata(fake_g01_df, xlsx)
+    responses.add(responses.GET, EXPECTED_URL, body=zip_bytes, status=200)
+
+    ds = _make_data_source(tmp_path)
+    metadata = ds.load_metadata()
+
+    # Descriptor sheet resolved → columns parsed.
+    assert "Tot_P_M" in metadata.tables["G01"].columns
+    # Table sheet resolved → human-readable table names attached.
     assert metadata.tables["G01"].name == "Selected Person Characteristics by Sex"
     assert metadata.tables["G02"].name == "Selected Medians and Averages"
 

@@ -112,8 +112,9 @@ def main() -> int:
         help=(
             "ASGS boundary edition to fetch. 3 (default) = current "
             "(year 2021, GDA2020). 2 = historical (year 2016, GDA94); "
-            "fetches only the SA2 boundary file — DataPack/MB Edition 2 "
-            "are deferred to follow-up PRs."
+            "fetches the SA2 boundary file and the GCP 2016 DataPack. "
+            "MB Edition 2 correspondence is still deferred — it ships "
+            "as 8 per-state shapefiles requiring concat logic."
         ),
     )
     args = p.parse_args()
@@ -140,18 +141,6 @@ def main() -> int:
     shp = boundaries.fetch(refresh=args.refresh)
     print(f"  shp:  {shp}")
 
-    if args.edition == 2:
-        # Edition 2 DataPack and MB downloads are deferred (see CHANGELOG /
-        # spec-temporal.md §6). The Edition 2 boundary above is enough to
-        # exercise the verify_real_parsers.py Edition 2 probe.
-        print(
-            "\nEdition 2 fetch complete (SA2 boundary only). DataPack and "
-            "MB correspondence for 2016 are deferred to a follow-up PR.\n"
-            "Run `uv run python tools/verify_real_parsers.py` to confirm "
-            "the parser handles the live Edition 2 file."
-        )
-        return 0
-
     print("=== DataPack ===")
     datapacks = DataPacksDataSource(
         census=census,
@@ -161,6 +150,22 @@ def main() -> int:
     print(f"  URL:    {datapacks.url}")
     extract = datapacks.fetch(refresh=args.refresh)
     print(f"  files:  {extract}")
+
+    if args.edition == 2:
+        # Edition 2 MB correspondence is still deferred (see CHANGELOG /
+        # spec-temporal.md §6) — ABS publishes Mesh Block shapefiles
+        # per state/territory rather than as a single national ZIP, and
+        # the §7.3 fast-path concat across the 8 state files isn't
+        # wired up yet. The Edition 2 boundary + DataPack above are
+        # enough to exercise the parser + verify_real_parsers.py probe
+        # introduced by F.4.
+        print(
+            "\nEdition 2 fetch complete (SA2 boundary + GCP 2016 DataPack). "
+            "MB correspondence for 2016 is still deferred to a follow-up.\n"
+            "Run `uv run python tools/verify_real_parsers.py` to confirm "
+            "the parser handles the live Edition 2 files."
+        )
+        return 0
 
     print("=== Mesh Block correspondence ===")
     mb_ds = MbCorrespondenceDataSource(

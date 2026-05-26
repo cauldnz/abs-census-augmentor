@@ -29,7 +29,7 @@ The output is a CSV with the original records plus appended columns drawn from t
 - Geocoding via a tiered strategy: G-NAF (Geoscape's Geocoded National Address File) as the primary "gold-standard" source, with Nominatim (public OpenStreetMap API) as a fallback.
 - SA2-level statistical area assignment via either G-NAF's mesh-block code (when available, no spatial join needed) or point-in-polygon spatial join (fallback path).
 - **Registered SA2-keyed datasets** (v1.3 §20). The 2021 GCP DataPack is one entry. Initial registry:
-    - `gcp_2021` — 2021 Census GCP DataPack (existing).
+    - `gcp` — ABS Census GCP DataPack (2021 + 2016 releases).
     - `seifa` — Socio-Economic Indexes for Areas (4 indexes × 10 fields).
     - `erp_by_sa2` — ABS Estimated Resident Population (annual).
     - `dss_payments` — DSS Payment Demographic Data (quarterly).
@@ -155,7 +155,7 @@ abs-census-augmentor/
 ├── .github/workflows/              # CI: tests + ruff + mypy + wheel-install regression
 ├── datasets/                       # Markdown specs for registered datasets (§20.1)
 │   ├── _template.md
-│   ├── gcp_2021.md
+│   ├── gcp.md
 │   ├── seifa.md
 │   ├── erp_by_sa2.md
 │   ├── dss_payments.md
@@ -819,7 +819,7 @@ SA2 Resolution (MB fast path → spatial fallback)
 Dataset Enrichment ─── for each requested variable, look up which
                        registered dataset provides it; fetch (cached);
                        join on sa2_code_2021; attach.
-   │                   ┌── gcp_2021       (G01..G62)
+   │                   ┌── gcp             (G01..G62; 2016 + 2021)
    │                   ├── seifa     (SEIFA.*)
    │                   ├── erp_by_sa2     (ERP.*)
    │                   ├── dss_payments   (DSS.*)
@@ -931,7 +931,7 @@ census-augment discover --search income           # search across all variables
 
 | id | namespace | source | cadence | size | status |
 |---|---|---|---|---|---|
-| `gcp_2021` | `G01..G62` | ABS GCP DataPack | one-shot | ~40 MB | active (migrated from v1.0) |
+| `gcp` | `G01..G62` | ABS GCP DataPack (2016 + 2021 releases) | per-census | ~35-40 MB / release | active (2016 in v1.6 / F.4) |
 | `seifa` | `SEIFA` | ABS SEIFA SA2 workbook (2016 .xls, 2021 .xlsx) | per-census | ~150-700 KB | active (v1.3 / 2016 in v1.5) |
 | `erp_by_sa2` | `ERP` | ABS Regional Population XLSX | annual | ~3 MB | active (v1.3) |
 | `dss_payments` | `DSS` | DSS data.gov.au CKAN | quarterly | ~5 MB / quarter | active (v1.3) |
@@ -968,7 +968,7 @@ id: pct_drive_to_work
 status: proposed | active | deprecated
 output_kind: percentage | ratio | rate | scalar | index
 bounds: [0, 100]
-dataset: gcp_2021
+dataset: gcp
 default: false
 tags: [transport, employment]
 numerator:
@@ -1040,7 +1040,7 @@ doesn't need geocoding.
 
 ### 21.4 Initial PRESET catalogue
 
-The six features that motivated this design (all sourced from `gcp_2021`):
+The six features that motivated this design (all sourced from `gcp`):
 
 - `pct_drive_to_work` — sum of G62 motor-vehicle modes / G62.Tot_P
 - `motor_vehicles_per_dwelling` — G34.Total_motor_vehicles / G34.Total_dwellings
@@ -1068,7 +1068,7 @@ would land as `features/2026/pct_drive_to_work.md` referencing
 The releases since v1.0 are **all additive** for the common path: existing
 `Pipeline.augment(df, variables={"median_age": "G02.Median_age_persons"})`
 configurations continue to work. The variable string `<TABLE>.<column>`
-still resolves through the `gcp_2021` registered dataset, which exposes
+still resolves through the `gcp` registered dataset, which exposes
 the same fetcher and parser as before. The output schema also stays
 stable from v1.0 onwards (the breaking change was the v0.9 → v1.0 step
 documented in §14 #28).

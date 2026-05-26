@@ -29,13 +29,26 @@ _METADATA_CACHE_SUFFIX = ".parsed.pkl"
 # Filename pattern matchers for table CSVs (e.g. G01, G02, G09A)
 _TABLE_ID_PATTERN = re.compile(r"^G\d+[A-Z]?$")
 
-# Common column names in ABS DataPack CSVs for the SA2 code
-_SA2_CODE_CANDIDATES = ("SA2_CODE_2021", "SA2_CODE21", "SA2_MAINCODE_2021")
+# Common column names in ABS DataPack CSVs for the SA2 code. The 2021
+# release uses ``SA2_MAINCODE_2021`` / ``SA2_CODE_2021``; the 2016
+# release (ASGS Edition 2) uses ``SA2_MAINCODE_2016`` / ``SA2_CODE_2016``.
+# Both shapes are listed so the same loader handles either release.
+_SA2_CODE_CANDIDATES = (
+    "SA2_CODE_2021",
+    "SA2_CODE21",
+    "SA2_MAINCODE_2021",
+    "SA2_CODE_2016",
+    "SA2_CODE16",
+    "SA2_MAINCODE_2016",
+)
 
 # Pattern matching the descriptor xlsx among the ~3 metadata files in the ZIP
 _METADATA_FILENAME_PATTERN = re.compile(r"Metadata.*GCP.*DataPack.*\.xlsx$", re.IGNORECASE)
 
-# Real ABS sheet names — match case- and whitespace-insensitively
+# Real ABS sheet names — match case- and whitespace-insensitively. The
+# 2016 metadata workbook uses sentence case ("Cell descriptors
+# information", "Table number, name, population") where 2021 uses Title
+# Case. Both shapes are listed so the same parser handles either release.
 _DESCRIPTOR_SHEET_CANDIDATES = (
     "Cell Descriptors Information",
     "Cell descriptors information",
@@ -44,6 +57,7 @@ _DESCRIPTOR_SHEET_CANDIDATES = (
 _TABLE_SHEET_CANDIDATES = (
     "Table Number, Name, Population",
     "Table Number Name Population",
+    "Table number, name, population",
 )
 
 # Required column markers used to find the descriptor sheet's header row.

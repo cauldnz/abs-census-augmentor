@@ -9,6 +9,69 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase F.4 — GCP 2016 release + dataset rename
+
+**Breaking:** the `gcp_2021` dataset id is renamed to `gcp`. Any config
+YAML or code that references the dataset by id must be updated. The
+variable namespace (`G##.*`) is unchanged — references like
+`G02.Median_tot_hhd_inc_weekly` continue to work verbatim.
+
+**What changed:**
+
+- `datasets/gcp_2021.md` → `datasets/gcp.md` (`id: gcp`). The spec's
+  `temporal.available_releases` now lists both `"2016"` and `"2021"`;
+  `asgs_edition_by_release` maps `"2016" → 2` and `"2021" → 3`.
+- The 2016 GCP DataPack uses the **same URL pattern as 2021** — only
+  the year prefix changes. Probed live on 2026-05-26:
+  `https://www.abs.gov.au/census/find-census-data/datapacks/download/2016_GCP_SA2_for_AUS_short-header.zip`
+  returns HTTP 200 with a 35.5 MB ZIP. The existing
+  `DataPacksDataSource.filename` property (`f"{year}_GCP_..."`)
+  already produces the right filename for 2016 without changes.
+- The 2016 ZIP layout matches 2021: CSVs in
+  `2016 Census GCP Statistical Area 2 for AUST/` plus
+  `Metadata/Metadata_2016_GCP_DataPack.xlsx`.
+- **Only `short-header` is hosted for 2016.** The `long-header` and
+  `sequential` URL variants return HTTP 404. A new config validator
+  (`_edition_2_gcp_descriptor_constraint`) requires
+  `census.descriptor='short-header'` when `year=2016` and surfaces
+  the constraint at config load. 2021 still supports all three
+  descriptors.
+- Parser candidate-list extensions in `data_sources/datapacks.py`:
+  - `_SA2_CODE_CANDIDATES` now includes `SA2_MAINCODE_2016`,
+    `SA2_CODE_2016`, `SA2_CODE16` alongside the 2021 forms.
+  - `_TABLE_SHEET_CANDIDATES` now includes
+    `"Table number, name, population"` (sentence case from 2016)
+    alongside the Title Case 2021 variant. The descriptor sheet
+    candidate (`Cell descriptors information`) was already present.
+- The `_edition_2_gcp_variables_not_supported_yet` config validator
+  is removed; the matching unit test repurposed to assert the new
+  short-header constraint instead.
+- Column codes (Short/Long/Sequential) confirmed **identical**
+  between releases for the columns sampled (G01 totals, G02
+  medians) — existing variable refs like
+  `G02.Median_tot_hhd_inc_weekly` resolve identically in both 2016
+  and 2021. The 2021-only tables (G60–G62) are correctly absent
+  from the 2016 metadata; references to them will fail with the
+  catalog's existing "unknown column" error.
+- Live verification: 110 metadata tables parsed, 2,310 SA2 rows in
+  G02, sample median household income $1,083/wk (Daceyville NSW,
+  realistic for 2016).
+- `tools/fetch_real_data.py --edition 2` now fetches the GCP 2016
+  DataPack in addition to the boundary file (MB correspondence is
+  still deferred — per-state shapefile concat).
+- `tools/verify_real_parsers.py` gains three new F.4 probes against
+  the 2016 DataPack: list-tables (~59, G62 absent), parse-metadata
+  (sentence-case sheet names resolve), load-G02
+  (`SA2_MAINCODE_2016` index column). Self-skipping if the 2016
+  cache isn't populated.
+- New `tests/test_datapacks.py` cases lock in the candidate-list
+  semantics: parametrized check on `_detect_sa2_column` for all six
+  SA2 column name variants, plus a `build_metadata_xlsx` invocation
+  with sentence-case sheet names to ensure the parser tolerates
+  both 2016 and 2021 shapes.
+- Spec, BACKLOG, and `docs/temporal-data.md` updated to reflect the
+  rename and the multi-release `gcp` dataset.
+
 ### devcontainer: isolate `.venv` in a named volume
 
 Fixes a host–container filesystem collision that broke the Windows host's

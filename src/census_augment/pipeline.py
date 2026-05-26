@@ -1500,7 +1500,7 @@ class Pipeline:
             if "." not in ref:
                 continue
             namespace = ref.split(".", 1)[0]
-            # GCP-shape ``G##.col`` refs → gcp_2021 dataset (today only).
+            # GCP-shape ``G##.col`` refs → gcp dataset (today only).
             is_gcp = bool(namespace) and namespace[0] == "G" and namespace[1:].isdigit()
             if is_gcp:
                 if include_gcp_and_preset:
@@ -1533,7 +1533,7 @@ class Pipeline:
 
         Walks the variables map and resolves each ref's namespace against
         the registry. PRESET refs are followed through to their source
-        variables' datasets. GCP refs map to ``gcp_2021``.
+        variables' datasets. GCP refs map to ``gcp``.
         """
         from .datasets import registry  # noqa: PLC0415
 
@@ -1542,7 +1542,7 @@ class Pipeline:
             namespace = ref.split(".", 1)[0] if "." in ref else ""
             # GCP-style ``G\d+.<col>`` resolves to the GCP dataset.
             if namespace and namespace[0] == "G" and namespace[1:].isdigit():
-                touched.add("gcp_2021")
+                touched.add("gcp")
                 continue
             # Otherwise look the namespace up against registered datasets.
             for spec in registry.list_datasets():

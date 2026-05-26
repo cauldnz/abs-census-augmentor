@@ -373,7 +373,7 @@ def test_registry_resolve_namespaced_variable() -> None:
 def test_registry_resolve_gcp_table_prefix() -> None:
     """G02.foo should route to the dataset with namespace='G' (GCP)."""
     r = Registry()
-    gcp = _make_spec(id="gcp_2021", namespace="G")
+    gcp = _make_spec(id="gcp", namespace="G")
     r.register_spec(gcp)
 
     spec, field = r.resolve_variable("G02.Median_age_persons")
@@ -401,7 +401,7 @@ def test_registry_loads_repo_specs_on_import() -> None:
     """The package-level registry instance picks up the repo's datasets/."""
     ids = {s.id for s in registry.list_datasets()}
     assert {
-        "gcp_2021",
+        "gcp",
         "seifa",
         "erp_by_sa2",
         "dss_payments",
@@ -419,4 +419,4 @@ def test_repo_specs_resolve_known_namespaces() -> None:
     assert field == "population_total"
 
     spec, field = registry.resolve_variable("G02.Median_age_persons")
-    assert spec.id == "gcp_2021"
+    assert spec.id == "gcp"
