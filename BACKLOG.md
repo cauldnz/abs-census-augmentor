@@ -4,6 +4,74 @@ Tracking ideas worth doing but not in the current release. Items here
 have been thought-through enough to be actioned by anyone who picks
 them up; they're not raw brainstorms.
 
+---
+
+## Session checkpoint — 2026-05-26
+
+End of a substantial day's work. State of main is **clean** (CI green
+across all workflows, 669 tests passing, mypy + ruff clean, zero open
+issues, zero open PRs at session end).
+
+### Shipped today (11 PRs landed on main)
+
+- **#74** — calamine engine probe (groundwork for SEIFA 2016 `.xls`)
+- **#75** — Temporal Phase F.3: SEIFA 2016 release + dataset rename
+  (`seifa_2021` → `seifa`, breaking)
+- **#76** — docs/tape rename followup for F.3
+- **#77** — devcontainer: isolate `.venv` in a named volume (fixes
+  Windows host filesystem collision)
+- **#78** — ruff format + mypy fixes for F.3 files
+- **#79** — `CLAUDE.md`: codify branch + PR workflow as default
+- **#80** — bump GHA action pins to Node 24-compatible majors
+- **#81** — Temporal Phase F.4: GCP 2016 release + dataset rename
+  (`gcp_2021` → `gcp`, breaking)
+- **#82** — ERP wishlist: add age bands, gender, median age columns
+  (sourced from ABS 3235.0 DS0002). Unblocks cross-dataset PRESETs.
+- **#83** — features/*.md `gcp` rename followup (metadata cleanup)
+- **#84** — stale-reference cleanup sweep across docs / examples /
+  test fixtures (post-F.3+F.4 hygiene)
+
+Plus two automatic `demo-publish.yml` runs refreshing the embedded
+GIFs against current main.
+
+### Where to pick up tomorrow
+
+Suggested ordering by ROI:
+
+1. **Cross-dataset PRESETs** — markdown-only authoring, ~1 PR per
+   PRESET, smallest possible wins. The ERP age/sex unlock is the
+   reason these are now tractable.
+   - `pct_age_pension_recipients = DSS.age_pension_recipients /
+     ERP.population_65_plus`
+   - `pct_unemployment_recipients_working_age = DSS.* /
+     ERP.population_15_64`
+   - Similar age-conditioned ratios.
+
+2. **Cut a 2.0.0 release.** The two breaking renames (`seifa_2021`,
+   `gcp_2021`) and the new ERP columns merit a major version bump.
+   `pyproject.toml` still says 1.4.2; the `[Unreleased]` block in
+   `CHANGELOG.md` has roughly 8 distinct deliverables to roll up.
+
+3. **Phase G — G-NAF release-per-row.** Self-contained engineering,
+   ~2-3 days, no external blocker. Designed in `spec-temporal.md`
+   §6 + §12.
+
+4. **F.5 / F.6 historical datasets.** GCP 2011, SEIFA 2011, SEIFA
+   2006/2001 — needs URL discovery (legacy `abs@.nsf` archive) and
+   for SEIFA 2011 a design discussion about pre-ASGS geography
+   (CCD / SLA).
+
+### Smaller deferred items
+
+- `ERP.population_density_per_km2` (needs SA2-area lookup wiring)
+- `_template.md` wheel exclusion (4 KB hygiene; design choice in
+  this BACKLOG)
+- Stale remote branch cleanup (~33 `origin/claude/*`,
+  `origin/temporal/*`, `origin/polish/*` left over from earlier
+  agent sessions)
+
+---
+
 ## VHS terminal recordings (animated demos)
 
 The README embeds VHS-rendered GIFs to show what the tool actually
