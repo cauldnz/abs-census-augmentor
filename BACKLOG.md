@@ -71,7 +71,7 @@ should land as its own PR when the upstream demand surfaces.
 
 ## Future PRESET features (deferred from #11)
 
-The v1.3 catalog ships six PRESETs sourced entirely from `gcp_2021`,
+The v1.3 catalog ships six PRESETs sourced entirely from `gcp`,
 and v1.4 (#18) lands first-class pipeline integration so any config
 can write `variables: {pct_renters: PRESET.pct_renters}` directly.
 Cross-dataset features (e.g. `pct_age_pension_recipients` =
@@ -92,15 +92,24 @@ A–E). Two follow-ups remain, both deliberately deferred since the
 headline use case (ASGS Edition 3 transactional data with per-row
 release selection) works end-to-end today.
 
-- **Phase F — historical datasets (pre-Edition 3).** Register SEIFA
-  2016 / SEIFA 2011, GCP 2016 / GCP 2011, ERP 2001 onwards, etc. Each
-  needs its own URL bookkeeping (the legacy `abs@.nsf` archive has
-  less predictable URLs than the current site), per-edition fetchers
-  (probably shared base class + per-edition subclass), and real-data
-  verification per `CLAUDE.md`'s Real Data First. Unblocks
-  cross-edition input spans (combined with the cross-edition spatial
-  lookups already sketched in `spec-temporal.md` §9.3 step 4b — those
-  also need implementing). Effort: ~3-5 days.
+- **Phase F — historical datasets (pre-Edition 3).** Tracked in
+  sub-phases:
+  - **F.3 — SEIFA 2016** ✅ shipped (v1.6 / PR #75). `.xls` via
+    python-calamine + dataset rename `seifa_2021 → seifa`.
+  - **F.4 — GCP 2016** ✅ shipped (PR pending merge). 2016 GCP
+    DataPack uses the same URL pattern as 2021 (probed live: HTTP 200
+    on `2016_GCP_SA2_for_AUS_short-header.zip`). The existing
+    `DataPacksDataSource` parser handles 2016 metadata with only
+    candidate-list extensions for the sheet names (`Cell descriptors
+    information` / `Table number, name, population`) and the SA2 code
+    column (`SA2_MAINCODE_2016`). Dataset id `gcp_2021 → gcp`.
+  - **F.5 / F.6 — earlier releases** (GCP 2011, SEIFA 2011, ERP 2001+).
+    Pre-2016 sources use the legacy `abs@.nsf` archive with less
+    predictable URLs. SEIFA 2011 uses CCD/SLA (pre-ASGS) geography —
+    needs a separate design discussion before implementation.
+    Unblocks cross-edition input spans (combined with the cross-edition
+    spatial lookups already sketched in `spec-temporal.md` §9.3 step
+    4b — those also need implementing).
 
 - **Phase G — G-NAF release-per-row.** Currently temporal-mode uses
   the pipeline's configured G-NAF release for every row, regardless of

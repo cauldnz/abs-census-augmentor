@@ -280,12 +280,45 @@ def test_year_2016_with_gnaf_fails_at_config_load(tmp_path: Path) -> None:
         load_config(_write(tmp_path, cfg))
 
 
-def test_year_2016_with_gcp_variables_fails_at_config_load(tmp_path: Path) -> None:
-    """GCP DataPack for 2016 isn't registered yet — Phase F.4 work."""
+def test_year_2016_with_gcp_short_header_descriptor_accepted(
+    tmp_path: Path,
+) -> None:
+    """F.4 unblocked the 2016 GCP DataPack — short-header descriptor works.
+
+    Phase F.4 lifted the year=2016 + GCP-variables block (the live URL
+    pattern works for the 2016 short-header ZIP). Confirms a config that
+    used to error now loads cleanly.
+    """
     cfg = _base_config()
-    cfg["census"] = {"year": 2016, "asgs_edition": 2, "datum": "GDA94"}
+    cfg["census"] = {
+        "year": 2016,
+        "asgs_edition": 2,
+        "datum": "GDA94",
+        "descriptor": "short-header",
+    }
     # _base_config uses G02.Median_age_persons — that's a GCP-shape ref.
-    with pytest.raises(ValidationError, match=r"year=2016.*GCP|DataPack"):
+    loaded = load_config(_write(tmp_path, cfg))
+    assert loaded.census.year == 2016
+    assert loaded.census.descriptor == "short-header"
+
+
+def test_year_2016_with_non_short_header_descriptor_rejected(
+    tmp_path: Path,
+) -> None:
+    """Only short-header is hosted for the 2016 GCP DataPack URL pattern.
+
+    The long-header.zip and sequential.zip variants return HTTP 404 for
+    2016 (probed in F.4). The config layer fails loudly so the failure
+    isn't surfaced from inside the network layer.
+    """
+    cfg = _base_config()
+    cfg["census"] = {
+        "year": 2016,
+        "asgs_edition": 2,
+        "datum": "GDA94",
+        "descriptor": "long-header",
+    }
+    with pytest.raises(ValidationError, match=r"year=2016.*short-header"):
         load_config(_write(tmp_path, cfg))
 
 

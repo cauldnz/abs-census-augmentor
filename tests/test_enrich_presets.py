@@ -260,7 +260,7 @@ def test_overlapping_preset_sources_dedupe_via_custom_registry(
             id: ratio_a
             status: proposed
             output_kind: ratio
-            dataset: gcp_2021
+            dataset: gcp
             numerator:
               expression: field
               field: G01.Tot_P_P
@@ -280,7 +280,7 @@ def test_overlapping_preset_sources_dedupe_via_custom_registry(
             id: ratio_b
             status: proposed
             output_kind: ratio
-            dataset: gcp_2021
+            dataset: gcp
             numerator:
               expression: field
               field: G01.Tot_P_P
@@ -394,7 +394,7 @@ def test_preset_workspace_strips_namespace_prefix_consistently(
             status: proposed
             output_kind: percentage
             bounds: [0, 100]
-            dataset: gcp_2021
+            dataset: gcp
             numerator:
               expression: field
               field: G02.numer

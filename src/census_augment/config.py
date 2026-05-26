@@ -24,10 +24,6 @@ _log = logging.getLogger(__name__)
 FRIENDLY_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 VARIABLE_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\.[A-Za-z][A-Za-z0-9_]*$")
 PREFIX_RE = re.compile(r"^[a-z0-9_]*$")
-#: Matches GCP-DataPack-shaped variable refs (``G##.<col>`` / ``G##A.<col>``).
-#: Used by the Edition 2 guard below; kept here so the regex isn't
-#: re-built every config load.
-_GCP_VARIABLE_REF_RE = re.compile(r"^G\d+[A-Z]?\.[A-Za-z][A-Za-z0-9_]*$")
 
 DEFAULT_BOUNDARIES_URL = (
     "https://www.abs.gov.au/statistics/standards/"
@@ -374,30 +370,22 @@ class Config(_StrictModel):
         return self
 
     @model_validator(mode="after")
-    def _edition_2_gcp_variables_not_supported_yet(self) -> Config:
-        # Edition 2 GCP DataPack lives at a different URL with a
-        # different filename pattern than Edition 3 — registering it is
-        # part of Phase F.4 work and not in this PR. Any GCP-shaped
-        # variable ref (``G\d+.<col>``) requires a working DataPack
-        # download; flag the combo at config-load to keep the failure
-        # mode loud and out of the network layer.
-        if self.census.year == 2016:
-            gcp_refs = [
-                (friendly, ref)
-                for friendly, ref in self.variables.items()
-                if _GCP_VARIABLE_REF_RE.match(ref)
-            ]
-            if gcp_refs:
-                raise ValueError(
-                    f"census.year=2016 (ASGS Edition 2) is not yet supported "
-                    f"with GCP DataPack variables. Registering the 2016 "
-                    f"DataPack is a separate follow-up. The following "
-                    f"variables reference GCP tables: "
-                    f"{[name for name, _ in gcp_refs]}. Either set "
-                    f"census.year=2021 or use only non-GCP variables "
-                    f"(SEIFA / ERP / DSS / ABS_PIA / PRESET, once those "
-                    f"have year=2016 fetchers wired up)."
-                )
+    def _edition_2_gcp_descriptor_constraint(self) -> Config:
+        # The 2016 GCP DataPack is only hosted in the short-header
+        # descriptor variant — long-header and sequential return HTTP 404
+        # at the same URL pattern (probed F.4). Fail loudly at config
+        # load rather than 404ing inside the network layer.
+        #
+        # 2021 supports all three descriptors.
+        if self.census.year == 2016 and self.census.descriptor != "short-header":
+            raise ValueError(
+                f"census.year=2016 (ASGS Edition 2) only publishes the "
+                f"short-header DataPack variant; the long-header and "
+                f"sequential ZIPs are not hosted at the predictable URL. "
+                f"You set census.descriptor={self.census.descriptor!r}. "
+                f"Either set census.descriptor='short-header' (the default) "
+                f"or set census.year=2021 for full descriptor flexibility."
+            )
         return self
 
 

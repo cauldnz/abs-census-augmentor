@@ -233,7 +233,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "seifa",
     }
     intentionally_skipped = {
-        "gcp_2021",  # multi-table loader; covered via VariableCatalog tests
+        "gcp",  # multi-table loader; covered via VariableCatalog tests
     }
     registered = {s.id for s in registry.list_datasets()}
 

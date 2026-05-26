@@ -9,7 +9,7 @@ Variable resolution dispatches by namespace:
 - ``SEIFA.irsd_decile`` → ``seifa_2021`` dataset, field ``irsd_decile``
 - ``ERP.population_total`` → ``erp_by_sa2`` dataset, field
   ``population_total``
-- ``G02.Median_age_persons`` → ``gcp_2021`` dataset, field
+- ``G02.Median_age_persons`` → ``gcp`` dataset, field
   ``Median_age_persons`` (the GCP variable convention preserves the
   table id as the namespace, since GCP exposes ~62 tables under one
   dataset).
@@ -165,7 +165,7 @@ class Registry:
 
         For GCP the convention is slightly different — every GCP table
         (G01, G02, ...) is its own logical "namespace" but they all
-        belong to the single ``gcp_2021`` dataset. The GCP spec
+        belong to the single ``gcp`` dataset. The GCP spec
         declares ``namespace: G`` and the registry treats any
         ``G\\d+`` prefix as routing to that dataset.
 

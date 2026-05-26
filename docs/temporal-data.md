@@ -137,9 +137,9 @@ pipeline = Pipeline.create(
 
 result = pipeline.augment(df)
 result.df.head()
-# Per-row sa2_code in reference edition, per-row gcp_2021_release, etc.
+# Per-row sa2_code in reference edition, per-row gcp_release, etc.
 result.releases_used
-# {"gcp_2021": {"2016", "2021"}, ...}
+# {"gcp": {"2016", "2021"}, ...}
 ```
 
 ## Performance considerations

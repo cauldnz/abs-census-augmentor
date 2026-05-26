@@ -36,7 +36,7 @@ def test_parse_minimal_feature_spec(tmp_path: Path) -> None:
             status: proposed
             output_kind: percentage
             bounds: [0, 100]
-            dataset: gcp_2021
+            dataset: gcp
             default: false
             tags: [test]
             numerator:
@@ -71,7 +71,7 @@ def test_parse_sum_numerator(tmp_path: Path) -> None:
             status: proposed
             output_kind: percentage
             bounds: null
-            dataset: gcp_2021
+            dataset: gcp
             numerator:
               expression: sum
               fields:
@@ -164,7 +164,7 @@ def test_source_fields_dedupes_across_numerator_and_denominator(
             id: same_top_and_bottom
             status: proposed
             output_kind: ratio
-            dataset: gcp_2021
+            dataset: gcp
             numerator:
               expression: field
               field: G01.Tot_P_P
@@ -190,7 +190,7 @@ def _make_spec(**overrides: object) -> FeatureSpec:
         "status": "proposed",
         "output_kind": "percentage",
         "bounds": [0, 100],
-        "dataset": "gcp_2021",
+        "dataset": "gcp",
         "default": False,
         "tags": [],
         "numerator": {"expression": "field", "field": "G62.num"},
