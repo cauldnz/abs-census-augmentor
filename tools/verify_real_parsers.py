@@ -404,10 +404,42 @@ def main() -> int:
         assert len(df) >= 2000
         assert "population_total" in df.columns
         assert "reference_year" in df.columns
-        print(
+        msg = (
             f"         -> {len(df):,} SA2s; release {ds.resolved_release}, "
             f"reference year {df['reference_year'].iloc[0]}"
         )
+        # Age/sex enrichment columns (wishlist PR): present iff the
+        # 3235.0 DS0002 fetch succeeded. The fetcher logs a warning
+        # and omits them on failure, so absence is informative rather
+        # than fatal.
+        age_sex_cols = (
+            "population_male",
+            "population_female",
+            "population_0_14",
+            "population_15_64",
+            "population_65_plus",
+            "median_age",
+        )
+        present = [c for c in age_sex_cols if c in df.columns]
+        if len(present) == len(age_sex_cols):
+            # Pick the latest-non-null SA2 to sanity-check the values.
+            sample = df[df["median_age"].notna()].iloc[0]
+            msg += (
+                f"\n         -> age/sex (3235.0 release "
+                f"{ds._resolved_age_sex_release}): {sample.name} "
+                f"M={int(sample['population_male'])}, "
+                f"F={int(sample['population_female'])}, "
+                f"median={sample['median_age']:.1f}y, "
+                f"65+={int(sample['population_65_plus'])}"
+            )
+        elif present:
+            msg += (
+                f"\n         -> age/sex columns PARTIAL: "
+                f"{sorted(present)} (expected {len(age_sex_cols)}, got {len(present)})"
+            )
+        else:
+            msg += "\n         -> age/sex columns absent (DS0002 not fetched)"
+        print(msg)
 
     def _check_dss() -> None:
         ds = DssDataSource(root=data_dir / "dss_payments")
