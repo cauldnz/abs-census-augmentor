@@ -3,7 +3,7 @@ id: pct_employed_full_time
 status: proposed
 output_kind: percentage
 bounds: [0, 100]
-dataset: gcp_2021
+dataset: gcp
 default: false
 tags: [employment, labour-force]
 numerator:

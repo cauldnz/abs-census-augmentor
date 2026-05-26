@@ -3,7 +3,7 @@ id: pct_one_parent_family
 status: proposed
 output_kind: percentage
 bounds: [0, 100]
-dataset: gcp_2021
+dataset: gcp
 default: false
 tags: [demographics, family]
 numerator:

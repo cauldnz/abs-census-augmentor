@@ -3,7 +3,7 @@ id: motor_vehicles_per_dwelling
 status: proposed
 output_kind: ratio
 bounds: [0, 10]
-dataset: gcp_2021
+dataset: gcp
 default: false
 tags: [transport, vehicle-ownership, fuel-demand]
 numerator:

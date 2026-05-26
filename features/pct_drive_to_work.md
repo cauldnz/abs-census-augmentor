@@ -3,7 +3,7 @@ id: pct_drive_to_work
 status: proposed
 output_kind: percentage
 bounds: [0, 100]
-dataset: gcp_2021
+dataset: gcp
 default: false
 tags: [transport, employment, fuel-demand]
 numerator:
