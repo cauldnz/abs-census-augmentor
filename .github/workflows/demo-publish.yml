@@ -46,14 +46,14 @@ jobs:
 
     steps:
       - name: Check out main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Needs the token with write scope so the later `git push`
           # works.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
@@ -72,7 +72,7 @@ jobs:
       # validation builds, so renders against an established cache key
       # finish in seconds rather than minutes.
       - name: Cache ABS data pre-warm
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/census-augment/data
           key: census-augment-abs-cache-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'tools/demo/*.yaml') }}
