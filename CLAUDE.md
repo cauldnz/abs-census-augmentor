@@ -136,7 +136,7 @@ For the branch + PR path:
 1. Branch off `main` with a slug naming the work: `feat/<scope>`, `fix/<scope>`, `docs/<scope>`, `chore/<scope>`, `style/<scope>`.
 2. Push the branch, open a PR with a body explaining *why* (not just *what*).
 3. Wait for CI green before merging. Don't disable checks to land work — fix the underlying issue.
-4. Squash-merge unless the branch's commit history is itself useful review material. Use `gh pr merge <n> --squash --delete-branch` so the source branch is cleaned up.
+4. **Use a regular merge commit** (`gh pr merge <n> --merge --delete-branch`), not a squash. The PR's commit history stays on `main`, the branch line is visible in GitKraken / GitLens / `git log --graph`, and the merge commit gives a clean "this is where PR #N landed" anchor. Only use `--squash` if the branch contains genuine noise (WIP commits, "fix typo", "address review", a long debugging dance) that's better collapsed — and even then, prefer interactive rebase before opening the PR so review sees the clean history. **Default = `--merge`, exception = `--squash`.**
 5. If you rebase a branch with an open PR, force-push with `--force-with-lease` (never plain `--force`), and ask the user to authorize each force-push the auto-mode classifier challenges.
 
 The auto-mode classifier enforces this: pushes to `main`, PR merges, and force-pushes to PR branches all require explicit per-action user authorization. Treat the prompt as the guardrail, not friction — when it fires, pause and confirm before retrying.
