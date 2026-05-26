@@ -3,7 +3,7 @@ id: pct_aged_65_plus
 status: proposed
 output_kind: percentage
 bounds: [0, 100]
-dataset: gcp_2021
+dataset: gcp
 default: false
 tags: [demographics, age]
 numerator:
