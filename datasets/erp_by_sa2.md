@@ -76,16 +76,21 @@ on 2021 boundaries goes back to ~2001.
 
 ## Schema (variables exposed by the augmentor)
 
-The v1.5 fetcher exposes the latest-year summary plus the full per-year time
-series. Age-band breakdowns, median age, gendered totals, and a derived
-population-density column are wish-list items not yet wired up (see "Wish list"
-below).
+The fetcher exposes the latest-year summary plus the full per-year time
+series, plus latest-year demographic breakdowns (gender, broad age
+groups, median age) sourced from the companion 3235.0 cube.
 
 | Variable | Type | Description |
 |---|---|---|
 | `ERP.population_total` | int | Total estimated resident population for the latest reference year |
 | `ERP.reference_year` | int | The mid-year reference year (e.g. 2024 = June 2024) |
 | `ERP.state_abbreviation` | str | State/territory abbreviation (NSW, VIC, ...) |
+| `ERP.population_male` | int | Estimated male residents, latest reference year (3235.0 DS0002) |
+| `ERP.population_female` | int | Estimated female residents, latest reference year |
+| `ERP.population_0_14` | int | Children & adolescents aged 0-14, latest reference year (derived from published %) |
+| `ERP.population_15_64` | int | Working-age 15-64, latest reference year |
+| `ERP.population_65_plus` | int | Older Australians aged 65+, latest reference year |
+| `ERP.median_age` | float | Median age in years, latest reference year (one decimal) |
 
 In addition, the fetcher emits one int column per available year as
 `ERP.population_history_YYYY` (e.g. `population_history_2001` through
@@ -93,20 +98,29 @@ In addition, the fetcher emits one int column per available year as
 2001-onwards history ABS publishes in the source workbook and let
 downstream consumers compute multi-year growth without re-fetching.
 
+The age/sex columns come from a *second* ABS workbook (3235.0 — Regional
+Population by Age and Sex). The fetcher downloads both DS0003 (totals)
+and DS0002 (age/sex) and merges them on `sa2_code_2021`. If the age/sex
+workbook is unavailable (older releases, transient network failure),
+the age/sex columns are silently omitted with a warning — the
+core `population_total` + `population_history_*` columns are
+unaffected. Inspect `ErpDataSource.resolved_release` for the totals
+release and `ErpDataSource._resolved_age_sex_release` for the
+age/sex release; they normally match but the two cubes publish on
+slightly different schedules.
+
 The augmentor returns the latest available year by default. Users can pin
 via `Pipeline.create(..., erp_year=2023)`.
 
-### Wish list — spec'd in earlier drafts, not yet implemented
+### Still on the wish list
 
-These rows were documented in the v1.4 draft of this spec but never landed
-in the fetcher. They're real ABS-published series; wiring them up means
-parsing additional sheets / computing density from the ASGS area lookup.
-Tracked in BACKLOG.md.
-
-- `ERP.population_male`, `ERP.population_female` — gendered totals
-- `ERP.population_0_14`, `ERP.population_15_64`, `ERP.population_65_plus` — age bands
-- `ERP.median_age` — median age (years)
-- `ERP.population_density_per_km2` — derived from SA2 area
+- `ERP.population_density_per_km2` — derived from SA2 area (needs an
+  area lookup the augmentor doesn't currently load). Tracked in
+  BACKLOG.md.
+- Age-and-sex *time series* (i.e. `population_65_plus_2010`, etc.) —
+  ABS publishes DS0005_2001-24.xlsx for this (28 MB). Deferred until
+  there's user demand; the latest-year columns above are the higher
+  ROI for cross-dataset PRESETs.
 
 ## Fetch notes
 

@@ -39,7 +39,11 @@ import responses
 from census_augment.datasets import registry
 from census_augment.datasets._abs_pia import ATO_LANDING_URL, AbsPiaDataSource
 from census_augment.datasets._dss import CKAN_PACKAGE_URL, DssDataSource
-from census_augment.datasets._erp import ERP_LANDING_URL, ErpDataSource
+from census_augment.datasets._erp import (
+    ERP_AGE_SEX_LANDING_URL,
+    ERP_LANDING_URL,
+    ErpDataSource,
+)
 from census_augment.datasets._seifa import DEFAULT_SEIFA_2021_URL, SeifaDataSource
 
 # Synthetic-fixture builders live in the per-dataset test modules. Reusing
@@ -49,7 +53,11 @@ from census_augment.datasets._seifa import DEFAULT_SEIFA_2021_URL, SeifaDataSour
 from tests.test_dataset_abs_pia import _make_ato_xlsx
 from tests.test_dataset_abs_pia import _make_landing_html as _pia_landing_html
 from tests.test_dataset_dss import _make_ckan_response, _make_dss_xlsx
-from tests.test_dataset_erp import _make_erp_xlsx
+from tests.test_dataset_erp import (
+    _make_age_sex_landing_html,
+    _make_age_sex_xlsx,
+    _make_erp_xlsx,
+)
 from tests.test_dataset_erp import _make_landing_html as _erp_landing_html
 from tests.test_dataset_seifa import _build_synthetic_seifa_xlsx
 
@@ -108,6 +116,28 @@ def test_spec_matches_fetcher__erp(tmp_path: Path) -> None:
         "https://www.abs.gov.au/statistics/people/population/"
         "regional-population/2024-25/32180DS0003_2001-25.xlsx",
         body=fake_xlsx,
+        status=200,
+    )
+    # Age/sex enrichment: register the 3235.0 mocks so the merged load
+    # surfaces population_male / population_female / population_0_14 /
+    # population_15_64 / population_65_plus / median_age — all of which
+    # the spec front-matter now claims (post ERP-wishlist PR).
+    responses.add(
+        responses.GET,
+        ERP_AGE_SEX_LANDING_URL,
+        body=_make_age_sex_landing_html(["2024"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population-age-and-sex/2024/32350DS0002_2024.xlsx",
+        body=_make_age_sex_xlsx(
+            [
+                ("117011326", "Sydney CBD", 6000, 6000, 100.0, 35.0, 15.0, 70.0, 15.0),
+                ("117011327", "North Sydney", 4800, 4700, 102.0, 38.5, 10.0, 75.0, 15.0),
+            ]
+        ),
         status=200,
     )
 

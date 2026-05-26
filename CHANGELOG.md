@@ -9,6 +9,75 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### ERP wishlist — age bands, gender, median age columns
+
+Extends the `erp_by_sa2` dataset with six new columns sourced from
+the companion ABS workbook **3235.0 — Regional Population by Age and
+Sex** (DS0002 SA2 cube). Unblocks the cross-dataset PRESETs the
+BACKLOG has been waiting on — most notably
+`pct_age_pension_recipients = DSS.age_pension_recipients /
+ERP.population_65_plus`.
+
+**New `ERP.*` columns** (latest reference year only):
+
+- `population_male` — int, gendered total
+- `population_female` — int, gendered total
+- `population_0_14` — int, derived from persons × pct/100
+- `population_15_64` — int, derived from persons × pct/100
+- `population_65_plus` — int, derived from persons × pct/100
+- `median_age` — float (years, one decimal)
+
+**Implementation:**
+
+- The 3235.0 DS0002 workbook lives at
+  `https://www.abs.gov.au/statistics/people/population/regional-population-age-and-sex/{year}/32350DS0002_{year}.xlsx`.
+  Probed live: HTTP 200, 305 KB, 2,454 SA2 rows.
+- `ErpDataSource` now fetches DS0002 alongside the existing DS0003
+  totals workbook. The two products publish on slightly different
+  cadences (DS0003 path is `2024-25` financial-year-style; DS0002
+  path is `2024` calendar-year-style). A second landing-page scrape
+  resolves DS0002's URL pattern independently.
+- The DS0002 parser (`_parse_ds0002_workbook`) reads Table 1: columns
+  10-12 carry Males/Females/Persons counts; column 14 holds median
+  age; columns 15-17 hold the broad-age-band percentages (0-14 /
+  15-64 / 65+).
+- Age-band **counts** are derived: `persons × pct / 100`, rounded to
+  int. The published percentages are accurate to one decimal so
+  derived counts are within ~0.5% of the underlying single-year
+  counts.
+- Enrichment is **best-effort**. If DS0002 can't be fetched (older
+  releases when 3235.0 wasn't yet published, transient ABS outage,
+  upstream layout shift), the fetcher logs a warning and emits the
+  core DS0003 columns only. The output schema becomes a strict
+  subset; downstream consumers using only `population_total` /
+  `population_history_*` continue to work unchanged.
+- `_parse_xlsx` refactored from `@staticmethod` to instance method so
+  it can drive the DS0002 fetch; both `_parse_ds0003_workbook` and
+  `_parse_ds0002_workbook` are top-level pure functions for
+  unit-test isolation.
+- Real-data check in `tools/verify_real_parsers.py` extended to spot
+  the age/sex columns when DS0002 is fetched — reports a sample SA2
+  with realistic values (males/females, median age, 65+ count).
+
+**Tests:**
+
+- Two new tests in `tests/test_dataset_erp.py`:
+  - `test_load_includes_age_sex_columns_when_available` — verifies
+    the merge path and the persons × pct/100 derivation arithmetic.
+  - `test_load_silently_omits_age_sex_columns_when_landing_fails`
+    — locks in the graceful-degradation contract: a 503 on the
+    DS0002 landing page leaves the core columns intact.
+- Existing three load tests updated to mock the DS0002 chain (via a
+  new `_add_age_sex_mocks` helper) so the parquet-cache test still
+  passes a `pd.testing.assert_frame_equal` round-trip.
+- `test_spec_matches_fetcher__erp` mocks DS0002 too so the spec/fetcher
+  column-set invariant holds.
+
+Live-verification numbers: 2,454 SA2s in DS0002, sample Braidwood
+NSW = 2,337 M + 2,147 F = 4,484 persons (matches DS0003), median
+age 51.0y, 27% aged 65+. Total Australian residents 27.19M
+(13.5M M + 13.7M F) — within rounding of ABS-published headline.
+
 ### Temporal Phase F.4 — GCP 2016 release + dataset rename
 
 **Breaking:** the `gcp_2021` dataset id is renamed to `gcp`. Any config
