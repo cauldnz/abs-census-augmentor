@@ -44,10 +44,11 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        # See test.yml for the v8.1.0 patch-pin rationale.
+        uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: pyproject.toml
@@ -73,7 +74,7 @@ jobs:
 
     steps:
       - name: Open or update tracking issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // Single rolling issue per ABS-drift event. If a stale
