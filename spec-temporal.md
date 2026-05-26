@@ -164,8 +164,8 @@ What each currently-registered dataset publishes, the time windows each release 
 - **Cadence:** per-Census. 2001, 2006, 2011, 2016, 2021 all have IRSAD/IRSD/IEO/IER published.
 - **Coverage:** Census reference date.
 - **Source ASGS edition:** each SEIFA release is on its contemporaneous edition.
-- **Current state:** `seifa_2021` only. `seifa_2016` and `seifa_2011` are tractable additions; older (2006, 2001) are on pre-ASGS geographies (CCD / SLA) — out of scope.
-- **URLs:** 2021 has a predictable URL. 2011 / 2016 live in the legacy `abs@.nsf/mf/2033.0.55.001` archive — URLs need per-edition lookup + real-fetch verify before each lands.
+- **Current state:** `seifa` dataset registers **2016 + 2021** releases (Phase F.3 shipped). `seifa_2011` remains a tractable future addition; older (2006, 2001) are on pre-ASGS geographies (CCD / SLA) — out of scope.
+- **URLs:** Both 2016 and 2021 use the legacy `abs@.nsf/mf/2033.0.55.001` archive with deterministic URLs verified against the live source. 2011 will need similar URL discovery + real-fetch verify before landing.
 
 ### 6.3 ERP (Regional Population, catalogue 3218.0)
 
@@ -458,7 +458,7 @@ Always present in temporal mode:
 | Column | Type | Description |
 |---|---|---|
 | `<input.date_column>` | datetime | Echoed from input (no rename) |
-| `<dataset_id>_release` | str | Release used for this row, per touched dataset. E.g. `seifa_2021_release`, `erp_by_sa2_release`, etc. |
+| `<dataset_id>_release` | str | Release used for this row, per touched dataset. E.g. `seifa_release`, `gcp_release`, `erp_by_sa2_release`, etc. |
 | `sa2_code_edition` | int | The reference ASGS edition the row's canonical `sa2_code` is in. Constant per run. |
 
 Present when at least one dataset's release source edition differs from the reference edition:
@@ -509,7 +509,7 @@ Most caches are already per-release. The breaking changes in this work:
 
 Per reviewer guidance, no auto-migration. Documented as a breaking change in CHANGELOG; users clear their cache and run `census-augment fetch ...` to repopulate.
 
-Dataset-specific caches (`seifa_2021/`, `erp_by_sa2/`, `dss_payments/`, `abs_personal_income/`) already use per-release filenames and don't need restructuring. They just gain more files when historical releases are registered.
+Dataset-specific caches (`seifa/`, `erp_by_sa2/`, `dss_payments/`, `abs_personal_income/`) already use per-release filenames and don't need restructuring. They just gain more files when historical releases are registered.
 
 ---
 

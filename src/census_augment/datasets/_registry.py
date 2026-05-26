@@ -6,7 +6,7 @@ files at the repo root, plus any registered programmatically via
 
 Variable resolution dispatches by namespace:
 
-- ``SEIFA.irsd_decile`` → ``seifa_2021`` dataset, field ``irsd_decile``
+- ``SEIFA.irsd_decile`` → ``seifa`` dataset, field ``irsd_decile``
 - ``ERP.population_total`` → ``erp_by_sa2`` dataset, field
   ``population_total``
 - ``G02.Median_age_persons`` → ``gcp`` dataset, field
@@ -69,7 +69,7 @@ class Registry:
         from census_augment.datasets import registry
 
         registry.list_datasets()           # all specs
-        registry.get("seifa_2021")         # one spec by id
+        registry.get("seifa")              # one spec by id
         registry.resolve_variable("SEIFA.irsd_decile")
                                            # -> (spec, "irsd_decile")
     """

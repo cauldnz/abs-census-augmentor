@@ -342,9 +342,9 @@ def _make_spec(**overrides: object) -> DatasetSpec:
 
 def test_registry_register_and_get() -> None:
     r = Registry()
-    spec = _make_spec(id="seifa_2021", namespace="SEIFA")
+    spec = _make_spec(id="seifa", namespace="SEIFA")
     r.register_spec(spec)
-    assert r.get("seifa_2021") is spec
+    assert r.get("seifa") is spec
     assert r.list_datasets() == [spec]
 
 
@@ -356,7 +356,7 @@ def test_registry_get_unknown_raises() -> None:
 
 def test_registry_resolve_namespaced_variable() -> None:
     r = Registry()
-    seifa = _make_spec(id="seifa_2021", namespace="SEIFA")
+    seifa = _make_spec(id="seifa", namespace="SEIFA")
     erp = _make_spec(id="erp_by_sa2", namespace="ERP")
     r.register_spec(seifa)
     r.register_spec(erp)
@@ -384,7 +384,7 @@ def test_registry_resolve_gcp_table_prefix() -> None:
 
 def test_registry_resolve_unknown_namespace_raises() -> None:
     r = Registry()
-    r.register_spec(_make_spec(id="seifa_2021", namespace="SEIFA"))
+    r.register_spec(_make_spec(id="seifa", namespace="SEIFA"))
     with pytest.raises(RegistryError, match="No dataset registered for namespace"):
         r.resolve_variable("UNKNOWN.foo")
 
