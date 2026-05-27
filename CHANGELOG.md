@@ -9,6 +9,39 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### First cross-dataset PRESETs (DSS + ERP)
+
+Three new PRESET feature specs landed in `features/`, sourcing their
+numerator from `dss_payments` and denominator from `erp_by_sa2`:
+
+- `pct_age_pension_recipients` — share of an SA2's 65+ residents
+  receiving the Age Pension. Pairs naturally with `pct_aged_65_plus`.
+- `pct_jobseeker_recipients` — share of working-age residents on
+  JobSeeker Payment.
+- `welfare_density_index` — composite: sum of nine principal DSS
+  payment-type recipient counts / total resident population. A
+  recipient-density index, not a unique-headcount measure (people
+  on multiple payments are counted once per payment).
+
+These are the first features that exercise the `dataset:` front-matter
+accepting a list — the namespace-based dispatch in `enrich.py` fans
+out to multiple registered fetchers transparently, no engine work
+needed. Yesterday's ERP wishlist columns (`population_65_plus`,
+`population_15_64`, `population_total`) are what unblocked this; the
+PRESETs were impossible to author cleanly before.
+
+The lock-door in `test_preset_columns_match_gcp_schema.py` was extended
+with an `intentionally_non_gcp_presets` set covering the three new
+specs — they're cross-dataset by design and don't need GCP catalogue
+coverage.
+
+`tests/test_wheel_bundles_specs.py` updated to assert the wheel ships
+all nine PRESETs (six GCP + three cross-dataset).
+
+`spec.md` §21.4 + `BACKLOG.md` "Future PRESET features" both updated
+to reflect the new state. Additional cross-dataset PRESET candidates
+documented in BACKLOG for future authoring sessions.
+
 ### ERP wishlist — age bands, gender, median age columns
 
 Extends the `erp_by_sa2` dataset with six new columns sourced from

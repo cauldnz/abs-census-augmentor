@@ -143,9 +143,15 @@ def test_every_registered_preset_has_at_least_one_resolvable_ref() -> None:
     legitimately have zero GCP refs — that case should add itself to
     ``intentionally_non_gcp_presets`` here with a comment.
     """
-    intentionally_non_gcp_presets: set[str] = set()
-    # Today: zero. When cross-dataset PRESETs land (per BACKLOG's
-    # "Future PRESET features"), they'll add their ids here.
+    intentionally_non_gcp_presets: set[str] = {
+        # Cross-dataset PRESETs sourced from DSS + ERP (no GCP refs by
+        # design). They get their own lock-door coverage via the
+        # registered fetchers' column tests — no GCP catalogue
+        # involvement needed.
+        "pct_age_pension_recipients",
+        "pct_jobseeker_recipients",
+        "welfare_density_index",
+    }
 
     gcp_covered = {pid for pid, _, _, _ in _gcp_refs()}
     registered = {spec.id for spec in features.list_features()}

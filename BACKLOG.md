@@ -142,16 +142,21 @@ should land as its own PR when the upstream demand surfaces.
 The v1.3 catalog ships six PRESETs sourced entirely from `gcp`,
 and v1.4 (#18) lands first-class pipeline integration so any config
 can write `variables: {pct_renters: PRESET.pct_renters}` directly.
-Cross-dataset features (e.g. `pct_age_pension_recipients` =
-`DSS.age_pension_recipients` / `ERP.population_65_plus`) are now
-implementable end-to-end — the only remaining blocker is:
+The first three cross-dataset PRESETs shipped 2026-05-27 once the
+ERP age/sex columns landed:
 
-1. ERP exposing age-band breakdowns (currently total population
-   only; spec example file describes age-band columns but the real
-   ERP DS0003 is total-only).
+- `pct_age_pension_recipients` (DSS + ERP)
+- `pct_jobseeker_recipients` (DSS + ERP)
+- `welfare_density_index` (DSS + ERP)
 
-When ERP gets age bands, cross-dataset PRESETs become a markdown-only
-authoring exercise.
+Additional candidates worth authoring when there's appetite (each
+markdown-only, ~30 minutes per spec):
+
+- `pct_disability_support_pension_recipients` — DSS / ERP.population_15_64
+- `pct_parenting_payment_recipients` — DSS (single + partnered) / ERP.population_15_64
+- `pct_youth_allowance_recipients` — DSS (other + student) / ERP.population_15_64 (or narrower 15-24 if exposed)
+- `pct_commonwealth_rent_assistance_recipients` — DSS / ERP.population_total
+- ATO PIA-based ratios (median taxable income vs median household income from GCP, etc.) once a use case surfaces
 
 ## Temporal mode follow-ups (deferred Phases F + G)
 
