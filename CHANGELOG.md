@@ -9,6 +9,83 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-05-27
+
+Major-version cut. The 17 weeks since v1.4.2 (2026-05-10) shipped the
+**temporal-spatial capability** (per-row dataset snapshot selection
+with boundary-edition correctness), **historical-data expansion**
+(SEIFA 2016, GCP 2016, ERP age/sex columns), the **first cross-dataset
+PRESETs**, plus extensive architectural simplification, devcontainer
+hardening, and CI / docs polish.
+
+### Migration from 1.x
+
+Five breaking changes accumulated. Each is loud at config-load /
+runtime — none silently mis-behave.
+
+1. **Dataset id `gcp_2021` → `gcp`** (Phase F.4). The dataset now
+   covers both 2016 and 2021 releases. Variable refs (`G02.*`, etc.)
+   are unchanged. If you reference the dataset by id (e.g.
+   `census-augment discover --dataset gcp_2021`,
+   `Pipeline.augment(..., touched_datasets={"gcp_2021"})`,
+   `_release` output columns), update to `gcp`.
+
+2. **Dataset id `seifa_2021` → `seifa`** (Phase F.3). Same pattern —
+   the dataset now covers 2016 and 2021. `SEIFA.*` variable namespace
+   unchanged.
+
+3. **Dataset id `ato_personal_income` → `abs_personal_income`**
+   (Temporal Phase C). The variable namespace changed from `ATO.*`
+   → `ABS_PIA.*`. Update both id-based and namespace-based refs.
+
+4. **Cache directory layout: flat → per-ASGS-edition subdirs**
+   (Temporal Phase D). The on-disk cache moves from
+   `<cache>/boundaries/*.shp` to `<cache>/boundaries/<year>/*.shp`,
+   and similarly for `mb/` and `census/`. No auto-migration —
+   clear the cache (`rm -rf ~/.cache/census-augment/data` or the
+   platform equivalent) and re-run `census-augment fetch` to
+   repopulate. Dataset-specific caches (`seifa/`, `erp_by_sa2/`,
+   `dss_payments/`, `abs_personal_income/`) already use per-release
+   filenames and don't need wiping.
+
+5. **Devcontainer no longer mounts the host Docker socket.** Only
+   relevant if you used `tools/demo/render.sh --docker` from inside
+   the devcontainer. Native vhs / ttyd / ffmpeg now ship in the
+   container; `render.sh` defaults to `--local` mode. The
+   `--docker` escape hatch is a maintainer-only diagnostic best
+   run from the host.
+
+### Highlights
+
+- **Temporal mode** — set `input.date_column` to enable per-row
+  release selection. Each row's dataset values are looked up at the
+  release's contemporaneous ASGS boundary edition. Cross-sectional
+  mode is the default and unchanged. Designed in `spec-temporal.md`;
+  ships Phases B-H + F.1-F.4 + G.
+- **Historical-data expansion** — SEIFA 2016 (`.xls` via
+  python-calamine) + GCP 2016 (same DataPack parser) both registered
+  alongside their 2021 counterparts. ERP age/sex columns
+  (`population_male/female/0_14/15_64/65_plus`, `median_age`)
+  sourced from ABS 3235.0.
+- **Cross-dataset PRESETs** — first three landed:
+  `pct_age_pension_recipients`, `pct_jobseeker_recipients`,
+  `welfare_density_index`. Exercise the existing
+  list-valued `dataset:` front-matter.
+- **Devcontainer hygiene** — `.venv` now on a named volume (fixes
+  Windows host filesystem collision); /tmp tmpfs (fixes Podman
+  perm-drop); native vhs/ttyd/ffmpeg (no Docker socket bind);
+  Chromium sandbox + IPC config; assorted post-create reliability
+  fixes.
+- **CI** — `Render demos` workflow tightened paths + caches ABS
+  pre-warm; weekly `Real-data parser check` opens / updates a
+  rolling drift issue on failure; GHA pins bumped to Node 24
+  compatible majors.
+- **Architectural** — `_AbsXlsxDataset` shared base + spec loader
+  collapsed four ~330-line dataset modules to ~150 each;
+  fetcher-registration consolidated; parsed-result caches in
+  pickle / parquet sidecars cut warm-cache run from 5.4 s to
+  2.2 s (#43).
+
 ### First cross-dataset PRESETs (DSS + ERP)
 
 Three new PRESET feature specs landed in `features/`, sourcing their

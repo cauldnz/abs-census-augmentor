@@ -6,69 +6,54 @@ them up; they're not raw brainstorms.
 
 ---
 
-## Session checkpoint — 2026-05-26
+## Session checkpoint — 2026-05-27
 
-End of a substantial day's work. State of main is **clean** (CI green
-across all workflows, 669 tests passing, mypy + ruff clean, zero open
-issues, zero open PRs at session end).
+State of main is **clean** (669 tests passing, mypy + ruff clean,
+zero open issues / PRs at session end). Now at **v2.0.0** —
+reconciled `pyproject.toml` with the accumulated `[Unreleased]`
+block via PR #86 + the release-cut PR.
 
-### Shipped today (11 PRs landed on main)
+### Shipped this session (Day 2)
 
-- **#74** — calamine engine probe (groundwork for SEIFA 2016 `.xls`)
-- **#75** — Temporal Phase F.3: SEIFA 2016 release + dataset rename
-  (`seifa_2021` → `seifa`, breaking)
-- **#76** — docs/tape rename followup for F.3
-- **#77** — devcontainer: isolate `.venv` in a named volume (fixes
-  Windows host filesystem collision)
-- **#78** — ruff format + mypy fixes for F.3 files
-- **#79** — `CLAUDE.md`: codify branch + PR workflow as default
-- **#80** — bump GHA action pins to Node 24-compatible majors
-- **#81** — Temporal Phase F.4: GCP 2016 release + dataset rename
-  (`gcp_2021` → `gcp`, breaking)
-- **#82** — ERP wishlist: add age bands, gender, median age columns
-  (sourced from ABS 3235.0 DS0002). Unblocks cross-dataset PRESETs.
-- **#83** — features/*.md `gcp` rename followup (metadata cleanup)
-- **#84** — stale-reference cleanup sweep across docs / examples /
-  test fixtures (post-F.3+F.4 hygiene)
-
-Plus two automatic `demo-publish.yml` runs refreshing the embedded
-GIFs against current main.
+- **#86** — three cross-dataset PRESETs (DSS + ERP):
+  `pct_age_pension_recipients`, `pct_jobseeker_recipients`,
+  `welfare_density_index`. First features to span two registered
+  datasets; markdown-only authoring (framework already supported).
+- **v2.0.0 release cut** — `pyproject.toml` 1.4.2 → 2.0.0.
+  CHANGELOG `[Unreleased]` (48 entries) rolled into `[2.0.0]`
+  with a "Migration from 1.x" section listing the five
+  breaking changes.
+- Plus an automatic `demo-publish.yml` run refreshing the GIFs to
+  show the 9 PRESETs (was 6).
 
 ### Where to pick up tomorrow
 
 Suggested ordering by ROI:
 
-1. **Cross-dataset PRESETs** — markdown-only authoring, ~1 PR per
-   PRESET, smallest possible wins. The ERP age/sex unlock is the
-   reason these are now tractable.
-   - `pct_age_pension_recipients = DSS.age_pension_recipients /
-     ERP.population_65_plus`
-   - `pct_unemployment_recipients_working_age = DSS.* /
-     ERP.population_15_64`
-   - Similar age-conditioned ratios.
+1. **Phase G — G-NAF release-per-row.** Self-contained engineering,
+   ~2-3 days. Designed in `spec-temporal.md` §6 + §12. No external
+   blocker. The biggest remaining piece of the temporal-mode
+   roadmap.
 
-2. **Cut a 2.0.0 release.** The two breaking renames (`seifa_2021`,
-   `gcp_2021`) and the new ERP columns merit a major version bump.
-   `pyproject.toml` still says 1.4.2; the `[Unreleased]` block in
-   `CHANGELOG.md` has roughly 8 distinct deliverables to roll up.
-
-3. **Phase G — G-NAF release-per-row.** Self-contained engineering,
-   ~2-3 days, no external blocker. Designed in `spec-temporal.md`
-   §6 + §12.
-
-4. **F.5 / F.6 historical datasets.** GCP 2011, SEIFA 2011, SEIFA
+2. **F.5 / F.6 historical datasets.** GCP 2011, SEIFA 2011, SEIFA
    2006/2001 — needs URL discovery (legacy `abs@.nsf` archive) and
    for SEIFA 2011 a design discussion about pre-ASGS geography
-   (CCD / SLA).
+   (CCD / SLA). Could pair well with #1 if there's appetite for a
+   "full temporal coverage" push.
+
+3. **More cross-dataset PRESETs.** Candidates listed in "Future
+   PRESET features" below. Each ~30 min of markdown authoring.
+
+4. **`ERP.population_density_per_km2`.** Needs SA2-area lookup
+   wiring. Small new infrastructure, moderate scope.
 
 ### Smaller deferred items
 
-- `ERP.population_density_per_km2` (needs SA2-area lookup wiring)
 - `_template.md` wheel exclusion (4 KB hygiene; design choice in
   this BACKLOG)
-- Stale remote branch cleanup (~33 `origin/claude/*`,
-  `origin/temporal/*`, `origin/polish/*` left over from earlier
-  agent sessions)
+- Stale remote / local branch cleanup if anything has accumulated
+  again (was thorough yesterday — should still be clean unless new
+  worktrees were created)
 
 ---
 
