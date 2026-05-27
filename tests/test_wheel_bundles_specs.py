@@ -158,7 +158,7 @@ def test_wheel_install_populates_both_registries(tmp_path: Path) -> None:
         f"dataset registry empty or missing entries on wheel install:\n{out}"
     )
     assert (
-        "FEATURES=motor_vehicles_per_dwelling,pct_aged_65_plus,pct_drive_to_work,pct_employed_full_time,pct_one_parent_family,pct_renters"
+        "FEATURES=motor_vehicles_per_dwelling,pct_age_pension_recipients,pct_aged_65_plus,pct_drive_to_work,pct_employed_full_time,pct_jobseeker_recipients,pct_one_parent_family,pct_renters,welfare_density_index"
         in out
     ), f"feature registry empty or missing entries on wheel install:\n{out}"
 

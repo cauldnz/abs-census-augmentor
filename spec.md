@@ -1038,9 +1038,9 @@ doesn't need geocoding.
   WARNING when out of bounds, `error` raises. `bounds: warn` is the right
   default because clipping silently masks denominator-mismatch bugs.
 
-### 21.4 Initial PRESET catalogue
+### 21.4 PRESET catalogue
 
-The six features that motivated this design (all sourced from `gcp`):
+GCP-only features (the originals that motivated this design):
 
 - `pct_drive_to_work` — sum of G62 motor-vehicle modes / G62.Tot_P
 - `motor_vehicles_per_dwelling` — G34.Total_motor_vehicles / G34.Total_dwellings
@@ -1049,9 +1049,17 @@ The six features that motivated this design (all sourced from `gcp`):
 - `pct_aged_65_plus` — G04 aged-65+ / G01.Tot_P_P
 - `pct_one_parent_family` — G29 one-parent-with-kids / G29 total-families-with-kids
 
-Cross-dataset features (e.g. DSS / ERP) are supported by the format
-(`dataset:` accepts a list) but deferred to follow-up PRs once the
-registered datasets settle.
+Cross-dataset features (sourced from `dss_payments` + `erp_by_sa2`),
+landed once the ERP age/sex columns shipped (see CHANGELOG entry for
+"ERP wishlist"):
+
+- `pct_age_pension_recipients` — DSS.age_pension_recipients / ERP.population_65_plus
+- `pct_jobseeker_recipients` — DSS.jobseeker_payment_recipients / ERP.population_15_64
+- `welfare_density_index` — sum of nine DSS payment-type recipient counts / ERP.population_total
+
+These exercise the `dataset:` front-matter accepting a list — the
+namespace-based dispatch in `enrich.py` fans out to multiple
+registered fetchers transparently.
 
 ### 21.5 Versioning to GCP release
 
