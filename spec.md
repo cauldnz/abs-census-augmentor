@@ -1059,6 +1059,7 @@ landed once the ERP age/sex columns shipped (see CHANGELOG entry for
 - `pct_parenting_payment_recipients` — sum of DSS parenting-payment streams / ERP.population_15_64
 - `pct_youth_allowance_recipients` — sum of DSS youth-allowance streams / ERP.population_15_64
 - `pct_commonwealth_rent_assistance_recipients` — DSS.commonwealth_rent_assistance_recipients / ERP.population_total
+- `pct_carer_payment_recipients` — DSS.carer_payment_recipients / ERP.population_15_64
 - `welfare_density_index` — sum of nine DSS payment-type recipient counts / ERP.population_total
 
 These exercise the `dataset:` front-matter accepting a list — the

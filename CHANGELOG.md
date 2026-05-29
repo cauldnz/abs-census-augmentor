@@ -9,6 +9,34 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### `pct_carer_payment_recipients` PRESET + BACKLOG cleanup round 2
+
+Two doc / spec changes:
+
+- New PRESET spec `pct_carer_payment_recipients` —
+  `DSS.carer_payment_recipients / ERP.population_15_64`. The Carer
+  Payment incidence among working-age residents. Skipped in PR #90's
+  initial close-out because "carer-vs-cared-for framing needs more
+  thought"; the new spec defends the working-age-resident-of-carer
+  framing explicitly and notes the alternative (a high-care-need
+  population denominator) isn't available at SA2 on the open ABS
+  portal. Brings the cross-dataset PRESET catalogue from 7 → 8 and
+  the total PRESET count from 13 → 14.
+
+- BACKLOG cleanup round 2. PR #88 corrected the "Phase G next
+  priority" wording in the session checkpoint but missed a second
+  stale Phase G mention deeper in the file under "Temporal mode
+  follow-ups (deferred Phases F + G)". This PR removes that
+  duplicate stale entry and replaces it with a pointer to the
+  "Done (no longer next priority)" subsection at the top of the
+  file.
+
+Lock-door + wheel tests extended for the new PRESET id; spec.md
+§21.4 cross-dataset list extended; BACKLOG "Future PRESET features"
+updated (Carer Payment shipped; Carer Allowance candidate noted in
+its place since the income-tested vs non-income-tested distinction
+is now relevant to the catalogue).
+
 ### Four more cross-dataset PRESETs (DSS + ERP) — catalogue close-out
 
 Four additional cross-dataset PRESET specs landed in `features/`,

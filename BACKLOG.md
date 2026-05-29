@@ -163,9 +163,10 @@ ERP age/sex columns landed — seven `DSS + ERP` features shipped:
 - `pct_parenting_payment_recipients`
 - `pct_youth_allowance_recipients`
 - `pct_commonwealth_rent_assistance_recipients`
+- `pct_carer_payment_recipients`
 - `welfare_density_index`
 
-That covers the principal income-support / family payments DSS
+That covers every principal income-support / family payment DSS
 publishes at SA2 level. Further additions worth considering when
 demand surfaces:
 
@@ -177,10 +178,11 @@ demand surfaces:
 - **ATO PIA-based ratios.** Median taxable income vs median
   household income from GCP, share above the income tax threshold,
   etc. — once a use case surfaces.
-- **Carer Payment incidence.** `pct_carer_payment_recipients` =
-  `DSS.carer_payment_recipients / ERP.population_15_64`. Skipped in
-  the initial pass because carer-vs-cared-for population framing
-  needs more thought.
+- **Carer Allowance.** `pct_carer_payment_recipients` only covers
+  the income-tested Carer Payment. Carer Allowance is a
+  non-income-tested supplementary payment for carers in
+  lower-intensity caring roles. Not in the DSS dataset spec
+  currently; could be added if there's demand.
 
 ## Temporal mode follow-ups (deferred Phases F + G)
 
@@ -232,18 +234,15 @@ Concrete shape:
   page how to obtain the 2011 ZIP and where to drop it.
 - ~2 hours of work when motivated by a real user request.
 
-- **Phase G — G-NAF release-per-row.** Currently temporal-mode uses
-  the pipeline's configured G-NAF release for every row, regardless of
-  date. Per-row G-NAF resolution needs the bucketing logic extended
-  upstream of geocoding (today it sits between geocoding and
-  enrichment). DuckDB connection-per-bucket adds memory cost; would
-  want to default to quarterly buckets to keep that bounded. Effort:
-  ~2-3 days.
+**Phase G — G-NAF release-per-row** previously appeared here as
+deferred work. Shipped in v2.0.0 via PR #70 (commit `063a9c0`);
+see the "Done (no longer next priority)" subsection in the session
+checkpoint at the top of this file. The remaining `--local-zip`
+DataPack fallback (above) is the only "Temporal mode follow-up"
+still pending.
 
-Both are designed in `spec-temporal.md`; the implementation is the
-pending work. When picking either up, start by reading §6 and §12
-of the spec, then walk through the Phase E.2 orchestrator in
-`pipeline.py::_enrich_temporal` to understand the pattern.
+The design and implementation rationale for the temporal-mode
+orchestration lives in `spec-temporal.md` §6 + §12 + §13.
 
 ## Slow `Render demos` CI workflow — partial fix shipped
 
