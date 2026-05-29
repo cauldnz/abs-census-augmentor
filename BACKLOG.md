@@ -30,22 +30,37 @@ block via PR #86 + the release-cut PR.
 
 Suggested ordering by ROI:
 
-1. **Phase G — G-NAF release-per-row.** Self-contained engineering,
-   ~2-3 days. Designed in `spec-temporal.md` §6 + §12. No external
-   blocker. The biggest remaining piece of the temporal-mode
-   roadmap.
+1. **F.5 / F.6 historical datasets.** GCP 2011 + SEIFA 2011 (both
+   ASGS Edition 1). Needs URL discovery (legacy `abs@.nsf` archive)
+   and ASGS Edition 1 boundary support. SEIFA 2001/2006 are
+   explicitly out-of-scope per `spec-temporal.md` §17 (CCD/SLA
+   pre-ASGS geography). The biggest remaining temporal-mode
+   coverage gap.
 
-2. **F.5 / F.6 historical datasets.** GCP 2011, SEIFA 2011, SEIFA
-   2006/2001 — needs URL discovery (legacy `abs@.nsf` archive) and
-   for SEIFA 2011 a design discussion about pre-ASGS geography
-   (CCD / SLA). Could pair well with #1 if there's appetite for a
-   "full temporal coverage" push.
-
-3. **More cross-dataset PRESETs.** Candidates listed in "Future
+2. **More cross-dataset PRESETs.** Candidates listed in "Future
    PRESET features" below. Each ~30 min of markdown authoring.
 
-4. **`ERP.population_density_per_km2`.** Needs SA2-area lookup
+3. **`ERP.population_density_per_km2`.** Needs SA2-area lookup
    wiring. Small new infrastructure, moderate scope.
+
+4. **Address-retirement awareness** (Phase G refinement,
+   spec-temporal.md §17 deferred): "address X existed in 2018,
+   retired in 2022; row dated 2020 should hit X even though X is
+   missing from the 2025 release." Today an unmatched address
+   falls through to fuzzy / Nominatim — same fallback as Phase F.2.
+   Marked out-of-scope in the original Phase G design but worth
+   revisiting if user demand surfaces.
+
+### Done (no longer "next priority")
+
+- ~~Phase G — G-NAF release-per-row.~~ Shipped in **v2.0.0** via
+  PR #70 (commit 063a9c0). The `gnaf_release` output column, per-row
+  release dispatch, and `Pipeline.from_config` wiring are all live.
+  14 dedicated tests in `tests/test_pipeline_temporal.py` and
+  `tests/test_temporal_helpers.py`. Yesterday's checkpoint
+  incorrectly promoted this as next priority — it was already in
+  the 48 `[Unreleased]` entries that rolled into v2.0.0. Corrected
+  to avoid the same loop next session.
 
 ### Smaller deferred items
 
