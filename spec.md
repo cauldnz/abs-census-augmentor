@@ -1055,6 +1055,10 @@ landed once the ERP age/sex columns shipped (see CHANGELOG entry for
 
 - `pct_age_pension_recipients` — DSS.age_pension_recipients / ERP.population_65_plus
 - `pct_jobseeker_recipients` — DSS.jobseeker_payment_recipients / ERP.population_15_64
+- `pct_disability_support_pension_recipients` — DSS.disability_support_pension_recipients / ERP.population_15_64
+- `pct_parenting_payment_recipients` — sum of DSS parenting-payment streams / ERP.population_15_64
+- `pct_youth_allowance_recipients` — sum of DSS youth-allowance streams / ERP.population_15_64
+- `pct_commonwealth_rent_assistance_recipients` — DSS.commonwealth_rent_assistance_recipients / ERP.population_total
 - `welfare_density_index` — sum of nine DSS payment-type recipient counts / ERP.population_total
 
 These exercise the `dataset:` front-matter accepting a list — the

@@ -154,21 +154,33 @@ should land as its own PR when the upstream demand surfaces.
 The v1.3 catalog ships six PRESETs sourced entirely from `gcp`,
 and v1.4 (#18) lands first-class pipeline integration so any config
 can write `variables: {pct_renters: PRESET.pct_renters}` directly.
-The first three cross-dataset PRESETs shipped 2026-05-27 once the
-ERP age/sex columns landed:
+The cross-dataset PRESET catalogue closed out 2026-05-29 once the
+ERP age/sex columns landed — seven `DSS + ERP` features shipped:
 
-- `pct_age_pension_recipients` (DSS + ERP)
-- `pct_jobseeker_recipients` (DSS + ERP)
-- `welfare_density_index` (DSS + ERP)
+- `pct_age_pension_recipients`
+- `pct_jobseeker_recipients`
+- `pct_disability_support_pension_recipients`
+- `pct_parenting_payment_recipients`
+- `pct_youth_allowance_recipients`
+- `pct_commonwealth_rent_assistance_recipients`
+- `welfare_density_index`
 
-Additional candidates worth authoring when there's appetite (each
-markdown-only, ~30 minutes per spec):
+That covers the principal income-support / family payments DSS
+publishes at SA2 level. Further additions worth considering when
+demand surfaces:
 
-- `pct_disability_support_pension_recipients` — DSS / ERP.population_15_64
-- `pct_parenting_payment_recipients` — DSS (single + partnered) / ERP.population_15_64
-- `pct_youth_allowance_recipients` — DSS (other + student) / ERP.population_15_64 (or narrower 15-24 if exposed)
-- `pct_commonwealth_rent_assistance_recipients` — DSS / ERP.population_total
-- ATO PIA-based ratios (median taxable income vs median household income from GCP, etc.) once a use case surfaces
+- **Narrower-denominator variants.** `pct_youth_allowance_recipients`
+  currently uses a working-age denominator; a single-year-age-band
+  ERP would let us compute the same against the actual 15-24
+  eligibility window. Same trick for any DSP-style metric where
+  the eligible-age band differs from `population_15_64`.
+- **ATO PIA-based ratios.** Median taxable income vs median
+  household income from GCP, share above the income tax threshold,
+  etc. — once a use case surfaces.
+- **Carer Payment incidence.** `pct_carer_payment_recipients` =
+  `DSS.carer_payment_recipients / ERP.population_15_64`. Skipped in
+  the initial pass because carer-vs-cared-for population framing
+  needs more thought.
 
 ## Temporal mode follow-ups (deferred Phases F + G)
 
