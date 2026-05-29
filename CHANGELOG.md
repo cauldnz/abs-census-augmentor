@@ -9,6 +9,75 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — #92: ERP temporal-release resolution via historical-year projection
+
+Temporal-mode runs that requested `ERP.*` variables for rows whose
+`date_column` resolved to a non-latest publication year raised:
+
+```
+RuntimeError: ERP release '2017' not found. Available: ['2024']
+```
+
+**Root cause.** ERP has a fundamentally different release shape from
+SEIFA / GCP / DSS. ABS publishes ONE annual workbook per cycle that
+carries the full 2001-onwards history in `population_history_<year>`
+columns. There's no separate "ERP 2017 workbook" on the ABS site —
+historical data lives inside the latest publication. The temporal
+resolver was treating ERP like SEIFA (one snapshot per release year)
+and failing on any non-latest year.
+
+**Fix.** ErpDataSource now serves any historical year ≤ latest via
+column projection at `load()` time:
+
+- The fetcher resolves the latest workbook URL regardless of the
+  requested release; `_physical_release_year` tracks the actual
+  workbook year, `_resolved_release` tracks the logical (possibly
+  historical) year the caller asked for.
+- `_xlsx_path` / `_parquet_path` overrides use the *physical* year so
+  every historical release shares the same on-disk cache — no
+  duplicate downloads.
+- `load()` projects: when `_resolved_release` ≠ `_physical_release_year`,
+  swaps `population_total` from `population_history_<release>` and sets
+  `reference_year` to the requested year.
+- Age/sex columns are sourced from the latest 3235.0 publication only
+  and have no historical breakdown. For historical releases the
+  fetcher nulls them out so users don't pair (e.g.) 2017 totals with
+  2024 demographics. PRESETs depending on age/sex columns
+  (`pct_age_pension_recipients`, etc.) therefore produce NaN for
+  historical ERP releases — documented in `datasets/erp_by_sa2.md`.
+- Requests for years more recent than the latest workbook still raise
+  loudly — they're genuinely out-of-range.
+
+**Spec change (related).** `datasets/erp_by_sa2.md`'s
+`available_releases` now exposes the full 2001-onwards historical
+range. The `asgs_edition_by_release` mapping changes:
+**all years map to Edition 3** (was 2016-2021 → Edition 2,
+2022-2024 → Edition 3). This reflects what ABS actually publishes —
+back-data is re-aggregated onto the current ASGS edition via internal
+concordance. The augmentor reads what ABS ships; it doesn't apply
+additional correspondence to recover original-edition geometry.
+
+**Test-vehicle side effect.** Three `test_pipeline_temporal.py`
+tests were structurally using ERP as the multi-edition test vehicle
+based on the previous (incorrect) spec. With the spec corrected,
+those tests no longer trigger cross-edition behaviour. They're
+`@pytest.mark.xfail` with clear notes pointing at SEIFA (which
+genuinely spans Editions 1, 2, 3 per F.6) as the proper vehicle for
+the migrated tests in a follow-up PR. The orchestrator's
+cross-edition correctness remains covered by SEIFA-based tests.
+
+Four new tests in `test_dataset_erp.py`:
+
+- `test_load_with_historical_release_projects_population_total` —
+  verifies a 2017 request projects from `population_history_2017`.
+- `test_load_with_historical_release_nulls_age_sex_columns` — locks
+  in the null-age/sex behaviour.
+- `test_load_with_historical_release_outside_coverage_raises` — a
+  year ≤ latest but not in workbook history raises with the right
+  message.
+- `test_load_latest_release_unchanged_by_projection` —
+  regression-prevention: `release="latest"` returns data unchanged.
+
 ### Fixed — #91 Stage 1: loud error replacing silent NaN for GCP cross-edition
 
 Temporal-mode runs that requested GCP variables for rows whose

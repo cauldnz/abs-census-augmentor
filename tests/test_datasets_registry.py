@@ -278,14 +278,29 @@ def test_existing_seifa_spec_has_temporal_block() -> None:
     assert "2021" in spec.temporal.available_releases
 
 
-def test_existing_erp_spec_has_temporal_block_with_edition_transition() -> None:
-    """ERP's temporal block declares the 2021→2022 ASGS edition
-    transition (2021 release on Edition 2; 2022 onwards on Edition 3)."""
+def test_existing_erp_spec_has_temporal_block_all_releases_on_edition_3() -> None:
+    """ERP's temporal block has all historical releases on the *current*
+    ASGS edition (3). ABS re-aggregates back-data onto the current
+    boundaries via internal concordance — there's no per-original-edition
+    ERP variant in the products the augmentor fetches.
+
+    Was previously asserted as a 2021→2022 edition transition; that
+    matched the original publication editions but not the data ABS
+    actually ships. Fixed for issue #92.
+    """
     repo_root = Path(__file__).resolve().parents[1]
     spec = parse_dataset_spec(repo_root / "datasets" / "erp_by_sa2.md")
     assert spec.temporal is not None
-    assert spec.temporal.asgs_edition_by_release["2021"] == 2
-    assert spec.temporal.asgs_edition_by_release["2022"] == 3
+    # Every release year maps to Edition 3 — the only ASGS edition the
+    # ABS-published workbook is keyed by today.
+    for year in ("2001", "2010", "2016", "2021", "2024"):
+        assert spec.temporal.asgs_edition_by_release[year] == 3, (
+            f"ERP release {year!r} should be on Edition 3 (current); "
+            f"got {spec.temporal.asgs_edition_by_release[year]}"
+        )
+    # The full historical range (2001 onwards) is exposed.
+    assert "2001" in spec.temporal.available_releases
+    assert "2024" in spec.temporal.available_releases
 
 
 def test_parse_missing_required_field_raises(tmp_path: Path) -> None:

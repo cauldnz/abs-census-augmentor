@@ -125,6 +125,16 @@ class ErpDataSource(_AbsXlsxDataset):
         # actual age/sex release year if they care.
         self._resolved_age_sex_release: str | None = None
         self._resolved_age_sex_url: str | None = None
+        # Issue #92 fix: ERP is structurally different from SEIFA / GCP /
+        # DSS. ABS publishes ONE annual workbook per cycle that contains
+        # the full 2001-onwards history in ``population_history_<year>``
+        # columns. Temporal mode resolves releases per row date, so we
+        # accept any historical year as a logical release and project
+        # the right history column into ``population_total`` at load()
+        # time. ``_physical_release_year`` tracks the actual workbook
+        # year (latest); ``_resolved_release`` tracks the logical
+        # (possibly historical) year the caller asked for.
+        self._physical_release_year: str | None = None
 
     # ---- hooks ---------------------------------------------------------
 
@@ -169,24 +179,123 @@ class ErpDataSource(_AbsXlsxDataset):
                 f"{self._landing_url}. Page layout may have changed."
             )
 
-        if self._release_request == "latest":
-            picked = max(candidates, key=lambda t: t[0])
-        else:
-            matching = [c for c in candidates if c[0] == self._release_request]
-            if not matching:
-                raise RuntimeError(
-                    f"ERP release {self._release_request!r} not found. "
-                    f"Available: {sorted({c[0] for c in candidates}, reverse=True)}"
-                )
-            picked = matching[0]
+        # Always pick the latest workbook — it's the only one ABS reliably
+        # hosts and its data goes back to 2001 via the
+        # ``population_history_<year>`` columns. Historical years
+        # requested by the temporal-mode resolver project from those
+        # columns at load() time (issue #92 fix).
+        latest_year, latest_url = max(candidates, key=lambda t: t[0])
+        self._physical_release_year = latest_year
+        self._resolved_url = latest_url
 
-        self._resolved_release = picked[0]
-        self._resolved_url = picked[1]
+        if self._release_request == "latest":
+            self._resolved_release = latest_year
+        elif self._release_request.isdigit():
+            requested_year = int(self._release_request)
+            latest_year_int = int(latest_year)
+            if requested_year > latest_year_int:
+                raise RuntimeError(
+                    f"ERP release {self._release_request!r} is more recent "
+                    f"than the latest published workbook ({latest_year}). "
+                    f"Available historical range: 2001..{latest_year}."
+                )
+            # Lower bound (2001) is validated at load() time against the
+            # actual ``population_history_*`` columns the workbook
+            # contains — keeps this method's only network round-trip the
+            # landing-page scrape.
+            self._resolved_release = self._release_request
+        else:
+            raise RuntimeError(f"ERP release {self._release_request!r} is not a year or 'latest'.")
+
         _log.info(
-            "Resolved ERP release=%s, url=%s",
+            "Resolved ERP release=%s (physical workbook: %s), url=%s",
             self._resolved_release,
+            self._physical_release_year,
             self._resolved_url,
         )
+
+    # ---- cache paths use the *physical* year (issue #92) ---------------
+
+    @property
+    def _xlsx_path(self) -> Path:
+        """Cache the XLSX under the *physical* release year, not the
+        logical release. Every historical release shares the same
+        on-disk workbook — ABS only publishes one file per cycle that
+        contains the full back-series.
+        """
+        # Force resolve so _physical_release_year is populated.
+        self._resolve_release()
+        assert self._physical_release_year is not None
+        return self._root / f"erp-sa2-{self._physical_release_year}.xlsx"
+
+    @property
+    def _parquet_path(self) -> Path:
+        """Same — one parsed-result cache per *physical* workbook, not
+        per logical release. The projection in :meth:`load` picks the
+        right historical column at read time.
+        """
+        self._resolve_release()
+        assert self._physical_release_year is not None
+        return self._root / f"erp-sa2-{self._physical_release_year}.parquet"
+
+    # ---- load() with historical-year projection (issue #92) ------------
+
+    def load(self) -> pd.DataFrame:
+        """Return ERP data for the configured ``release``.
+
+        For ``release="latest"`` (or when the resolved release matches
+        the physical workbook year): returns the full data as parsed
+        from the workbook — same shape as before this fix.
+
+        For a historical release (e.g. ``release="2017"``): projects
+        the ``population_history_<year>`` column into
+        ``population_total`` and updates ``reference_year``.
+
+        Age/sex columns (3235.0 DS0002) are sourced from the latest
+        workbook regardless of release. For historical releases we
+        null them out so users don't accidentally use current
+        demographics for historical population totals. This is
+        documented in ``datasets/erp_by_sa2.md`` and on issue #92.
+        """
+        df = super().load()
+        # Defensive: super().load() returns a DataFrame indexed by
+        # sa2_code_2021. _resolve_release has run by this point, so
+        # both _resolved_release and _physical_release_year are
+        # populated.
+        assert self._resolved_release is not None
+        assert self._physical_release_year is not None
+        if self._resolved_release == self._physical_release_year:
+            return df
+        requested = self._resolved_release
+        hist_col = f"population_history_{requested}"
+        if hist_col not in df.columns:
+            available = sorted(
+                c.removeprefix("population_history_")
+                for c in df.columns
+                if c.startswith("population_history_")
+            )
+            raise RuntimeError(
+                f"ERP release {requested!r} is not in the workbook's "
+                f"historical coverage. Available years: {available}. "
+                f"This usually means the requested year predates ABS's "
+                f"published series start (typically 2001)."
+            )
+        df = df.copy()
+        df["population_total"] = df[hist_col]
+        df["reference_year"] = int(requested)
+        # Age/sex columns reflect the latest workbook only — null them
+        # for historical releases. See class docstring + issue #92.
+        for col in (
+            "population_male",
+            "population_female",
+            "median_age",
+            "population_0_14",
+            "population_15_64",
+            "population_65_plus",
+        ):
+            if col in df.columns:
+                df[col] = None
+        return df
 
     # ---- parsing -------------------------------------------------------
 
