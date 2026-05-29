@@ -9,6 +9,52 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Four more cross-dataset PRESETs (DSS + ERP) — catalogue close-out
+
+Four additional cross-dataset PRESET specs landed in `features/`,
+completing the principal income-support / family payment coverage
+from DSS at SA2 level:
+
+- `pct_disability_support_pension_recipients` —
+  `DSS.disability_support_pension_recipients / ERP.population_15_64`.
+  Working-age DSP incidence; principal long-term disability uptake
+  measure.
+- `pct_parenting_payment_recipients` —
+  sum of `DSS.parenting_payment_single_recipients` +
+  `DSS.parenting_payment_partnered_recipients` /
+  `ERP.population_15_64`. Composite parenting-payment incidence
+  (sums both single and partnered streams since they answer
+  related questions about the same low-income-families-with-young-
+  children population).
+- `pct_youth_allowance_recipients` —
+  sum of `DSS.youth_allowance_other_recipients` +
+  `DSS.youth_allowance_student_and_apprentice_recipients` /
+  `ERP.population_15_64`. Under-22 analogue of
+  `pct_jobseeker_recipients`.
+- `pct_commonwealth_rent_assistance_recipients` —
+  `DSS.commonwealth_rent_assistance_recipients / ERP.population_total`.
+  CRA-supported private-rental incidence (uses population_total
+  rather than working-age because CRA spans all income-support
+  payment types from Youth Allowance through Age Pension).
+
+Each spec includes the same "Why this denominator / Why not X /
+Edge cases / Bounds (typical)" sections as the first three —
+particularly important for the parenting-payment and youth-allowance
+sums where the denominator framing is a real design choice that
+downstream consumers might want to override.
+
+The lock-door in `test_preset_columns_match_gcp_schema.py`
+extended (`intentionally_non_gcp_presets` now lists all seven
+cross-dataset PRESETs). The `test_wheel_bundles_specs.py` FEATURES
+assertion updated to include all 13 PRESETs (six GCP + seven
+cross-dataset).
+
+`spec.md` §21.4 + `BACKLOG.md` "Future PRESET features" both
+updated. BACKLOG marks the cross-dataset catalogue as closed-out;
+new candidates ("Carer Payment incidence", "ATO PIA-based ratios",
+narrower-denominator variants once single-year ages are available)
+documented for future authoring sessions.
+
 ### Temporal Phase F.6 — SEIFA 2011 release + ASGS Edition 1 boundary support
 
 Extends the `seifa` dataset with the 2011 release (ASGS Edition 1) and

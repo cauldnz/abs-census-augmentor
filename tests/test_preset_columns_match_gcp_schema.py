@@ -149,7 +149,11 @@ def test_every_registered_preset_has_at_least_one_resolvable_ref() -> None:
         # registered fetchers' column tests — no GCP catalogue
         # involvement needed.
         "pct_age_pension_recipients",
+        "pct_commonwealth_rent_assistance_recipients",
+        "pct_disability_support_pension_recipients",
         "pct_jobseeker_recipients",
+        "pct_parenting_payment_recipients",
+        "pct_youth_allowance_recipients",
         "welfare_density_index",
     }
 
