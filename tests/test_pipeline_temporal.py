@@ -772,3 +772,196 @@ def test_cross_sectional_mode_unaffected_by_temporal_code(tmp_path: Path) -> Non
     # No temporal columns; releases_used is None.
     assert "erp_by_sa2_release" not in result.df.columns
     assert result.releases_used is None
+
+
+# ---- issue #91: GCP cross-edition emits loud error, not silent NaN -------
+
+
+def test_temporal_gcp_cross_edition_raises_loud_error(tmp_path: Path) -> None:
+    """A row whose date resolves to GCP 2016 (Edition 2) with a GCP
+    variable in the config should raise a clear ``ValueError`` naming
+    the affected variables and the resolved non-reference releases —
+    rather than silently returning NaN.
+
+    Issue #91 root-cause: ``_variables_for_datasets``'s
+    ``include_gcp_and_preset`` shortcut routes GCP variables to the
+    reference-edition sub-enricher only, so the lookup uses Edition-3
+    SA2 codes against the 2016 DataPack (keyed by Edition-2 codes) and
+    misses. Until the per-release ``DataPacksDataSource`` routing
+    lands (#91 Stage 2), the loud error preserves intent — clearer
+    failure mode than silent NaN with misleading ``gcp_release``
+    annotation.
+
+    Background: see issue #91 / spec-temporal.md §9 PRESET note.
+    """
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    # Config: temporal mode + GCP variable.
+    config = Config(
+        input=InputConfig(
+            path=tmp_path / "in.csv",
+            latitude_column="lat",
+            longitude_column="lon",
+            date_column="transaction_date",
+        ),
+        output=OutputConfig(path=tmp_path / "out.csv"),
+        census=CensusConfig(),
+        data_sources=DataSourcesConfig(),
+        geocoding=GeocodingConfig(
+            providers=["nominatim"],
+            nominatim=NominatimConfig(user_agent="test/0.1 (test@example.com)"),
+        ),
+        variables={"pop_total": "G01.Tot_P_P"},
+        temporal=TemporalConfig(),
+    )
+
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(),
+        base_url="https://x",
+        root=tmp_path / "ds",
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+
+    pipeline = Pipeline(
+        config=config,
+        geocoders=[_FakeGeocoder()],
+        spatial=spatial,
+        enricher=enricher,
+        extra_spatial_indices={2: _edition_2_synthetic_spatial_index()},
+    )
+
+    # 2017-06-15 resolves to GCP release 2016 under closest_at_or_before
+    # (gcp available_releases = ["2016", "2021"]).
+    df = pd.DataFrame(
+        {
+            "lat": [-33.86],
+            "lon": [151.21],
+            "transaction_date": pd.to_datetime(["2017-06-15"]),
+        }
+    )
+
+    with pytest.raises(
+        ValueError, match="GCP cross-edition routing is not yet implemented"
+    ) as excinfo:
+        pipeline.augment(df)
+
+    # The error names the affected variable, the non-reference release,
+    # and points at the tracking issue + the workaround.
+    msg = str(excinfo.value)
+    assert "pop_total" in msg
+    assert "2016" in msg
+    assert "issue #91" in msg
+    assert "Workarounds" in msg
+
+
+def test_temporal_gcp_no_cross_edition_runs_cleanly(tmp_path: Path) -> None:
+    """The #91 guard fires *only* when a GCP variable is requested AND
+    the row resolves to a non-reference GCP release. A temporal-mode
+    config with a GCP variable whose date stays on the reference
+    edition (2021 + onwards) runs without raising — the guard
+    correctly scopes its loud-error to the broken combination.
+
+    This is the regression-prevention companion of the test above:
+    we mustn't accidentally widen the guard and break the
+    in-reference-edition temporal path.
+    """
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = Config(
+        input=InputConfig(
+            path=tmp_path / "in.csv",
+            latitude_column="lat",
+            longitude_column="lon",
+            date_column="transaction_date",
+        ),
+        output=OutputConfig(path=tmp_path / "out.csv"),
+        census=CensusConfig(),
+        data_sources=DataSourcesConfig(),
+        geocoding=GeocodingConfig(
+            providers=["nominatim"],
+            nominatim=NominatimConfig(user_agent="test/0.1 (test@example.com)"),
+        ),
+        variables={"pop_total": "G01.Tot_P_P"},
+        temporal=TemporalConfig(),
+    )
+
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(),
+        base_url="https://x",
+        root=tmp_path / "ds",
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+
+    # Stub enricher.add_enrichment_columns so we don't actually try
+    # to fetch GCP — this test exercises only the guard, not the
+    # downstream lookup.
+    from census_augment import enrich as enrich_module
+
+    def _no_op_add(self: CensusEnricher, df: pd.DataFrame, *, sa2_code_col: str) -> pd.DataFrame:
+        df = df.copy()
+        df["sa2_pop_total"] = 12345.0
+        return df
+
+    enrich_module.CensusEnricher.add_enrichment_columns = _no_op_add  # type: ignore[assignment]
+
+    pipeline = Pipeline(
+        config=config,
+        geocoders=[_FakeGeocoder()],
+        spatial=spatial,
+        enricher=enricher,
+    )
+
+    # 2023-06-15 + closest_at_or_before resolves GCP to release 2021
+    # (reference edition). No cross-edition involved → guard stays silent.
+    df = pd.DataFrame(
+        {
+            "lat": [-33.86],
+            "lon": [151.21],
+            "transaction_date": pd.to_datetime(["2023-06-15"]),
+        }
+    )
+    result = pipeline.augment(df)
+
+    # No exception raised; output has the GCP value.
+    assert "sa2_pop_total" in result.df.columns
+    assert result.df["sa2_pop_total"].iloc[0] == 12345.0
+    # gcp_release column reports the reference-edition release.
+    assert result.df["gcp_release"].iloc[0] == "2021"
