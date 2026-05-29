@@ -47,6 +47,18 @@ _EDITION_2_SA2_URL = (
     "&July%202016&12.07.2016&Latest"
 )
 
+#: Edition 1 SA2 shapefile download URL — same Lotus Notes "openagent"
+#: form as Edition 2. The UNID hex hash
+#: (``7130A5514535C5FCCA257801000D3FBD``) is the SA2-2011 page entry
+#: in the ABS subscriber DB, captured via WebFetch 2026-05-29 against
+#: the live 1270.0.55.001 (ASGS Vol 1) July 2011 details page.
+_EDITION_1_SA2_URL = (
+    "https://www.abs.gov.au/ausstats/subscriber.nsf/log"
+    "?openagent&1270055001_sa2_2011_aust_shape.zip&1270.0.55.001"
+    "&Data%20Cubes&7130A5514535C5FCCA257801000D3FBD&0"
+    "&July%202011&23.12.2010&Latest"
+)
+
 #: Datum literal — only the two ABS currently publishes.
 Datum = Literal["GDA94", "GDA2020"]
 
@@ -78,8 +90,8 @@ class BoundaryEditionSpec:
     :class:`MbCorrespondenceDataSource` handles directly.
     """
 
-    edition: Literal[2, 3]
-    year: Literal[2016, 2021]
+    edition: Literal[1, 2, 3]
+    year: Literal[2011, 2016, 2021]
     datum: Datum
     sa2_zip_filename: str
     sa2_download_url: str
@@ -129,19 +141,49 @@ def edition_2_spec() -> BoundaryEditionSpec:
     )
 
 
+def edition_1_spec() -> BoundaryEditionSpec:
+    """Return the spec for ASGS Edition 1 (Jul 2011 – Jun 2016).
+
+    The first ASGS edition; same Lotus Notes openagent URL form as
+    Edition 2. GDA94 only (GDA2020 didn't exist yet). DBF columns use
+    the ``11`` year-suffix convention (``SA2_MAIN11`` / ``SA2_NAME11``).
+
+    Live-probed 2026-05-29: 2,214 SA2 polygons, CRS GDA94 / EPSG:4283,
+    9-digit SA2 codes matching SEIFA 2011's ``2011 Statistical Area
+    Level 2 Code (SA2)`` column.
+    """
+    return BoundaryEditionSpec(
+        edition=1,
+        year=2011,
+        datum="GDA94",
+        sa2_zip_filename="1270055001_sa2_2011_aust_shape.zip",
+        sa2_download_url=_EDITION_1_SA2_URL,
+        sa2_code_column="SA2_MAIN11",
+        sa2_name_column="SA2_NAME11",
+    )
+
+
 def edition_spec_for(
     *,
-    year: Literal[2016, 2021],
+    year: Literal[2011, 2016, 2021],
     datum: Datum,
     base_url: str | None = None,
 ) -> BoundaryEditionSpec:
     """Pick the boundary edition spec matching ``(year, datum)``.
 
     ``base_url`` only affects Edition 3 (where the URL is base + filename);
-    Edition 2's URL is fixed to the ABS openagent form. Raises
-    :class:`ValueError` for ``(2016, "GDA2020")`` — no such ABS release
-    exists.
+    Editions 1 and 2 use the fixed ABS openagent URL form. Raises
+    :class:`ValueError` for ``(2011, "GDA2020")`` and
+    ``(2016, "GDA2020")`` — neither ABS release exists in GDA2020.
     """
+    if year == 2011:
+        if datum != "GDA94":
+            raise ValueError(
+                f"ASGS Edition 1 (2011 boundaries) is only published in GDA94; "
+                f"got datum={datum!r}. Set census.datum=GDA94 or use a more "
+                f"recent census.year for GDA2020 boundaries."
+            )
+        return edition_1_spec()
     if year == 2016:
         if datum != "GDA94":
             raise ValueError(
@@ -155,5 +197,5 @@ def edition_spec_for(
             return edition_3_spec(datum=datum)
         return edition_3_spec(datum=datum, base_url=base_url)
     raise ValueError(  # pragma: no cover — Literal typing catches this at type-check time
-        f"Unsupported boundary year {year!r}; expected 2016 or 2021."
+        f"Unsupported boundary year {year!r}; expected 2011, 2016 or 2021."
     )

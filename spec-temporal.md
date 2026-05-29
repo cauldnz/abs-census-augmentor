@@ -605,13 +605,17 @@ The §2 invariant — boundary edition matches the release's compiled edition �
 
 Initial historical scope (in this work):
 
-- SEIFA 2016 (Edition 2)
-- GCP 2016 (Edition 2)
-- ERP back to 2016 (Edition 2 series)
-- DSS back to 2015 (the earliest SA2-coded quarter)
-- ABS PIA back to 2010-11
+- **SEIFA 2011** (Edition 1, shipped Phase F.6) — `.xls` via python-calamine, same parser as 2016.
+- **SEIFA 2016** (Edition 2, shipped Phase F.3)
+- **GCP 2016** (Edition 2, shipped Phase F.4)
+- **ERP** back to 2016 (Edition 2 series)
+- **DSS** back to 2015 (the earliest SA2-coded quarter)
+- **ABS PIA** back to 2010-11
+- **ASGS Edition 1 boundary** (shipped alongside Phase F.6 — used by SEIFA 2011 temporal-mode lookups).
 
-Pre-2011 datasets (CCD / SLA geography) remain out of scope.
+Pre-2011 SEIFA releases (2001, 2006) remain out of scope — they use CCD/SLA pre-ASGS geography.
+
+**GCP 2011 / BCP 2011** is out of scope at the data-source layer: ABS gates the 2011 DataPack behind a login at `https://www.censusdata.abs.gov.au/datapacks` with no public direct URL. Verified 2026-05-29 by probing multiple URL patterns + the live datapacks home page. A future "user-supplied ZIP" fallback on `DataPacksDataSource` could unblock 2011 GCP for power users who download manually; tracked in BACKLOG.
 
 ### Q4 — Migration of averages/medians: preserve source value
 

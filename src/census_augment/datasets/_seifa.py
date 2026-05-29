@@ -60,7 +60,21 @@ DEFAULT_SEIFA_2016_URL = (
     "&Data%20Cubes&C9F7AD36397CB43DCA25825D000F917C&0&2016&27.03.2018&Latest"
 )
 
+# Direct-link to the SA2 SEIFA 2011 workbook on the ABS site (Lotus
+# Notes openagent form — same family as the 2016 URL but with a
+# different UNID hex and a different filename convention ("SA2
+# Indexes" instead of "2033055001 - sa2 indexes"). The naming change
+# reflects ABS's evolving file-naming convention between the 2011 and
+# 2016 SEIFA releases. Captured via WebFetch 2026-05-29 against the
+# 2033.0.55.001 SEIFA 2011 details page.
+DEFAULT_SEIFA_2011_URL = (
+    "https://www.abs.gov.au/AUSSTATS/subscriber.nsf/log?"
+    "openagent&2033.0.55.001%20SA2%20Indexes.xls&2033.0.55.001"
+    "&Data%20Cubes&76D0BC44356DC34ACA257B3B001A4913&0&2011&12.11.2014&Latest"
+)
+
 _RELEASE_URLS: dict[str, str] = {
+    "2011": DEFAULT_SEIFA_2011_URL,
     "2016": DEFAULT_SEIFA_2016_URL,
     "2021": DEFAULT_SEIFA_2021_URL,
 }
@@ -119,10 +133,14 @@ _SA2_CODE_HEADER_FRAGMENTS = (
 def _read_grids(path: Path, release: str) -> dict[str, list[list[object]]]:
     """Read a SEIFA workbook into a sheet-name → row-grid dict.
 
-    Selects the reader based on release:
+    Selects the reader based on the workbook format the release uses:
 
-    - ``"2021"`` — openpyxl (native .xlsx reader; already a project dep).
-    - ``"2016"`` — python-calamine (Rust reader; handles .xls without xlrd).
+    - ``"2021"`` — modern .xlsx via openpyxl (already a project dep).
+    - ``"2016"`` and ``"2011"`` — legacy .xls via python-calamine (Rust
+      reader; handles both .xls and .xlsx without the deprecated xlrd
+      dependency). Both releases produce schematically identical grids
+      (8 sheets, Tables 1-6 with the same layout) so they share the
+      same downstream parser.
 
     Returns a dict mapping each sheet name to a list of rows, where each
     row is a list of cell values (``None`` for empty/blank cells).
@@ -138,7 +156,7 @@ def _read_grids(path: Path, release: str) -> dict[str, list[list[object]]]:
             }
         finally:
             wb.close()
-    else:  # "2016" — legacy .xls via python-calamine
+    else:  # "2016" or "2011" — legacy .xls via python-calamine
         from python_calamine import CalamineWorkbook  # noqa: PLC0415
 
         wb = CalamineWorkbook.from_path(str(path))
@@ -368,9 +386,12 @@ class SeifaDataSource(_AbsXlsxDataset):
     def _xlsx_path(self) -> Path:
         """File path for the cached workbook.
 
-        The 2016 release is a legacy .xls file; 2021 is .xlsx.
+        The 2011 and 2016 releases are legacy .xls files; 2021 is .xlsx.
+        Both .xls releases are read via python-calamine (which handles
+        both formats); 2021 uses openpyxl. Selection happens inside
+        :func:`_read_grids`.
         """
-        ext = ".xls" if self._resolved_release == "2016" else ".xlsx"
+        ext = ".xlsx" if self._resolved_release == "2021" else ".xls"
         return self._root / f"{self._filename_stem(self.resolved_release)}{ext}"
 
     def _resolve_release(self) -> None:

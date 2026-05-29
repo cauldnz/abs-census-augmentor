@@ -273,7 +273,7 @@ def test_existing_seifa_spec_has_temporal_block() -> None:
     assert spec.id == "seifa"
     assert spec.temporal is not None
     assert spec.temporal.cadence == "per_census"
-    assert spec.temporal.asgs_edition_by_release == {"2016": 2, "2021": 3}
+    assert spec.temporal.asgs_edition_by_release == {"2011": 1, "2016": 2, "2021": 3}
     assert "2016" in spec.temporal.available_releases
     assert "2021" in spec.temporal.available_releases
 

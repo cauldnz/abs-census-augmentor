@@ -22,6 +22,7 @@ import requests
 import responses
 
 from census_augment.datasets._seifa import (
+    DEFAULT_SEIFA_2011_URL,
     DEFAULT_SEIFA_2016_URL,
     DEFAULT_SEIFA_2021_URL,
     SeifaDataSource,
@@ -295,13 +296,20 @@ def test_invalid_release_raises(seifa_data_dir: Path) -> None:
 
 
 def test_supported_releases(seifa_data_dir: Path) -> None:
-    """2016 and 2021 are the only supported releases; others raise."""
+    """2011, 2016 and 2021 are the supported releases; others raise.
+
+    Pre-2011 SEIFA (2001, 2006) used CCD/SLA pre-ASGS geographies and is
+    out-of-scope per spec-temporal.md §17.
+    """
     # These should not raise.
     SeifaDataSource(release="2021", root=seifa_data_dir)
     SeifaDataSource(release="2016", root=seifa_data_dir)
-    # Anything else should.
+    SeifaDataSource(release="2011", root=seifa_data_dir)
+    # Anything else should — including pre-ASGS releases.
     with pytest.raises(ValueError, match="release must be"):
-        SeifaDataSource(release="2011", root=seifa_data_dir)
+        SeifaDataSource(release="2006", root=seifa_data_dir)
+    with pytest.raises(ValueError, match="release must be"):
+        SeifaDataSource(release="2026", root=seifa_data_dir)
 
 
 # ---- parse ---------------------------------------------------------------
@@ -768,3 +776,64 @@ def test_fetch_2016_downloads_to_xls_path(
     assert path.suffix == ".xls"
     assert path.name == "seifa-2016.xls"
     assert len(responses.calls) == 1
+
+
+# ---- F.6: 2011 release ---------------------------------------------------
+
+
+def test_seifa_2011_uses_correct_url(seifa_data_dir: Path) -> None:
+    ds = SeifaDataSource(release="2011", root=seifa_data_dir)
+    assert ds._resolved_url == DEFAULT_SEIFA_2011_URL
+
+
+def test_seifa_2011_sa2_index_name(seifa_data_dir: Path) -> None:
+    """2011 uses ASGS Edition 1 SA2 codes — index name reflects that."""
+    ds = SeifaDataSource(release="2011", root=seifa_data_dir)
+    assert ds._sa2_index_name == "sa2_code_2011"
+
+
+def test_seifa_2011_filename_has_xls_extension(seifa_data_dir: Path) -> None:
+    """2011 is the legacy .xls format (same as 2016)."""
+    ds = SeifaDataSource(release="2011", root=seifa_data_dir)
+    assert ds._xlsx_path.suffix == ".xls"
+    assert "seifa-2011" in ds._xlsx_path.name
+
+
+@responses.activate
+def test_fetch_2011_downloads_to_xls_path(
+    seifa_data_dir: Path,
+) -> None:
+    """The 2011 fetcher hits the right URL and saves to seifa-2011.xls."""
+    dummy_bytes = b"\xd0\xcf\x11\xe0"  # MS-Office compound file magic
+    responses.add(
+        responses.GET,
+        DEFAULT_SEIFA_2011_URL,
+        body=dummy_bytes,
+        status=200,
+    )
+    ds = SeifaDataSource(release="2011", root=seifa_data_dir)
+    path = ds.fetch()
+    assert path.exists()
+    assert path.suffix == ".xls"
+    assert path.name == "seifa-2011.xls"
+    assert len(responses.calls) == 1
+
+
+def test_parse_grids_2011_layout(seifa_data_dir: Path) -> None:
+    """_parse_grids handles the 2011 layout (identical sheet structure
+    to 2016/2021, just different SA2 index column name).
+
+    Synthesizes a minimal 2011-shaped grid dict using the same builders
+    the 2016 tests use, then asserts the parser produces an
+    sa2_code_2011-indexed DataFrame with all four indexes present.
+    """
+    from tests.test_dataset_seifa import _build_synthetic_grids_2016
+
+    grids = _build_synthetic_grids_2016()
+    df = _parse_grids(grids, sa2_index_name="sa2_code_2011")
+    assert df.index.name == "sa2_code_2011"
+    # Same four indexes as 2016/2021
+    assert "irsd_score" in df.columns
+    assert "irsad_score" in df.columns
+    assert "ier_score" in df.columns
+    assert "ieo_score" in df.columns

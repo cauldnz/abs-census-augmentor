@@ -9,6 +9,84 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Temporal Phase F.6 — SEIFA 2011 release + ASGS Edition 1 boundary support
+
+Extends the `seifa` dataset with the 2011 release (ASGS Edition 1) and
+registers Edition 1 as a first-class boundary edition in the temporal-
+mode multi-edition orchestrator.
+
+**What changed:**
+
+- `datasets/seifa.md` `available_releases` extended with `"2011"`;
+  `asgs_edition_by_release` maps `"2011": 1`.
+- `DEFAULT_SEIFA_2011_URL` in `_seifa.py` points at the live ABS
+  Lotus Notes openagent URL captured 2026-05-29 (catalogue
+  2033.0.55.001, UNID `76D0BC44356DC34ACA257B3B001A4913`, document
+  dated 12.11.2014). The 2011 filename convention is
+  `2033.0.55.001 SA2 Indexes.xls` (different casing/spacing from the
+  2016 `2033055001 - sa2 indexes.xls` — ABS changed the convention
+  between releases).
+- The existing `_parse_grids` parser handles 2011 with **zero code
+  changes**. SEIFA's sheet layout (Contents, Table 1-6, Explanatory
+  Notes) is stable across 2011/2016/2021. The SA2 index column name
+  is now `sa2_code_2011` for the 2011 release.
+- `_xlsx_path` extension selection generalised: `.xlsx` for 2021,
+  `.xls` for both 2011 and 2016.
+- `_read_grids` dispatches python-calamine for any non-2021 release
+  (handles 2011 and 2016 .xls identically).
+- New `edition_1_spec()` in `data_sources/_edition.py` returns the
+  ASGS Edition 1 boundary descriptor: filename
+  `1270055001_sa2_2011_aust_shape.zip`, SA2 columns `SA2_MAIN11` /
+  `SA2_NAME11`, GDA94 datum (no GDA2020 — pre-dates it). Live-probed
+  2026-05-29: 2,214 SA2 polygons, CRS EPSG:4283.
+- `BoundaryEditionSpec.edition` Literal extended to include 1;
+  `year` Literal extended to include 2011.
+- `edition_spec_for(year=2011, ...)` validator added — only accepts
+  `datum="GDA94"` (Edition 1 is GDA94-only).
+- `tools/fetch_real_data.py --edition 1` fetches the SA2 boundary
+  only. The 2011 GCP/BCP DataPack is **not** auto-fetchable — see
+  "Out of scope" below.
+- `tools/verify_real_parsers.py` extended:
+  - SEIFA probe now exercises the 2011 release alongside 2016/2021.
+    Asserts ~2,100 SA2 rows, IRSD score range 554-1196, index column
+    `sa2_code_2011`.
+  - New Edition 1 boundary probe: self-skipping when no cache, asserts
+    schema (`SA2_MAIN11` / `SA2_NAME11`), CRS GDA94, ~2,214 polygons.
+
+**Tests (5 new):**
+
+- `test_seifa_2011_uses_correct_url`
+- `test_seifa_2011_sa2_index_name` (locks in `sa2_code_2011`)
+- `test_seifa_2011_filename_has_xls_extension`
+- `test_fetch_2011_downloads_to_xls_path`
+- `test_parse_grids_2011_layout` (locks the synthetic-grid parser
+  produces an `sa2_code_2011`-indexed DataFrame with all 4 indexes)
+
+Plus `test_supported_releases` extended to accept 2011 alongside
+2016/2021 and reject pre-ASGS years (2006).
+
+**Live-verification numbers (against the real ABS file):**
+
+- SEIFA 2011 SA2 file: 2.4 MB .xls, 2,110 parsed SA2 rows × 46 columns
+- IRSD score range: 554 — 1,196 (within ABS's mean-1000-sd-100 spec)
+- Sample SA2 `101011001` (Goulburn NSW): IRSD score 928 → decile 2
+  (consistent with regional NSW disadvantage)
+- ASGS 2011 SA2 boundary: 47.7 MB ZIP, 2,214 polygons, GDA94 / EPSG:4283
+
+**Out of scope (deliberately):**
+
+- **GCP 2011 / BCP 2011 DataPack**: requires login at
+  `https://www.censusdata.abs.gov.au/datapacks`. No public direct URL
+  exists at any ABS endpoint (verified by probing multiple URL
+  patterns + the live datapacks home page on 2026-05-29). Auto-fetch
+  is impossible without bundling auth credentials. A future
+  "user-supplied ZIP" fallback path on `DataPacksDataSource` could
+  unblock this for power users; tracked in BACKLOG.
+- **MB Edition 1 correspondence**: same per-state-shapefile challenge
+  as Edition 2. Deferred.
+- **SEIFA 2001 / 2006**: pre-ASGS geographies (CCD/SLA). Per
+  spec-temporal.md §17 these stay out of scope.
+
 ## [2.0.0] - 2026-05-27
 
 Major-version cut. The 17 weeks since v1.4.2 (2026-05-10) shipped the
