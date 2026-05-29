@@ -107,14 +107,17 @@ def main() -> int:
     p.add_argument(
         "--edition",
         type=int,
-        choices=[2, 3],
+        choices=[1, 2, 3],
         default=3,
         help=(
             "ASGS boundary edition to fetch. 3 (default) = current "
             "(year 2021, GDA2020). 2 = historical (year 2016, GDA94); "
             "fetches the SA2 boundary file and the GCP 2016 DataPack. "
-            "MB Edition 2 correspondence is still deferred — it ships "
-            "as 8 per-state shapefiles requiring concat logic."
+            "1 = historical (year 2011, GDA94); fetches the SA2 boundary "
+            "file only — the 2011 GCP/BCP DataPack lives behind ABS's "
+            "censusdata.abs.gov.au login and isn't auto-fetchable. "
+            "MB Edition 1/2 correspondence is still deferred — both "
+            "ship as 8 per-state shapefiles requiring concat logic."
         ),
     )
     args = p.parse_args()
@@ -122,24 +125,60 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
     data_dir = default_data_dir()
+    # Edition 1 → year=2011/GDA94 (handled inline via edition_1_spec since
+    # CensusConfig.year is Literal[2016, 2021] — cross-sectional 2011 isn't
+    # a supported run mode; the boundary fetch is needed by temporal-mode
+    # SEIFA 2011 lookups via per-edition spatial-index hand-off).
     # Edition 2 → year=2016/GDA94; Edition 3 → year=2021/GDA2020 (default).
-    if args.edition == 2:
+    if args.edition == 1:
+        # Construct a stand-in CensusConfig for the BoundariesDataSource's
+        # required argument, then inject the real Edition 1 spec.
+        from census_augment.data_sources._edition import edition_1_spec
+
         census = CensusConfig(year=2016, asgs_edition=2, datum="GDA94")
+        boundary_year = "2011"
+        edition_spec_override = edition_1_spec()
+    elif args.edition == 2:
+        census = CensusConfig(year=2016, asgs_edition=2, datum="GDA94")
+        boundary_year = "2016"
+        edition_spec_override = None
     else:
         census = CensusConfig()  # spec defaults: SA2, 2021, GCP, AUS, short-header, GDA2020
+        boundary_year = "2021"
+        edition_spec_override = None
     print(f"Cache root: {data_dir}")
-    print(f"ASGS edition: {census.asgs_edition} (year={census.year}, datum={census.datum})")
+    if args.edition == 1:
+        print("ASGS edition: 1 (year=2011, datum=GDA94 — boundary-only fetch)")
+    else:
+        print(f"ASGS edition: {census.asgs_edition} (year={census.year}, datum={census.datum})")
     print("(Override via CENSUS_AUGMENT_DATA_DIR env var.)\n")
 
     print("=== Boundary ===")
-    boundaries = BoundariesDataSource(
-        census=census,
-        base_url=DEFAULT_BOUNDARIES_URL,
-        root=data_dir / "boundaries" / str(census.year),
-    )
+    boundaries_kwargs: dict[str, object] = {
+        "census": census,
+        "base_url": DEFAULT_BOUNDARIES_URL,
+        "root": data_dir / "boundaries" / boundary_year,
+    }
+    if edition_spec_override is not None:
+        boundaries_kwargs["edition_spec"] = edition_spec_override
+    boundaries = BoundariesDataSource(**boundaries_kwargs)  # type: ignore[arg-type]
     print(f"  URL:  {boundaries.url}")
     shp = boundaries.fetch(refresh=args.refresh)
     print(f"  shp:  {shp}")
+
+    if args.edition == 1:
+        # Edition 1 DataPack lives behind ABS login. Edition 1 MB
+        # correspondence is per-state (same deferral as Edition 2). The
+        # boundary above is enough for SEIFA 2011 temporal-mode lookups.
+        print(
+            "\nEdition 1 fetch complete (SA2 boundary only). "
+            "GCP 2011 / BCP 2011 are not auto-fetchable — they require "
+            "manual download from https://www.censusdata.abs.gov.au/datapacks "
+            "and live outside the augmentor's auto-fetch contract.\n"
+            "Run `uv run python tools/verify_real_parsers.py` to confirm "
+            "the parser handles the live Edition 1 boundary file."
+        )
+        return 0
 
     print("=== DataPack ===")
     datapacks = DataPacksDataSource(

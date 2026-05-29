@@ -155,6 +155,65 @@ def main() -> int:
             ):
                 failures.append("boundaries_edition_2")
 
+    # ------ Edition 1 (2011) boundaries (Phase F.6) ------
+    #
+    # Same probe pattern as Edition 2: cross-check the
+    # BoundaryEditionSpec-driven URL / filename / column-name claims
+    # against the live ABS Edition-1 SA2 download.
+    e1_root = data_dir / "boundaries" / "2011"
+    if e1_root.exists():
+        print("=== Boundaries (ASGS Edition 1, 2011) ===")
+        # CensusConfig.year is Literal[2016, 2021]; we satisfy it with
+        # 2016 + GDA94 (valid combo) and override the edition spec
+        # explicitly. The probe is exercising the boundary file, not
+        # the cross-sectional config layer.
+        from census_augment.data_sources._edition import edition_1_spec  # noqa: PLC0415
+
+        e1_census = CensusConfig(year=2016, asgs_edition=2, datum="GDA94")
+        e1_boundaries = BoundariesDataSource(
+            census=e1_census,
+            base_url=DEFAULT_BOUNDARIES_URL,  # Edition 1 ignores this
+            root=e1_root,
+            edition_spec=edition_1_spec(),
+        )
+        if not e1_boundaries.is_cached():
+            print(
+                "  (skipped; no cached Edition 1 boundary. "
+                "Run `uv run python tools/fetch_real_data.py --edition 1` "
+                "to populate it once that flag is wired.)"
+            )
+        else:
+
+            def _load_edition_1_boundary() -> None:
+                gdf = e1_boundaries.load()
+                # 2011 had ~2,214 SA2s — fewer than 2016's ~2,310 and
+                # 2021's ~2,473.
+                assert len(gdf) > 1000, f"only {len(gdf)} rows (expected ~2,214)"
+                spec = e1_boundaries.edition
+                assert spec.sa2_code_column in gdf.columns, (
+                    f"missing {spec.sa2_code_column!r}; got: {list(gdf.columns)[:5]}"
+                )
+                assert spec.sa2_name_column in gdf.columns, (
+                    f"missing {spec.sa2_name_column!r}; got: {list(gdf.columns)[:5]}"
+                )
+                # Edition 1 should be GDA94 (EPSG:4283), same as Ed 2.
+                assert gdf.crs is not None, "CRS is None"
+                crs_epsg = gdf.crs.to_epsg()
+                crs_name = (gdf.crs.name or "").upper()
+                assert crs_epsg == 4283 or "GDA94" in crs_name, (
+                    f"unexpected CRS for Edition 1: epsg={crs_epsg}, name={gdf.crs.name!r}"
+                )
+                print(
+                    f"         -> {len(gdf)} polygons, "
+                    f"columns include {sorted(gdf.columns.tolist())[:5]}..."
+                )
+
+            if not _check(
+                "Edition 1 load + schema (SA2_MAIN11/SA2_NAME11) + CRS (GDA94)",
+                _load_edition_1_boundary,
+            ):
+                failures.append("boundaries_edition_1")
+
     # ------ DataPacks ------
     print("=== DataPacks ===")
     datapacks = DataPacksDataSource(
@@ -396,6 +455,22 @@ def main() -> int:
         print(
             f"         -> 2016: {len(df16):,} SA2s, {len(df16.columns)} columns, "
             f"index={df16.index.name}"
+        )
+        # 2011 release (XLS — F.6). Same .xls parser as 2016, different
+        # SA2 geography (ASGS Edition 1, ~2,100 SA2s with scores).
+        ds11 = SeifaDataSource(release="2011", root=data_dir / "seifa")
+        df11 = ds11.load()
+        assert len(df11) >= 1800, f"only {len(df11)} SA2s in 2011 (expected ~2,100)"
+        assert "irsd_score" in df11.columns
+        assert df11.index.name == "sa2_code_2011"
+        # IRSD scores normalise to mean 1000, sd 100 by ABS convention.
+        irsd_min = df11["irsd_score"].dropna().min()
+        irsd_max = df11["irsd_score"].dropna().max()
+        assert 400 < irsd_min < 700, f"2011 IRSD min looks wrong: {irsd_min} (expected ~554)"
+        assert 1100 < irsd_max < 1300, f"2011 IRSD max looks wrong: {irsd_max} (expected ~1196)"
+        print(
+            f"         -> 2011: {len(df11):,} SA2s, {len(df11.columns)} columns, "
+            f"index={df11.index.name}; IRSD {irsd_min:.0f}-{irsd_max:.0f}"
         )
 
     def _check_erp() -> None:

@@ -26,22 +26,34 @@ block via PR #86 + the release-cut PR.
 - Plus an automatic `demo-publish.yml` run refreshing the GIFs to
   show the 9 PRESETs (was 6).
 
+### Shipped this session (Day 3)
+
+- **#88** — corrected the stale Phase G "next priority"
+  guidance in the previous checkpoint. Phase G was already done in
+  v2.0.0 (PR #70).
+- **F.6 — SEIFA 2011 + ASGS Edition 1 boundary support**. SEIFA
+  2011 release added to the `seifa` dataset's `available_releases`;
+  same `.xls` parser as 2016, no core code changes needed.
+  `edition_1_spec()` registered for ASGS Edition 1 (2,214 SA2s,
+  GDA94). `tools/fetch_real_data.py --edition 1` fetches the
+  boundary. GCP 2011 documented as auto-fetch-out-of-scope (ABS
+  login wall); a "user-supplied ZIP" fallback path is in the
+  backlog for power users.
+
 ### Where to pick up tomorrow
 
 Suggested ordering by ROI:
 
-1. **F.5 / F.6 historical datasets.** GCP 2011 + SEIFA 2011 (both
-   ASGS Edition 1). Needs URL discovery (legacy `abs@.nsf` archive)
-   and ASGS Edition 1 boundary support. SEIFA 2001/2006 are
-   explicitly out-of-scope per `spec-temporal.md` §17 (CCD/SLA
-   pre-ASGS geography). The biggest remaining temporal-mode
-   coverage gap.
-
-2. **More cross-dataset PRESETs.** Candidates listed in "Future
+1. **More cross-dataset PRESETs.** Candidates listed in "Future
    PRESET features" below. Each ~30 min of markdown authoring.
+   Smallest wins; consolidates yesterday's ERP age/sex unlock
+   further. Likely 3-5 PRESETs land in a single PR.
 
-3. **`ERP.population_density_per_km2`.** Needs SA2-area lookup
-   wiring. Small new infrastructure, moderate scope.
+2. **`ERP.population_density_per_km2`.** Needs SA2-area lookup
+   wiring. Small new infrastructure, moderate scope (~half day).
+
+3. **User-supplied DataPack ZIP fallback** (for GCP 2011 unlock —
+   see new section below). ~2 hours of clean engineering.
 
 4. **Address-retirement awareness** (Phase G refinement,
    spec-temporal.md §17 deferred): "address X existed in 2018,
@@ -176,13 +188,37 @@ release selection) works end-to-end today.
     candidate-list extensions for the sheet names (`Cell descriptors
     information` / `Table number, name, population`) and the SA2 code
     column (`SA2_MAINCODE_2016`). Dataset id `gcp_2021 → gcp`.
-  - **F.5 / F.6 — earlier releases** (GCP 2011, SEIFA 2011, ERP 2001+).
-    Pre-2016 sources use the legacy `abs@.nsf` archive with less
-    predictable URLs. SEIFA 2011 uses CCD/SLA (pre-ASGS) geography —
-    needs a separate design discussion before implementation.
-    Unblocks cross-edition input spans (combined with the cross-edition
-    spatial lookups already sketched in `spec-temporal.md` §9.3 step
-    4b — those also need implementing).
+  - **F.5 — GCP 2011.** Out of scope at the auto-fetch layer: ABS
+    gates the 2011 DataPack behind login auth at
+    `https://www.censusdata.abs.gov.au/datapacks`. A future
+    "user-supplied ZIP" fallback on `DataPacksDataSource` could let
+    power users drop a manually-downloaded ZIP into the cache and
+    have the rest work; ~2 hours of clean engineering when motivated.
+    Tracked separately under "User-supplied DataPack ZIP fallback"
+    below.
+  - **F.6 — SEIFA 2011** ✅ shipped 2026-05-29. `.xls` via the same
+    python-calamine path as 2016; ASGS Edition 1 boundary support
+    landed alongside (`edition_1_spec()` in
+    `data_sources/_edition.py`). SEIFA 2001/2006 stay out of scope
+    (CCD/SLA pre-ASGS geography per spec-temporal.md §17).
+
+## User-supplied DataPack ZIP fallback (unblock GCP 2011 for power users)
+
+ABS gates the 2011 GCP/BCP DataPack behind a login at
+`https://www.censusdata.abs.gov.au/datapacks` — no public direct URL.
+The augmentor's auto-fetch can't ride that. But the parser is the
+same `DataPacksDataSource` machinery that handles 2016 + 2021, so a
+power user who manually downloads from the login portal should be
+able to drop the ZIP into the cache and use it.
+
+Concrete shape:
+
+- Add a `--local-zip <path>` (or env var) hook on
+  `DataPacksDataSource.fetch()` that bypasses the URL fetch and uses
+  a user-supplied ZIP from disk.
+- Document in `datasets/gcp.md` or a new `docs/historical-data.md`
+  page how to obtain the 2011 ZIP and where to drop it.
+- ~2 hours of work when motivated by a real user request.
 
 - **Phase G — G-NAF release-per-row.** Currently temporal-mode uses
   the pipeline's configured G-NAF release for every row, regardless of

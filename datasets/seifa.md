@@ -10,7 +10,7 @@ geography_edition: 2021_ASGS_Edition_3
 geography_native: true
 join_key: sa2_code_2021
 landing_page: https://www.abs.gov.au/statistics/people/people-and-communities/socio-economic-indexes-areas-seifa-australia/latest-release
-fetch_size_compressed: ~150 KB
+fetch_size_compressed: ~150 KB - 2.4 MB
 tags: [seifa, demographics, socio-economic, disadvantage, advantage]
 namespace: SEIFA
 temporal:
@@ -18,9 +18,11 @@ temporal:
   cover_basis: census_reference_date
   release_id_format: YYYY (Census year)
   available_releases:
+    - "2011"
     - "2016"
     - "2021"
   asgs_edition_by_release:
+    "2011": 1
     "2016": 2
     "2021": 3
 ---
@@ -49,20 +51,37 @@ scale is arbitrary.
 - **2016**: ABS publishes `2033055001 - sa2 indexes.xls` (~700 KB).
   Same sheet structure as 2021 but in legacy .xls format (requires
   `python-calamine` for parsing); uses ASGS Edition 2 SA2 codes.
+- **2011**: ABS publishes `2033.0.55.001 SA2 Indexes.xls` (~2.4 MB).
+  Same sheet structure as 2016, legacy .xls format. Uses ASGS Edition 1
+  SA2 codes (different geography from 2016/2021 — ~2,214 SA2s vs
+  ~2,310 / ~2,473). Lotus Notes openagent download URL.
 
 ## Update cadence
 
-Once per Census (five-yearly). Available releases: 2016 (ASGS Edition 2,
-SA2 .xls) and 2021 (ASGS Edition 3, SA2 .xlsx). 2026 will be added to
-this dataset when ABS publishes it.
+Once per Census (five-yearly). Available releases: 2011 (ASGS Edition 1,
+SA2 .xls), 2016 (ASGS Edition 2, SA2 .xls), and 2021 (ASGS Edition 3,
+SA2 .xlsx). 2026 will be added to this dataset when ABS publishes it.
+
+Pre-2011 SEIFA releases (2001, 2006) used CCD/SLA pre-ASGS geographies
+that don't align with SA2 — they're explicitly out of scope per
+`spec-temporal.md` §17.
 
 ## Granularity
 
 SA2 native. ABS computes scores at SA1 first then aggregates to higher
 levels; the SA2 file is the canonical publication for SA2 modelling.
-The 2016 release uses ASGS Edition 2 SA2 codes (9-digit integers); the
-2021 release uses ASGS Edition 3 SA2 codes (also 9-digit integers but
-a different geography).
+
+Per-release SA2 geography differs across ASGS editions:
+
+- **2011** uses ASGS Edition 1 SA2 codes (~2,214 SA2s; e.g. `101011001`).
+- **2016** uses ASGS Edition 2 SA2 codes (~2,310 SA2s; e.g. `101021007`).
+- **2021** uses ASGS Edition 3 SA2 codes (~2,473 SA2s; e.g. the current
+  canonical reference edition).
+
+All three are 9-digit integers but the underlying geography is
+different. In temporal mode the pipeline reads each release using its
+contemporaneous boundary file, and the canonical `sa2_code` in output
+is the configured `reference_edition` (default Edition 3).
 
 ## Schema (variables exposed by the augmentor)
 
