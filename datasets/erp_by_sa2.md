@@ -17,7 +17,27 @@ temporal:
   cadence: annual
   cover_basis: financial_year_ending
   release_id_format: "YYYY (year ending 30 Jun)"
+  # ERP publishes ONE annual workbook per cycle that carries the full
+  # 2001-onwards history in ``population_history_<year>`` columns.
+  # Temporal-mode resolution projects from those columns at load() time
+  # (issue #92 fix) — every year from 2001 to the latest publication
+  # is a valid logical release served by the same physical workbook.
   available_releases:
+    - "2001"
+    - "2002"
+    - "2003"
+    - "2004"
+    - "2005"
+    - "2006"
+    - "2007"
+    - "2008"
+    - "2009"
+    - "2010"
+    - "2011"
+    - "2012"
+    - "2013"
+    - "2014"
+    - "2015"
     - "2016"
     - "2017"
     - "2018"
@@ -27,13 +47,33 @@ temporal:
     - "2022"
     - "2023"
     - "2024"
+  # All historical years are exposed on the *current* ASGS edition (3).
+  # ABS re-aggregates back-data onto the current boundaries via their
+  # internal concordance — the augmentor reads the data as-published
+  # and doesn't apply additional correspondence. Documented in the
+  # body below.
   asgs_edition_by_release:
-    "2016": 2
-    "2017": 2
-    "2018": 2
-    "2019": 2
-    "2020": 2
-    "2021": 2
+    "2001": 3
+    "2002": 3
+    "2003": 3
+    "2004": 3
+    "2005": 3
+    "2006": 3
+    "2007": 3
+    "2008": 3
+    "2009": 3
+    "2010": 3
+    "2011": 3
+    "2012": 3
+    "2013": 3
+    "2014": 3
+    "2015": 3
+    "2016": 3
+    "2017": 3
+    "2018": 3
+    "2019": 3
+    "2020": 3
+    "2021": 3
     "2022": 3
     "2023": 3
     "2024": 3
@@ -111,6 +151,43 @@ slightly different schedules.
 
 The augmentor returns the latest available year by default. Users can pin
 via `Pipeline.create(..., erp_year=2023)`.
+
+### Temporal mode + historical releases (issue #92)
+
+ERP has a fundamentally different release shape from SEIFA / GCP / DSS:
+ABS publishes **one annual workbook per cycle** that carries the full
+2001-onwards history in `population_history_<year>` columns. There's
+no separate "ERP 2017 workbook" on the ABS site — historical data
+lives inside the latest publication.
+
+In temporal mode, when a row's date resolves to a historical ERP
+release (e.g. row dated 2017-06-15 → ERP 2017):
+
+- The fetcher serves the **latest physical workbook** (only one on
+  disk, regardless of how many logical releases the temporal mode
+  resolves to).
+- `population_total` is **projected** from the
+  `population_history_<release>` column of that workbook.
+- `reference_year` is set to the requested release year.
+- The `population_history_*` columns themselves remain intact —
+  downstream consumers can still do multi-year deltas off them.
+
+**Age/sex limitations:** the 3235.0 companion cube (Males / Females /
+median age / broad age groups) ships only the latest year's
+demographics — there's no `population_male_2017` column. For
+historical releases the fetcher sets all age/sex columns to NULL so
+users don't accidentally pair (e.g.) 2017 totals with 2024
+demographics. PRESETs that depend on age/sex columns (e.g.
+`pct_age_pension_recipients`) will therefore produce NaN for any
+row that resolves to a historical (non-latest) ERP release.
+
+**ASGS edition note:** the historical years exposed are on the
+**current ASGS edition** (3), because ABS re-aggregates back-data
+onto the current boundaries via their internal concordance. The
+spec's `asgs_edition_by_release` reflects that — every year maps to
+edition 3. The augmentor reads what ABS publishes; it doesn't
+additionally apply correspondence to recover original-edition
+geometry for older years (deferred — see `spec-temporal.md` §17).
 
 ### Still on the wish list
 

@@ -290,7 +290,13 @@ def test_resolve_specific_release(erp_data_dir: Path) -> None:
 
 
 @responses.activate
-def test_resolve_unknown_release_raises(erp_data_dir: Path) -> None:
+def test_resolve_release_more_recent_than_latest_raises(erp_data_dir: Path) -> None:
+    """Requesting a release year newer than the latest published workbook
+    raises a clear RuntimeError naming both the requested year and the
+    available range. Historical years (≤ latest) are now accepted via
+    the load() projection (issue #92 fix); only future years still
+    raise here.
+    """
     responses.add(
         responses.GET,
         ERP_LANDING_URL,
@@ -298,7 +304,7 @@ def test_resolve_unknown_release_raises(erp_data_dir: Path) -> None:
         status=200,
     )
     ds = ErpDataSource(release="2030", root=erp_data_dir)
-    with pytest.raises(RuntimeError, match="not found"):
+    with pytest.raises(RuntimeError, match="more recent than the latest"):
         _ = ds.resolved_release
 
 
@@ -535,3 +541,178 @@ def test_load_silently_omits_age_sex_columns_when_landing_fails(
         "population_65_plus",
     ):
         assert col not in df.columns, f"unexpected age/sex column present: {col}"
+
+
+# ---- issue #92: historical-year projection (release="<historical-year>") ----
+
+
+@responses.activate
+def test_load_with_historical_release_projects_population_total(
+    erp_data_dir: Path,
+) -> None:
+    """Requesting a historical release year (e.g. 2017) returns the same
+    underlying workbook but with ``population_total`` projected from
+    ``population_history_2017`` and ``reference_year`` set to 2017.
+
+    Issue #92 fix: ERP publishes ONE annual workbook per cycle that
+    carries the full 2001-onwards history in
+    ``population_history_<year>`` columns. Temporal-mode resolution
+    asks for a historical release per row date; the fetcher now
+    serves those via column projection rather than failing.
+    """
+    # Realistic synthetic data: 2017 and 2024 history columns with
+    # distinct values so we can verify the projection picks the right
+    # column.
+    fake_xlsx = _make_erp_xlsx(
+        [
+            (
+                "117011326",
+                "Sydney CBD",
+                "New South Wales",
+                {2017: 11000, 2024: 12500},
+            ),
+        ]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks([("117011326", "Sydney CBD", 6250, 6250, 100.0, 35.0, 15.0, 70.0, 15.0)])
+
+    ds = ErpDataSource(release="2017", root=erp_data_dir)
+    df = ds.load()
+
+    # Logical release the user asked for.
+    assert ds.resolved_release == "2017"
+    # Projected: population_total comes from population_history_2017
+    # and reference_year is 2017 (not the workbook's latest 2024).
+    assert df.loc["117011326", "population_total"] == 11000
+    assert df.loc["117011326", "reference_year"] == 2017
+    # The history columns themselves stay intact for downstream use.
+    assert df.loc["117011326", "population_history_2017"] == 11000
+    assert df.loc["117011326", "population_history_2024"] == 12500
+
+
+@responses.activate
+def test_load_with_historical_release_nulls_age_sex_columns(
+    erp_data_dir: Path,
+) -> None:
+    """Age/sex columns reflect the latest 3235.0 publication only —
+    there's no historical age/sex breakdown in the products the
+    augmentor fetches. For historical releases the load() projection
+    nulls them out so users don't accidentally pair 2017 totals with
+    2024 demographics.
+    """
+    fake_xlsx = _make_erp_xlsx(
+        [("117011326", "Sydney CBD", "New South Wales", {2017: 11000, 2024: 12500})]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks([("117011326", "Sydney CBD", 6250, 6250, 100.0, 35.0, 15.0, 70.0, 15.0)])
+
+    ds = ErpDataSource(release="2017", root=erp_data_dir)
+    df = ds.load()
+
+    # All age/sex columns null for the historical release.
+    for col in (
+        "population_male",
+        "population_female",
+        "median_age",
+        "population_0_14",
+        "population_15_64",
+        "population_65_plus",
+    ):
+        assert pd.isna(df.loc["117011326", col]), (
+            f"expected null {col!r} for historical release; got {df.loc['117011326', col]!r}"
+        )
+
+
+@responses.activate
+def test_load_with_historical_release_outside_coverage_raises(
+    erp_data_dir: Path,
+) -> None:
+    """A release year that's ≤ latest but not in the workbook's
+    ``population_history_*`` columns raises a clear error naming the
+    available years. Catches "user asked for 1990 but ABS series
+    starts at 2001" without hardcoding the lower bound.
+    """
+    # 2024 workbook contains 2017 + 2024 (we control the synthetic
+    # fixture). Requesting 2015 should raise — not in history.
+    fake_xlsx = _make_erp_xlsx(
+        [("117011326", "Sydney CBD", "New South Wales", {2017: 11000, 2024: 12500})]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks([("117011326", "Sydney CBD", 6250, 6250, 100.0, 35.0, 15.0, 70.0, 15.0)])
+
+    ds = ErpDataSource(release="2015", root=erp_data_dir)
+    with pytest.raises(RuntimeError, match="not in the workbook's historical coverage"):
+        ds.load()
+
+
+@responses.activate
+def test_load_latest_release_unchanged_by_projection(erp_data_dir: Path) -> None:
+    """Regression-prevention companion: ``release="latest"`` (the
+    default) returns the workbook's data verbatim — no projection
+    happens when the resolved release equals the physical release
+    year.
+    """
+    fake_xlsx = _make_erp_xlsx(
+        [("117011326", "Sydney CBD", "New South Wales", {2017: 11000, 2024: 12500})]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks([("117011326", "Sydney CBD", 6250, 6250, 100.0, 35.0, 15.0, 70.0, 15.0)])
+
+    ds = ErpDataSource(release="latest", root=erp_data_dir)
+    df = ds.load()
+
+    # Latest = 2024. population_total reflects 2024.
+    assert ds.resolved_release == "2024"
+    assert df.loc["117011326", "population_total"] == 12500
+    assert df.loc["117011326", "reference_year"] == 2024
+    # Age/sex columns present (not nulled).
+    assert df.loc["117011326", "population_male"] == 6250
+    assert df.loc["117011326", "median_age"] == 35.0
