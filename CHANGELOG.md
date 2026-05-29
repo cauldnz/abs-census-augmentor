@@ -9,6 +9,53 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — #91 Stage 1: loud error replacing silent NaN for GCP cross-edition
+
+Temporal-mode runs that requested GCP variables for rows whose
+`date_column` resolved to the **2016 GCP release** silently returned
+NaN. The output carried a misleading `gcp_release="2016"` annotation
+and a `gcp_sa2_code_source` column pointing at the reference-edition
+SA2 code rather than the source-edition (Edition 2) code the 2016
+DataPack is keyed by.
+
+**Root cause** (traced in issue #91 root-cause comment):
+`_variables_for_datasets`'s `include_gcp_and_preset` shortcut and
+`_enricher_for_bucket`'s singleton `DataPacksDataSource` were never
+updated when F.4 (PR #81) registered GCP 2016. The orchestrator
+unconditionally routes GCP variables to the reference-edition
+sub-enricher, which uses Edition-3 SA2 codes against the 2016
+DataPack. SEIFA / ERP / DSS aren't affected because they go through
+the registered-fetcher per-release path that F.2 wired correctly.
+
+**Stage 1 (this PR):** detect the bad combination
+(`temporal mode + GCP variable + non-reference GCP release`) at the
+start of `_enrich_temporal` and raise a clear `ValueError` listing
+the affected variable names, resolved releases, ASGS editions, and
+two concrete workarounds (drop GCP variables, or constrain date
+range). Loud failure with intent is strictly better than silent NaN.
+
+PRESETs are unaffected because spec-temporal.md §9 explicitly
+declares them as always-reference-edition; the orchestrator's
+existing handling of PRESETs as reference-edition-only is correct.
+
+The cross-dataset PRESETs from PR #86 / #90 / #93 don't touch GCP
+and aren't affected by this specific bug. They hit #92 instead
+(ERP temporal-release resolution — separate fix).
+
+**Stage 2 (follow-up):** per-release `DataPacksDataSource`
+construction + factory wiring, mirroring how SEIFA's per-release
+fetchers work. Tracked on issue #91; estimated half-day to a day
+of focused implementation.
+
+Two new tests in `test_pipeline_temporal.py`:
+
+- `test_temporal_gcp_cross_edition_raises_loud_error` — verifies a
+  2017-dated row + `G01.Tot_P_P` variable raises with the right
+  message.
+- `test_temporal_gcp_no_cross_edition_runs_cleanly` —
+  regression-prevention companion. A 2023-dated row + GCP variable
+  on the reference edition runs without hitting the guard.
+
 ### `pct_carer_payment_recipients` PRESET + BACKLOG cleanup round 2
 
 Two doc / spec changes:

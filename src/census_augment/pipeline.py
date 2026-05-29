@@ -1328,6 +1328,67 @@ class Pipeline:
                 edition_per_dataset_release[(did, rel)] = src_edition
                 editions_in_use.add(src_edition)
 
+        # Phase F.2 + F.4 gap (issue #91): the temporal orchestrator routes
+        # GCP variables to the reference-edition sub-enricher only — there's
+        # no per-release ``DataPacksDataSource`` factory like SEIFA / ERP /
+        # DSS / ABS_PIA use. Before F.4 this didn't matter (only 2021 GCP
+        # was registered). F.4 (PR #81) registered GCP 2016, but
+        # ``_variables_for_datasets``'s ``include_gcp_and_preset`` shortcut
+        # and ``_enricher_for_bucket``'s singleton DataPacks were never
+        # updated to match.
+        #
+        # Result if we silently let this through: a row dated 2017 resolves
+        # to GCP release 2016 (source edition 2), but the GCP variable
+        # ends up looked up via the reference-edition (2021) DataPack
+        # keyed by Edition-3 SA2 codes — silent NaN for every such row,
+        # with a misleading ``gcp_release="2016"`` annotation on the
+        # output.
+        #
+        # Until the per-release DataPacks routing lands (#91 Stage 2),
+        # fail loudly so users know to either drop GCP variables from
+        # their temporal config or constrain the input date range.
+        # PRESETs are explicitly always-reference-edition per
+        # spec-temporal.md §9, so they're unaffected.
+        gcp_variables_used = [
+            (friendly, ref)
+            for friendly, ref in self._config.variables.items()
+            if _is_gcp_variable_ref(ref)
+        ]
+        non_reference_gcp_releases = sorted(
+            {
+                rel
+                for (did, rel), src_ed in edition_per_dataset_release.items()
+                if did == "gcp" and src_ed != reference_edition
+            }
+        )
+        if gcp_variables_used and non_reference_gcp_releases:
+            non_ref_eds = sorted(
+                {edition_per_dataset_release[("gcp", rel)] for rel in non_reference_gcp_releases}
+            )
+            raise ValueError(
+                "GCP cross-edition routing is not yet implemented in "
+                "temporal mode (issue #91).\n\n"
+                f"  Variables affected: "
+                f"{sorted(f for f, _ in gcp_variables_used)}\n"
+                f"  GCP release(s) on non-reference editions: "
+                f"{non_reference_gcp_releases}\n"
+                f"  ASGS edition(s) involved: {non_ref_eds}\n"
+                f"  Reference edition (configured): {reference_edition}\n\n"
+                "Workarounds until the per-release DataPacks routing "
+                "lands:\n"
+                "  - Drop GCP variables (G##.*) from the temporal-mode "
+                "config and pull them via separate cross-sectional "
+                "runs, then merge by row.\n"
+                "  - Constrain your input date range so all rows "
+                "resolve to the GCP release matching the reference "
+                "edition.\n\n"
+                "Background: spec-temporal.md §9 covers the "
+                "orchestration design; pipeline.py "
+                "``_variables_for_datasets`` carries a stale "
+                "always-reference-edition assumption for GCP that "
+                "predates F.4. See issue #91 for the full diagnosis."
+            )
+
         # Per-edition SA2 lookup. The reference edition's codes are already
         # on df_out as ``sa2_code``; any other edition gets its own column
         # via a fresh SpatialIndex lookup against that edition's boundary.
