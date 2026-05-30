@@ -205,6 +205,102 @@ def test_temporal_multi_bucket(tmp_path: Path) -> None:
 # ---- cross-edition: Phase F.2 succeeds with per-edition spatial index ----
 
 
+def _make_seifa_config(tmp_path: Path, **temporal_overrides: Any) -> Config:
+    """Variant of ``_make_config`` for SEIFA-vehicle cross-edition tests.
+
+    SEIFA is the canonical multi-edition dataset for the augmentor:
+    2011 (Edition 1), 2016 (Edition 2), 2021 (Edition 3). Tests using
+    this config exercise the cross-edition orchestrator's per-source-
+    edition fan-out against a dataset whose ``asgs_edition_by_release``
+    spec genuinely matches reality.
+    """
+    return Config(
+        input=InputConfig(
+            path=tmp_path / "in.csv",
+            latitude_column="lat",
+            longitude_column="lon",
+            date_column="transaction_date",
+        ),
+        output=OutputConfig(path=tmp_path / "out.csv"),
+        census=CensusConfig(),
+        data_sources=DataSourcesConfig(),
+        geocoding=GeocodingConfig(
+            providers=["nominatim"],
+            nominatim=NominatimConfig(user_agent="test/0.1 (test@example.com)"),
+        ),
+        variables={"irsd": "SEIFA.irsd_score"},
+        temporal=TemporalConfig(**temporal_overrides),
+    )
+
+
+def _make_seifa_pipeline(
+    tmp_path: Path,
+    *,
+    with_edition_2_index: bool = False,
+    **temporal_overrides: Any,
+) -> Pipeline:
+    """SEIFA-vehicle Pipeline for cross-edition tests.
+
+    Sets up a stub enricher that encodes the bucket's SEIFA release as
+    the IRSD score value so tests can assert which release each row was
+    routed to.
+    """
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = _make_seifa_config(tmp_path, **temporal_overrides)
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+    datapacks = DataPacksDataSource(
+        census=CensusConfig(),
+        base_url="https://x",
+        root=tmp_path / "ds",
+    )
+    catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=datapacks,
+        catalog=catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+
+    from census_augment import enrich as enrich_module
+
+    def _seifa_stubbed_add(
+        self: CensusEnricher, df: pd.DataFrame, *, sa2_code_col: str
+    ) -> pd.DataFrame:
+        df = df.copy()
+        rel = self._dataset_release_overrides.get("seifa", "default")
+        # Encode the bucket's release as the IRSD score so the test can
+        # assert which SEIFA release each row got routed to.
+        df["sa2_irsd"] = [float(int(rel) if rel.isdigit() else 0) for _ in range(len(df))]
+        return df
+
+    enrich_module.CensusEnricher.add_enrichment_columns = _seifa_stubbed_add  # type: ignore[assignment]
+
+    extras: dict[int, SpatialIndex] = {}
+    if with_edition_2_index:
+        extras[2] = _edition_2_synthetic_spatial_index()
+
+    return Pipeline(
+        config=config,
+        geocoders=[_FakeGeocoder()],
+        spatial=spatial,
+        enricher=enricher,
+        extra_spatial_indices=extras,
+    )
+
+
 def _edition_2_synthetic_spatial_index() -> Any:
     """Build a SpatialIndex over a synthetic Edition 2 boundary GDF.
 
@@ -273,73 +369,69 @@ def _make_pipeline_with_edition_2(tmp_path: Path, **temporal_overrides: Any) -> 
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "This test used ERP as its cross-edition test vehicle, which was "
-        "based on an incorrect spec assumption (ERP 2016-2021 marked as "
-        "Edition 2). Issue #92 fix corrected the spec: ABS re-aggregates "
-        "all historical ERP data onto the current Edition 3 boundaries "
-        "via concordance, so every ERP release is Edition 3. The "
-        "orchestrator's missing-edition error path is still tested via "
-        "SEIFA, which genuinely spans Edition 1 (2011) + Edition 2 (2016) "
-        "+ Edition 3 (2021). Migrating this test to use SEIFA as the "
-        "vehicle is tracked as a follow-up."
-    ),
-    strict=False,
-)
 def test_temporal_cross_edition_raises_without_spatial_index(tmp_path: Path) -> None:
-    """A row resolving to an Edition 2 release with no Edition 2
-    SpatialIndex wired raises a clear RuntimeError naming the missing
-    edition."""
-    pipeline = _make_pipeline(tmp_path)
+    """A row resolving to a non-reference-edition release with no
+    matching SpatialIndex wired raises a clear RuntimeError naming the
+    missing edition.
+
+    Migrated from ERP to SEIFA as the test vehicle (issue #92 fix
+    corrected the ERP spec — all ERP releases are now Edition 3, so
+    ERP can no longer trigger cross-edition lookups). SEIFA genuinely
+    spans Edition 1 (2011) + Edition 2 (2016) + Edition 3 (2021), so
+    a 2018-dated row resolves to SEIFA 2016 / Edition 2 and exercises
+    the missing-edition error path against a spec that matches reality.
+    """
+    # No Edition 2 spatial index wired — the orchestrator can't
+    # construct one because tests don't pass a spatial_index_factory.
+    pipeline = _make_seifa_pipeline(tmp_path)
 
     df = pd.DataFrame(
         {
             "lat": [-33.86],
             "lon": [151.21],
-            "transaction_date": pd.to_datetime(["2020-06-01"]),
+            # 2018-06-01 resolves SEIFA to 2016 (Edition 2) under
+            # closest_at_or_before; releases are 2011/2016/2021.
+            "transaction_date": pd.to_datetime(["2018-06-01"]),
         }
     )
     with pytest.raises(RuntimeError, match="Edition 2"):
         pipeline.augment(df)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Same as test_temporal_cross_edition_raises_without_spatial_index: "
-        "this test used ERP as its cross-edition vehicle based on an "
-        "incorrect spec. ERP is now correctly all-Edition-3 (issue #92). "
-        "SEIFA is the proper cross-edition test vehicle and is covered "
-        "elsewhere; migrating this assertion is a follow-up."
-    ),
-    strict=False,
-)
 def test_temporal_cross_edition_succeeds_with_extra_spatial_index(tmp_path: Path) -> None:
-    """A row dated 2020 resolves ERP to a 2020 release (Edition 2).
-    With ``extra_spatial_indices={2: SpatialIndex(...)}`` supplied, the
-    cross-edition orchestrator looks up the Edition-2 SA2 code and the
-    bucket's sub-enricher merges on it. Output gains the new
-    ``sa2_code_edition`` + ``<dataset>_sa2_code_source`` columns."""
-    pipeline = _make_pipeline_with_edition_2(tmp_path)
+    """A row dated 2018 resolves SEIFA to 2016 (Edition 2). With
+    ``extra_spatial_indices={2: SpatialIndex(...)}`` supplied, the
+    cross-edition orchestrator looks up the Edition-2 SA2 code and
+    the bucket's sub-enricher merges on it. Output gains the new
+    ``sa2_code_edition`` + ``<dataset>_sa2_code_source`` columns.
+
+    Migrated from ERP to SEIFA as the test vehicle — see
+    ``test_temporal_cross_edition_raises_without_spatial_index`` for
+    the rationale.
+    """
+    pipeline = _make_seifa_pipeline(tmp_path, with_edition_2_index=True)
 
     df = pd.DataFrame(
         {
             "lat": [-33.86],
             "lon": [151.21],
-            "transaction_date": pd.to_datetime(["2020-06-01"]),
+            "transaction_date": pd.to_datetime(["2018-06-01"]),
         }
     )
     result = pipeline.augment(df)
 
+    # The stub encodes the bucket's release as the value — 2016
+    # confirms the routing.
+    assert result.df["sa2_irsd"].iloc[0] == 2016.0
     # Cross-edition: source edition is 2, reference edition is 3.
     assert "sa2_code_edition" in result.df.columns
     assert result.df["sa2_code_edition"].iloc[0] == 3
     # Per-dataset source-SA2 column (only emitted when source != reference).
-    assert "erp_by_sa2_sa2_code_source" in result.df.columns
-    assert result.df["erp_by_sa2_sa2_code_source"].iloc[0] == "117011326"
+    assert "seifa_sa2_code_source" in result.df.columns
+    assert result.df["seifa_sa2_code_source"].iloc[0] == "117011326"
     # Release column shows the Edition-2 release.
-    assert result.df["erp_by_sa2_release"].iloc[0] == "2020"
-    assert result.releases_used == {"erp_by_sa2": ["2020"]}
+    assert result.df["seifa_release"].iloc[0] == "2016"
+    assert result.releases_used == {"seifa": ["2016"]}
     # The canonical ``sa2_code`` is in the reference edition.
     assert result.df["sa2_code"].iloc[0] == "117011326"
     # Private per-edition columns are dropped before returning.
@@ -611,46 +703,43 @@ def test_temporal_gnaf_missing_release_in_factory_raises(tmp_path: Path) -> None
         pipeline.augment(df)
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Same migration issue as the two cross-edition tests above: "
-        "this test used ERP as its cross-edition vehicle (one row on "
-        "Edition 2, one on Edition 3). The issue #92 fix corrected the "
-        "spec to mark all ERP releases as Edition 3 (per ABS concordance), "
-        "so this test's 2020/2024 split no longer produces mixed "
-        "editions. SEIFA is the proper mixed-edition vehicle. Migrating "
-        "this assertion is a follow-up."
-    ),
-    strict=False,
-)
 def test_temporal_mixed_edition_buckets(tmp_path: Path) -> None:
     """One row on Edition 3 + one row on Edition 2 → two buckets, each
     looked up against its own edition. The Edition-3 row gets no
     ``<dataset>_sa2_code_source`` (source == reference); the Edition-2
-    row does."""
-    pipeline = _make_pipeline_with_edition_2(tmp_path)
+    row does — but the column appears for both rows since the
+    orchestrator emits it whenever at least one row is non-reference.
+
+    Migrated from ERP to SEIFA as the test vehicle (issue #92 fix
+    corrected the ERP spec — see the two cross-edition tests above
+    for the rationale).
+    """
+    pipeline = _make_seifa_pipeline(tmp_path, with_edition_2_index=True)
 
     df = pd.DataFrame(
         {
             "lat": [-33.86, -33.86],
             "lon": [151.21, 151.21],
-            # 2020 → Edition 2; 2024 → Edition 3.
-            "transaction_date": pd.to_datetime(["2020-06-01", "2024-06-01"]),
+            # 2018-06-01 → SEIFA 2016 (Edition 2);
+            # 2024-06-01 → SEIFA 2021 (Edition 3).
+            "transaction_date": pd.to_datetime(["2018-06-01", "2024-06-01"]),
         }
     )
     result = pipeline.augment(df)
 
-    releases = result.df["erp_by_sa2_release"].tolist()
-    assert releases == ["2020", "2024"]
+    releases = result.df["seifa_release"].tolist()
+    assert releases == ["2016", "2021"]
+    # Stub-encoded values confirm per-bucket routing.
+    assert result.df["sa2_irsd"].tolist() == [2016.0, 2021.0]
     # When ANY row uses a non-reference edition, the per-dataset
     # source-SA2 column is emitted; reference-edition rows still get a
     # value (same as canonical sa2_code).
-    assert "erp_by_sa2_sa2_code_source" in result.df.columns
-    source_codes = result.df["erp_by_sa2_sa2_code_source"].tolist()
+    assert "seifa_sa2_code_source" in result.df.columns
+    source_codes = result.df["seifa_sa2_code_source"].tolist()
     assert source_codes == ["117011326", "117011326"]
     # Same canonical reference-edition sa2_code.
     assert result.df["sa2_code"].tolist() == ["117011326", "117011326"]
-    assert result.releases_used == {"erp_by_sa2": ["2020", "2024"]}
+    assert result.releases_used == {"seifa": ["2016", "2021"]}
 
 
 # ---- temporal config: closest rule respected ----------------------------
