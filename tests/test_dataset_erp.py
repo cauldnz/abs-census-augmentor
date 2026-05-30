@@ -716,3 +716,166 @@ def test_load_latest_release_unchanged_by_projection(erp_data_dir: Path) -> None
     # Age/sex columns present (not nulled).
     assert df.loc["117011326", "population_male"] == 6250
     assert df.loc["117011326", "median_age"] == 35.0
+
+
+# ---- population_density_per_km2 column (attach_sa2_areas) -------------------
+
+
+@responses.activate
+def test_load_emits_population_density_when_areas_attached(
+    erp_data_dir: Path,
+) -> None:
+    """``attach_sa2_areas`` enables the ``population_density_per_km2``
+    column. Density = ``population_total / area_km2``. Test uses
+    convenient round numbers so the assertion is unambiguous.
+    """
+    fake_xlsx = _make_erp_xlsx(
+        [
+            ("117011326", "Sydney CBD", "New South Wales", {2024: 10_000}),
+            ("117011327", "North Sydney", "New South Wales", {2024: 50_000}),
+        ]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks(
+        [
+            ("117011326", "Sydney CBD", 5000, 5000, 100.0, 35.0, 15.0, 70.0, 15.0),
+            ("117011327", "North Sydney", 25000, 25000, 100.0, 35.0, 15.0, 70.0, 15.0),
+        ]
+    )
+
+    ds = ErpDataSource(release="latest", root=erp_data_dir)
+    ds.attach_sa2_areas(
+        {
+            "117011326": 5.0,  # 10,000 / 5.0 km² = 2,000/km² (dense)
+            "117011327": 100.0,  # 50,000 / 100 km² = 500/km² (sparse)
+        }
+    )
+    df = ds.load()
+
+    assert "population_density_per_km2" in df.columns
+    assert df.loc["117011326", "population_density_per_km2"] == 2000.0
+    assert df.loc["117011327", "population_density_per_km2"] == 500.0
+
+
+@responses.activate
+def test_load_omits_population_density_without_attach(
+    erp_data_dir: Path,
+) -> None:
+    """Without ``attach_sa2_areas``, the density column is absent —
+    no implicit dependency on the boundary file, keeps the fetcher
+    standalone-usable.
+    """
+    fake_xlsx = _make_erp_xlsx([("117011326", "Sydney CBD", "New South Wales", {2024: 10_000})])
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks([("117011326", "Sydney CBD", 5000, 5000, 100.0, 35.0, 15.0, 70.0, 15.0)])
+
+    ds = ErpDataSource(release="latest", root=erp_data_dir)
+    # Deliberately no attach_sa2_areas call.
+    df = ds.load()
+
+    assert "population_density_per_km2" not in df.columns
+
+
+@responses.activate
+def test_load_emits_density_for_historical_release(
+    erp_data_dir: Path,
+) -> None:
+    """The density projection lines up with the historical-release
+    projection from #92: density = projected_population_total /
+    area_km2. So density for ``release="2017"`` uses
+    ``population_history_2017`` as the numerator.
+    """
+    fake_xlsx = _make_erp_xlsx(
+        [("117011326", "Sydney CBD", "New South Wales", {2017: 8_000, 2024: 10_000})]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks([("117011326", "Sydney CBD", 5000, 5000, 100.0, 35.0, 15.0, 70.0, 15.0)])
+
+    ds = ErpDataSource(release="2017", root=erp_data_dir)
+    ds.attach_sa2_areas({"117011326": 4.0})
+    df = ds.load()
+
+    # Projected total: 8000 (from population_history_2017).
+    assert df.loc["117011326", "population_total"] == 8000
+    assert df.loc["117011326", "reference_year"] == 2017
+    # Density: 8000 / 4.0 km² = 2000/km².
+    assert df.loc["117011326", "population_density_per_km2"] == 2000.0
+
+
+@responses.activate
+def test_load_density_nan_for_sa2_missing_from_areas(
+    erp_data_dir: Path,
+) -> None:
+    """When the SA2 areas lookup doesn't cover every SA2 in the ERP
+    data (e.g. partial lookup), the density column is NaN for the
+    uncovered SA2s — never crashes.
+    """
+    fake_xlsx = _make_erp_xlsx(
+        [
+            ("117011326", "Sydney CBD", "New South Wales", {2024: 10_000}),
+            ("117011327", "North Sydney", "New South Wales", {2024: 50_000}),
+        ]
+    )
+    responses.add(
+        responses.GET,
+        ERP_LANDING_URL,
+        body=_make_landing_html(["2024-25"]),
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://www.abs.gov.au/statistics/people/population/"
+        "regional-population/2024-25/32180DS0003_2001-25.xlsx",
+        body=fake_xlsx,
+        status=200,
+    )
+    _add_age_sex_mocks(
+        [
+            ("117011326", "Sydney CBD", 5000, 5000, 100.0, 35.0, 15.0, 70.0, 15.0),
+            ("117011327", "North Sydney", 25000, 25000, 100.0, 35.0, 15.0, 70.0, 15.0),
+        ]
+    )
+
+    ds = ErpDataSource(release="latest", root=erp_data_dir)
+    # Only one SA2 in the areas lookup — the other should produce NaN.
+    ds.attach_sa2_areas({"117011326": 5.0})
+    df = ds.load()
+
+    assert df.loc["117011326", "population_density_per_km2"] == 2000.0
+    assert pd.isna(df.loc["117011327", "population_density_per_km2"])

@@ -135,6 +135,13 @@ class ErpDataSource(_AbsXlsxDataset):
         # year (latest); ``_resolved_release`` tracks the logical
         # (possibly historical) year the caller asked for.
         self._physical_release_year: str | None = None
+        # Population-density support: optional SA2-code -> area-km² lookup.
+        # When attached (via ``attach_sa2_areas``), ``load()`` emits the
+        # ``population_density_per_km2`` column = population_total / area.
+        # When ``None`` the density column is omitted — keeps the fetcher
+        # usable without a boundary dependency for callers who don't need
+        # density (the cross-sectional notebook path, tests, etc.).
+        self._sa2_areas_km2: dict[str, float] | None = None
 
     # ---- hooks ---------------------------------------------------------
 
@@ -214,6 +221,24 @@ class ErpDataSource(_AbsXlsxDataset):
             self._resolved_url,
         )
 
+    # ---- optional SA2-area attachment (population_density_per_km2) -----
+
+    def attach_sa2_areas(self, areas: dict[str, float]) -> None:
+        """Attach an SA2-code → area-km² lookup so ``load()`` emits
+        the ``population_density_per_km2`` column.
+
+        The caller computes the lookup once per pipeline run (typically
+        from the boundary GeoDataFrame via
+        :func:`census_augment.spatial.compute_sa2_areas_km2`) and
+        attaches the same dict to every ErpDataSource instance that
+        will produce density output.
+
+        Safe to call repeatedly — last attachment wins. Safe to leave
+        unattached: density column simply doesn't appear in the
+        ``load()`` output.
+        """
+        self._sa2_areas_km2 = dict(areas)
+
     # ---- cache paths use the *physical* year (issue #92) ---------------
 
     @property
@@ -264,37 +289,53 @@ class ErpDataSource(_AbsXlsxDataset):
         # populated.
         assert self._resolved_release is not None
         assert self._physical_release_year is not None
-        if self._resolved_release == self._physical_release_year:
-            return df
-        requested = self._resolved_release
-        hist_col = f"population_history_{requested}"
-        if hist_col not in df.columns:
-            available = sorted(
-                c.removeprefix("population_history_")
-                for c in df.columns
-                if c.startswith("population_history_")
-            )
-            raise RuntimeError(
-                f"ERP release {requested!r} is not in the workbook's "
-                f"historical coverage. Available years: {available}. "
-                f"This usually means the requested year predates ABS's "
-                f"published series start (typically 2001)."
-            )
-        df = df.copy()
-        df["population_total"] = df[hist_col]
-        df["reference_year"] = int(requested)
-        # Age/sex columns reflect the latest workbook only — null them
-        # for historical releases. See class docstring + issue #92.
-        for col in (
-            "population_male",
-            "population_female",
-            "median_age",
-            "population_0_14",
-            "population_15_64",
-            "population_65_plus",
-        ):
-            if col in df.columns:
-                df[col] = None
+        if self._resolved_release != self._physical_release_year:
+            # Issue #92 projection: swap population_total for the
+            # requested historical year and null the age/sex columns.
+            requested = self._resolved_release
+            hist_col = f"population_history_{requested}"
+            if hist_col not in df.columns:
+                available = sorted(
+                    c.removeprefix("population_history_")
+                    for c in df.columns
+                    if c.startswith("population_history_")
+                )
+                raise RuntimeError(
+                    f"ERP release {requested!r} is not in the workbook's "
+                    f"historical coverage. Available years: {available}. "
+                    f"This usually means the requested year predates ABS's "
+                    f"published series start (typically 2001)."
+                )
+            df = df.copy()
+            df["population_total"] = df[hist_col]
+            df["reference_year"] = int(requested)
+            # Age/sex columns reflect the latest workbook only — null
+            # them for historical releases. See class docstring + #92.
+            for col in (
+                "population_male",
+                "population_female",
+                "median_age",
+                "population_0_14",
+                "population_15_64",
+                "population_65_plus",
+            ):
+                if col in df.columns:
+                    df[col] = None
+        # Population density (independent of historical-projection above).
+        # Emitted when ``attach_sa2_areas`` has been called. NaN for any
+        # SA2 the lookup doesn't cover (no area available).
+        if self._sa2_areas_km2 is not None:
+            df = df.copy()
+            areas = pd.Series(self._sa2_areas_km2, name="_sa2_area_km2")
+            areas.index.name = df.index.name
+            # Right-align so we only annotate rows where both inputs
+            # exist; coerces missing SA2s to NaN density.
+            joined = df.join(areas, how="left")
+            density = (joined["population_total"] / joined["_sa2_area_km2"]).astype(float)
+            # Inf shows up for zero-area SA2s (shouldn't happen with
+            # real ABS boundaries but keeps the column clean if it does).
+            density = density.where(density.abs() != float("inf"))
+            df["population_density_per_km2"] = density
         return df
 
     # ---- parsing -------------------------------------------------------

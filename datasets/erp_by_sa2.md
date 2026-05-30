@@ -131,6 +131,7 @@ groups, median age) sourced from the companion 3235.0 cube.
 | `ERP.population_15_64` | int | Working-age 15-64, latest reference year |
 | `ERP.population_65_plus` | int | Older Australians aged 65+, latest reference year |
 | `ERP.median_age` | float | Median age in years, latest reference year (one decimal) |
+| `ERP.population_density_per_km2` | float | Resident population density (population_total / SA2 area in km²). Emitted only when the pipeline supplies SA2 areas (`Pipeline.from_config` does this automatically). |
 
 In addition, the fetcher emits one int column per available year as
 `ERP.population_history_YYYY` (e.g. `population_history_2001` through
@@ -191,13 +192,16 @@ geometry for older years (deferred — see `spec-temporal.md` §17).
 
 ### Still on the wish list
 
-- `ERP.population_density_per_km2` — derived from SA2 area (needs an
-  area lookup the augmentor doesn't currently load). Tracked in
-  BACKLOG.md.
 - Age-and-sex *time series* (i.e. `population_65_plus_2010`, etc.) —
   ABS publishes DS0005_2001-24.xlsx for this (28 MB). Deferred until
   there's user demand; the latest-year columns above are the higher
   ROI for cross-dataset PRESETs.
+
+`ERP.population_density_per_km2` (formerly in this list) shipped via
+`ErpDataSource.attach_sa2_areas()` — `Pipeline.from_config` computes
+the SA2 areas from the boundary GeoDataFrame and threads them to the
+ERP fetcher. Direct callers who construct `ErpDataSource` outside the
+pipeline can attach areas themselves; see the method docstring.
 
 ## Fetch notes
 

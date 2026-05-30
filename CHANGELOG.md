@@ -66,6 +66,86 @@ get values from the 2016 DataPack rather than failing.
 - The existing `test_temporal_gcp_no_cross_edition_runs_cleanly`
   is unchanged — it exercises the no-routing-needed path.
 
+### Added — `ERP.population_density_per_km2` column
+
+The last item from the ERP wishlist in `datasets/erp_by_sa2.md`.
+Density = `population_total / SA2 area (km²)`. Density values
+range from <50/km² (remote SA2s) to >25,000/km² (inner-city
+Sydney CBD).
+
+**How it's computed:**
+
+- `Pipeline.from_config` computes an SA2 code → area-in-km² lookup
+  once per run from the already-loaded boundary GeoDataFrame, using
+  the new `census_augment.spatial.compute_sa2_areas_km2()` helper
+  (reprojects to EPSG:3577 / Australian Albers Equal Area Conic).
+- The areas dict is passed to `CensusEnricher` via a new optional
+  `sa2_areas_km2` kwarg, then threaded to the ERP fetcher at
+  ``_make_fetcher`` time via the new
+  `ErpDataSource.attach_sa2_areas(areas)` method.
+- `ErpDataSource.load()` adds the `population_density_per_km2`
+  column when areas are attached; omits it otherwise (keeps the
+  fetcher standalone-usable for callers without a boundary).
+
+**Temporal mode:** the density column reflects the same release-
+projection as `population_total` — a row dated 2017 gets density
+computed from `population_history_2017 / area_km2`. SA2 areas
+themselves are on the reference edition (ABS doesn't publish per-
+edition area lookups; the spatial drift between editions is small
+enough that one area lookup serves all releases).
+
+**Tests:**
+
+- 4 new tests in `test_dataset_erp.py`:
+  - `test_load_emits_population_density_when_areas_attached`
+  - `test_load_omits_population_density_without_attach`
+  - `test_load_emits_density_for_historical_release` — locks the
+    interaction with the #92 historical-year projection.
+  - `test_load_density_nan_for_sa2_missing_from_areas` — partial-
+    coverage area lookup produces NaN density (never crashes).
+- 4 new tests in `test_spatial.py` covering
+  `compute_sa2_areas_km2()`: basic shape, Albers-projection sanity
+  check (1° box at 32°S ≈ 10,400 km²), unknown-column raise,
+  no-CRS raise.
+
+### Tests — migrate cross-edition vehicle ERP → SEIFA (closes #92 xfails)
+
+The three `@pytest.mark.xfail` markers in
+`tests/test_pipeline_temporal.py` introduced alongside the #92 fix
+are removed. The tests they covered are now reimplemented using
+SEIFA as the cross-edition vehicle.
+
+**Background.** The #92 fix corrected the ERP spec — all ERP
+releases map to ASGS Edition 3 (ABS re-aggregates back-data onto
+the current boundaries via concordance). That correction made ERP
+unsuitable as a multi-edition test vehicle, and the three orchestrator
+tests that genuinely exercised cross-edition behaviour through ERP
+became architectural orphans (xfailed with a note pointing at SEIFA
+as the proper vehicle for the follow-up).
+
+This PR is that follow-up. The tests now use SEIFA, which genuinely
+spans Edition 1 (2011) + Edition 2 (2016) + Edition 3 (2021) per F.6.
+A 2018-dated row resolves to SEIFA 2016 / Edition 2 and exercises
+the cross-edition orchestrator's per-source-edition fan-out, missing-
+edition error path, and per-dataset `<dataset>_sa2_code_source`
+column emission against a spec that matches reality.
+
+New helpers in `test_pipeline_temporal.py`:
+
+- `_make_seifa_config` — variant of `_make_config` that uses a
+  SEIFA variable (`SEIFA.irsd_score`).
+- `_make_seifa_pipeline` — SEIFA-vehicle Pipeline with a stubbed
+  enricher that encodes the bucket's SEIFA release as the IRSD score
+  so tests can assert per-bucket routing.
+
+Tests migrated (xfail removed, assertions adjusted for SEIFA):
+
+- `test_temporal_cross_edition_raises_without_spatial_index`
+- `test_temporal_cross_edition_succeeds_with_extra_spatial_index`
+- `test_temporal_mixed_edition_buckets`
+
+No production-code changes — pure test-vehicle migration.
+
 ### Fixed — #92: ERP temporal-release resolution via historical-year projection
 
 Temporal-mode runs that requested `ERP.*` variables for rows whose

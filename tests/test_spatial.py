@@ -8,7 +8,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon
 
-from census_augment.spatial import SpatialIndex
+from census_augment.spatial import SpatialIndex, compute_sa2_areas_km2
 
 # Points chosen to fall cleanly inside the three fixture polygons:
 #   Sydney CBD       : lon 151.20-151.22, lat -33.87 to -33.85
@@ -208,3 +208,55 @@ def test_custom_code_and_name_columns() -> None:
 
     code2, _ = idx.lookup_one(0.5, 2.5)
     assert code2 == "B"
+
+
+# ---- compute_sa2_areas_km2 helper ----------------------------------------
+
+
+def test_compute_sa2_areas_km2_basic(fake_sa2_gdf: gpd.GeoDataFrame) -> None:
+    """Returns a dict of SA2 code → area in km², covering every SA2 in
+    the input GeoDataFrame. Areas are positive floats.
+    """
+    areas = compute_sa2_areas_km2(fake_sa2_gdf, code_column="SA2_CODE21")
+    assert len(areas) == len(fake_sa2_gdf)
+    assert set(areas.keys()) == set(fake_sa2_gdf["SA2_CODE21"].astype(str))
+    for code, area in areas.items():
+        assert isinstance(area, float)
+        assert area > 0.0, f"non-positive area for {code}: {area}"
+
+
+def test_compute_sa2_areas_km2_albers_projection_sanity() -> None:
+    """A 1° × 1° polygon at Australian latitudes is ~10,400 km². Test
+    the function reprojects to EPSG:3577 (Australian Albers) and
+    returns an order-of-magnitude-correct value. Precision isn't the
+    goal; sanity is.
+    """
+    polygon = Polygon([(145.0, -32.0), (146.0, -32.0), (146.0, -31.0), (145.0, -31.0)])
+    boundaries = gpd.GeoDataFrame(
+        {"SA2_CODE21": ["TEST_001"]},
+        geometry=[polygon],
+        crs="EPSG:4326",
+    )
+    areas = compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")
+    area = areas["TEST_001"]
+    # Allow ±15% for projection distortion at this latitude.
+    assert 8_000 < area < 13_000, f"expected ~10,400 km² for 1° box at 32°S, got {area:.0f}"
+
+
+def test_compute_sa2_areas_km2_unknown_code_column_raises() -> None:
+    boundaries = gpd.GeoDataFrame(
+        {"SA2_CODE21": ["A"]},
+        geometry=[Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="code column 'NOT_THERE' not found"):
+        compute_sa2_areas_km2(boundaries, code_column="NOT_THERE")
+
+
+def test_compute_sa2_areas_km2_no_crs_raises() -> None:
+    boundaries = gpd.GeoDataFrame(
+        {"SA2_CODE21": ["A"]},
+        geometry=[Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+    )
+    with pytest.raises(ValueError, match="must have a CRS"):
+        compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")

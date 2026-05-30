@@ -59,6 +59,7 @@ class CensusEnricher:
         output_prefix: str = "sa2_",
         data_dir: Path | None = None,
         dataset_release_overrides: dict[str, str] | None = None,
+        sa2_areas_km2: dict[str, float] | None = None,
     ) -> None:
         self._datapacks = datapacks
         self._catalog = catalog
@@ -70,6 +71,14 @@ class CensusEnricher:
         #: registry's factory. Cross-sectional mode leaves this empty
         #: and fetchers construct with their default release.
         self._dataset_release_overrides: dict[str, str] = dict(dataset_release_overrides or {})
+        #: Optional SA2-code → area-km² lookup. When provided, the ERP
+        #: fetcher gets it attached via ``attach_sa2_areas`` so its
+        #: ``load()`` emits the ``population_density_per_km2`` column.
+        #: ``Pipeline.from_config`` computes this from the boundary GDF
+        #: and threads it through. Other datasets ignore it.
+        self._sa2_areas_km2: dict[str, float] | None = (
+            dict(sa2_areas_km2) if sa2_areas_km2 is not None else None
+        )
         self._validate_no_synthetic_prefix_collision()
 
     def build_lookup(self) -> pd.DataFrame:
@@ -217,7 +226,18 @@ class CensusEnricher:
         kwargs: dict[str, Any] = {"root": self._data_dir / dataset_id}
         if dataset_id in self._dataset_release_overrides:
             kwargs["release"] = self._dataset_release_overrides[dataset_id]
-        return registry.make_fetcher(dataset_id, **kwargs)
+        fetcher = registry.make_fetcher(dataset_id, **kwargs)
+        # ERP density support: when the enricher knows SA2 areas (wired
+        # by Pipeline.from_config from the boundary GDF), attach them
+        # to the ERP fetcher so its ``load()`` emits the
+        # ``population_density_per_km2`` column.
+        if (
+            dataset_id == "erp_by_sa2"
+            and self._sa2_areas_km2 is not None
+            and hasattr(fetcher, "attach_sa2_areas")
+        ):
+            fetcher.attach_sa2_areas(self._sa2_areas_km2)
+        return fetcher
 
     # ---- PRESET integration --------------------------------------------
 

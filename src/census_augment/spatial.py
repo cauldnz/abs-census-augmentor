@@ -131,3 +131,53 @@ class SpatialIndex:
             names_out[orig_idx] = str(name)
 
         return codes_out, names_out
+
+
+# ---- SA2 area lookup ------------------------------------------------------
+#
+# Australia-wide equal-area projection used for area calculations:
+# Albers Equal Area Conic (EPSG:3577 / GDA94 Australian Albers). Standard
+# choice for area-preserving Australia-scale geo work — distorts shape but
+# preserves area within ~0.01% across the continent. Geopandas reprojects
+# to this CRS before computing geometry .area, which returns square metres.
+
+
+def compute_sa2_areas_km2(
+    boundaries: gpd.GeoDataFrame,
+    *,
+    code_column: str = "SA2_CODE21",
+) -> dict[str, float]:
+    """Build an SA2-code → area-in-km² lookup from a boundary GeoDataFrame.
+
+    Reprojects to EPSG:3577 (Australian Albers Equal Area Conic) so the
+    geometry ``.area`` is in square metres and area-preserving across the
+    continent. Squared metres are converted to km².
+
+    Args:
+        boundaries: GeoDataFrame containing SA2 polygons + a CRS + a code
+            column. Typically the same boundary GDF a :class:`SpatialIndex`
+            is built from.
+        code_column: Column name holding the SA2 code. Defaults to the
+            current ASGS Edition 3 convention; pass ``SA2_MAIN16`` for
+            Edition 2 boundaries or ``SA2_MAIN11`` for Edition 1.
+
+    Returns:
+        Dict mapping SA2 code (as ``str``) to area in km² (``float``).
+        Areas range from <1 km² (inner-city SA2s) to >50,000 km² (remote
+        SA2s); the function preserves the full range without bucketing.
+
+    Used by :class:`ErpDataSource` to compute
+    ``ERP.population_density_per_km2`` = ``population_total / area_km2``.
+    """
+    if code_column not in boundaries.columns:
+        raise ValueError(
+            f"code column {code_column!r} not found in boundaries; got: {list(boundaries.columns)}"
+        )
+    if boundaries.crs is None:
+        raise ValueError("boundaries GeoDataFrame must have a CRS")
+    # EPSG:3577 — GDA94 / Australian Albers. Equal-area projection.
+    in_equal_area = boundaries.to_crs("EPSG:3577")
+    return {
+        str(code): float(geom.area / 1_000_000.0)
+        for code, geom in zip(in_equal_area[code_column], in_equal_area.geometry, strict=False)
+    }
