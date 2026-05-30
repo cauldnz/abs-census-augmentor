@@ -51,6 +51,44 @@ enough that one area lookup serves all releases).
   check (1° box at 32°S ≈ 10,400 km²), unknown-column raise,
   no-CRS raise.
 
+### Tests — migrate cross-edition vehicle ERP → SEIFA (closes #92 xfails)
+
+The three `@pytest.mark.xfail` markers in
+`tests/test_pipeline_temporal.py` introduced alongside the #92 fix
+are removed. The tests they covered are now reimplemented using
+SEIFA as the cross-edition vehicle.
+
+**Background.** The #92 fix corrected the ERP spec — all ERP
+releases map to ASGS Edition 3 (ABS re-aggregates back-data onto
+the current boundaries via concordance). That correction made ERP
+unsuitable as a multi-edition test vehicle, and the three orchestrator
+tests that genuinely exercised cross-edition behaviour through ERP
+became architectural orphans (xfailed with a note pointing at SEIFA
+as the proper vehicle for the follow-up).
+
+This PR is that follow-up. The tests now use SEIFA, which genuinely
+spans Edition 1 (2011) + Edition 2 (2016) + Edition 3 (2021) per F.6.
+A 2018-dated row resolves to SEIFA 2016 / Edition 2 and exercises
+the cross-edition orchestrator's per-source-edition fan-out, missing-
+edition error path, and per-dataset `<dataset>_sa2_code_source`
+column emission against a spec that matches reality.
+
+New helpers in `test_pipeline_temporal.py`:
+
+- `_make_seifa_config` — variant of `_make_config` that uses a
+  SEIFA variable (`SEIFA.irsd_score`).
+- `_make_seifa_pipeline` — SEIFA-vehicle Pipeline with a stubbed
+  enricher that encodes the bucket's SEIFA release as the IRSD score
+  so tests can assert per-bucket routing.
+
+Tests migrated (xfail removed, assertions adjusted for SEIFA):
+
+- `test_temporal_cross_edition_raises_without_spatial_index`
+- `test_temporal_cross_edition_succeeds_with_extra_spatial_index`
+- `test_temporal_mixed_edition_buckets`
+
+No production-code changes — pure test-vehicle migration.
+
 ### Fixed — #92: ERP temporal-release resolution via historical-year projection
 
 Temporal-mode runs that requested `ERP.*` variables for rows whose
