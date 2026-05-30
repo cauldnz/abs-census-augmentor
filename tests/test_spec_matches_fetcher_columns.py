@@ -141,7 +141,17 @@ def test_spec_matches_fetcher__erp(tmp_path: Path) -> None:
         status=200,
     )
 
-    df = ErpDataSource(root=tmp_path / "erp-cache").load()
+    # Attach SA2 areas so the density column appears (matches the
+    # spec's recent population_density_per_km2 addition). In production
+    # Pipeline.from_config does this automatically from the boundary GDF.
+    erp = ErpDataSource(root=tmp_path / "erp-cache")
+    erp.attach_sa2_areas(
+        {
+            "117011326": 5.0,
+            "117011327": 100.0,
+        }
+    )
+    df = erp.load()
     _check_spec_matches("erp_by_sa2", set(df.columns))
 
 

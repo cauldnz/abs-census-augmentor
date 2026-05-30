@@ -9,6 +9,48 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — `ERP.population_density_per_km2` column
+
+The last item from the ERP wishlist in `datasets/erp_by_sa2.md`.
+Density = `population_total / SA2 area (km²)`. Density values
+range from <50/km² (remote SA2s) to >25,000/km² (inner-city
+Sydney CBD).
+
+**How it's computed:**
+
+- `Pipeline.from_config` computes an SA2 code → area-in-km² lookup
+  once per run from the already-loaded boundary GeoDataFrame, using
+  the new `census_augment.spatial.compute_sa2_areas_km2()` helper
+  (reprojects to EPSG:3577 / Australian Albers Equal Area Conic).
+- The areas dict is passed to `CensusEnricher` via a new optional
+  `sa2_areas_km2` kwarg, then threaded to the ERP fetcher at
+  ``_make_fetcher`` time via the new
+  `ErpDataSource.attach_sa2_areas(areas)` method.
+- `ErpDataSource.load()` adds the `population_density_per_km2`
+  column when areas are attached; omits it otherwise (keeps the
+  fetcher standalone-usable for callers without a boundary).
+
+**Temporal mode:** the density column reflects the same release-
+projection as `population_total` — a row dated 2017 gets density
+computed from `population_history_2017 / area_km2`. SA2 areas
+themselves are on the reference edition (ABS doesn't publish per-
+edition area lookups; the spatial drift between editions is small
+enough that one area lookup serves all releases).
+
+**Tests:**
+
+- 4 new tests in `test_dataset_erp.py`:
+  - `test_load_emits_population_density_when_areas_attached`
+  - `test_load_omits_population_density_without_attach`
+  - `test_load_emits_density_for_historical_release` — locks the
+    interaction with the #92 historical-year projection.
+  - `test_load_density_nan_for_sa2_missing_from_areas` — partial-
+    coverage area lookup produces NaN density (never crashes).
+- 4 new tests in `test_spatial.py` covering
+  `compute_sa2_areas_km2()`: basic shape, Albers-projection sanity
+  check (1° box at 32°S ≈ 10,400 km²), unknown-column raise,
+  no-CRS raise.
+
 ### Fixed — #92: ERP temporal-release resolution via historical-year projection
 
 Temporal-mode runs that requested `ERP.*` variables for rows whose

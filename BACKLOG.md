@@ -49,13 +49,10 @@ Suggested ordering by ROI:
    Smallest wins; consolidates yesterday's ERP age/sex unlock
    further. Likely 3-5 PRESETs land in a single PR.
 
-2. **`ERP.population_density_per_km2`.** Needs SA2-area lookup
-   wiring. Small new infrastructure, moderate scope (~half day).
-
-3. **User-supplied DataPack ZIP fallback** (for GCP 2011 unlock —
+2. **User-supplied DataPack ZIP fallback** (for GCP 2011 unlock —
    see new section below). ~2 hours of clean engineering.
 
-4. **Address-retirement awareness** (Phase G refinement,
+3. **Address-retirement awareness** (Phase G refinement,
    spec-temporal.md §17 deferred): "address X existed in 2018,
    retired in 2022; row dated 2020 should hit X even though X is
    missing from the 2025 release." Today an unmatched address
@@ -64,6 +61,12 @@ Suggested ordering by ROI:
    revisiting if user demand surfaces.
 
 ### Done (no longer "next priority")
+
+- ~~`ERP.population_density_per_km2`.~~ Shipped via
+  `ErpDataSource.attach_sa2_areas()` + `Pipeline.from_config` wiring.
+  Density computed from `population_total / SA2 area km²`; SA2 areas
+  derived from the boundary GeoDataFrame at pipeline construction via
+  `census_augment.spatial.compute_sa2_areas_km2()`. See CHANGELOG.
 
 - ~~Phase G — G-NAF release-per-row.~~ Shipped in **v2.0.0** via
   PR #70 (commit 063a9c0). The `gnaf_release` output column, per-row
