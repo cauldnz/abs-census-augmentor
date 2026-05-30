@@ -274,6 +274,9 @@ class Pipeline:
         extra_gnaf_geocoders: dict[str, Geocoder] | None = None,
         gnaf_geocoder_factory: Callable[[str], Geocoder] | None = None,
         gnaf_available_releases: list[str] | None = None,
+        extra_gcp_datapacks: dict[str, tuple[DataPacksDataSource, VariableCatalog]] | None = None,
+        gcp_datapacks_factory: Callable[[str], tuple[DataPacksDataSource, VariableCatalog]]
+        | None = None,
     ) -> None:
         """Construct directly. Tests use this; production code typically
         goes through :meth:`from_config` or :meth:`create`.
@@ -319,6 +322,20 @@ class Pipeline:
         YYYYMM releases the data source can serve; if ``None``,
         per-row resolution is disabled and the configured release is
         used for every row (matching the Phase E.2 / F.2 behaviour).
+
+        ``extra_gcp_datapacks`` / ``gcp_datapacks_factory`` (issue #91
+        Stage 2): per-release GCP ``DataPacksDataSource`` + matching
+        ``VariableCatalog`` for temporal-mode cross-edition GCP
+        routing. Before this PR the orchestrator hardcoded GCP to the
+        reference edition because only one release was registered;
+        Phase F.4 (PR #81) added GCP 2016 but the orchestrator wasn't
+        updated to route variables per source edition. With the
+        factory wired, a row whose date resolves to GCP 2016 gets
+        looked up against the 2016 DataPack with Edition-2 SA2 codes —
+        the correct cross-edition behaviour. ``from_config`` wires the
+        factory automatically; tests pre-populate ``extra_gcp_datapacks``
+        with synthetic per-release DataPacks to avoid the network
+        round-trip.
         """
         if not geocoders:
             raise ValueError(
@@ -348,6 +365,19 @@ class Pipeline:
         self._gnaf_available_releases: list[str] | None = (
             list(gnaf_available_releases) if gnaf_available_releases is not None else None
         )
+        # Per-release GCP DataPacks dispatch (issue #91 Stage 2). Empty
+        # extras + None factory together mean "no cross-edition GCP
+        # routing wired" — temporal-mode runs whose GCP releases
+        # resolve to a non-reference edition raise loudly (the Stage 1
+        # guard, retained as a defensive fallback). ``from_config``
+        # always wires the factory; tests pre-populate
+        # ``extra_gcp_datapacks`` instead.
+        self._gcp_datapacks_by_release: dict[str, tuple[DataPacksDataSource, VariableCatalog]] = (
+            dict(extra_gcp_datapacks or {})
+        )
+        self._gcp_datapacks_factory: (
+            Callable[[str], tuple[DataPacksDataSource, VariableCatalog]] | None
+        ) = gcp_datapacks_factory
         self._validate_no_column_collisions()
 
     @classmethod
@@ -457,6 +487,55 @@ class Pipeline:
             data_dir=data_dir,
             sa2_areas_km2=sa2_areas_km2,
         )
+
+        # Per-release GCP DataPacks factory (issue #91 Stage 2). Closes
+        # over data_dir + base_url so the per-release DataPacks lands
+        # under a release-scoped subdir on disk and re-uses the
+        # configured URL.
+        captured_datapacks_data_dir = data_dir
+        captured_datapacks_base_url = config.data_sources.datapacks_base_url
+
+        def _gcp_datapacks_factory(
+            release: str,
+        ) -> tuple[DataPacksDataSource, VariableCatalog]:
+            """Build a (DataPacksDataSource, VariableCatalog) pair for
+            the requested GCP release year.
+
+            For 2016 the descriptor is coerced to ``short-header``
+            (F.4 spec: ABS only hosts that variant at the 2016 URL).
+            For 2021 the descriptor follows the user's config — they
+            picked it for a reason.
+            """
+            from .config import CensusConfig as _CensusCfg  # noqa: PLC0415
+
+            year = int(release)
+            if year == 2016:
+                gcp_census = _CensusCfg(
+                    year=2016,
+                    asgs_edition=2,
+                    datum="GDA94",
+                    descriptor="short-header",
+                )
+            elif year == 2021:
+                gcp_census = _CensusCfg(
+                    year=2021,
+                    asgs_edition=3,
+                    datum="GDA2020",
+                    descriptor=config.census.descriptor,
+                )
+            else:
+                raise NotImplementedError(
+                    f"No GCP DataPack factory wired for release {release!r}. "
+                    f"Only 2016 and 2021 are registered today; F.5 will "
+                    f"unlock GCP 2011 once URLs are sourced."
+                )
+            per_release_ds = DataPacksDataSource(
+                census=gcp_census,
+                base_url=captured_datapacks_base_url,
+                root=captured_datapacks_data_dir / "census" / str(year),
+            )
+            per_release_catalog = VariableCatalog.from_data_source(per_release_ds)
+            return (per_release_ds, per_release_catalog)
 
         cache: GeocodeCache
         if config.geocoding.cache_enabled:
@@ -579,6 +658,7 @@ class Pipeline:
             spatial_index_factory=_spatial_index_factory,
             gnaf_geocoder_factory=gnaf_factory,
             gnaf_available_releases=gnaf_available,
+            gcp_datapacks_factory=_gcp_datapacks_factory,
         )
 
     @classmethod
@@ -1338,66 +1418,14 @@ class Pipeline:
                 edition_per_dataset_release[(did, rel)] = src_edition
                 editions_in_use.add(src_edition)
 
-        # Phase F.2 + F.4 gap (issue #91): the temporal orchestrator routes
-        # GCP variables to the reference-edition sub-enricher only — there's
-        # no per-release ``DataPacksDataSource`` factory like SEIFA / ERP /
-        # DSS / ABS_PIA use. Before F.4 this didn't matter (only 2021 GCP
-        # was registered). F.4 (PR #81) registered GCP 2016, but
-        # ``_variables_for_datasets``'s ``include_gcp_and_preset`` shortcut
-        # and ``_enricher_for_bucket``'s singleton DataPacks were never
-        # updated to match.
-        #
-        # Result if we silently let this through: a row dated 2017 resolves
-        # to GCP release 2016 (source edition 2), but the GCP variable
-        # ends up looked up via the reference-edition (2021) DataPack
-        # keyed by Edition-3 SA2 codes — silent NaN for every such row,
-        # with a misleading ``gcp_release="2016"`` annotation on the
-        # output.
-        #
-        # Until the per-release DataPacks routing lands (#91 Stage 2),
-        # fail loudly so users know to either drop GCP variables from
-        # their temporal config or constrain the input date range.
-        # PRESETs are explicitly always-reference-edition per
-        # spec-temporal.md §9, so they're unaffected.
-        gcp_variables_used = [
-            (friendly, ref)
-            for friendly, ref in self._config.variables.items()
-            if _is_gcp_variable_ref(ref)
-        ]
-        non_reference_gcp_releases = sorted(
-            {
-                rel
-                for (did, rel), src_ed in edition_per_dataset_release.items()
-                if did == "gcp" and src_ed != reference_edition
-            }
-        )
-        if gcp_variables_used and non_reference_gcp_releases:
-            non_ref_eds = sorted(
-                {edition_per_dataset_release[("gcp", rel)] for rel in non_reference_gcp_releases}
-            )
-            raise ValueError(
-                "GCP cross-edition routing is not yet implemented in "
-                "temporal mode (issue #91).\n\n"
-                f"  Variables affected: "
-                f"{sorted(f for f, _ in gcp_variables_used)}\n"
-                f"  GCP release(s) on non-reference editions: "
-                f"{non_reference_gcp_releases}\n"
-                f"  ASGS edition(s) involved: {non_ref_eds}\n"
-                f"  Reference edition (configured): {reference_edition}\n\n"
-                "Workarounds until the per-release DataPacks routing "
-                "lands:\n"
-                "  - Drop GCP variables (G##.*) from the temporal-mode "
-                "config and pull them via separate cross-sectional "
-                "runs, then merge by row.\n"
-                "  - Constrain your input date range so all rows "
-                "resolve to the GCP release matching the reference "
-                "edition.\n\n"
-                "Background: spec-temporal.md §9 covers the "
-                "orchestration design; pipeline.py "
-                "``_variables_for_datasets`` carries a stale "
-                "always-reference-edition assumption for GCP that "
-                "predates F.4. See issue #91 for the full diagnosis."
-            )
+        # Issue #91 Stage 2: GCP variables on non-reference editions are
+        # routed to per-release DataPacks via ``_get_gcp_datapacks(rel)``.
+        # The Stage 1 loud-error guard from PR #94 is replaced — the
+        # proper routing happens in ``_enricher_for_bucket`` below.
+        # Defensive: when a test pipeline is constructed without a
+        # factory and without the matching ``extra_gcp_datapacks``
+        # entry, the loud error fires from ``_get_gcp_datapacks`` at
+        # bucket-construction time naming the missing release.
 
         # Per-edition SA2 lookup. The reference edition's codes are already
         # on df_out as ``sa2_code``; any other edition gets its own column
@@ -1452,7 +1480,7 @@ class Pipeline:
                 dataset_releases = by_edition[src_edition]
                 edition_vars = self._variables_for_datasets(
                     set(dataset_releases.keys()),
-                    include_gcp_and_preset=(src_edition == reference_edition),
+                    include_preset=(src_edition == reference_edition),
                 )
                 if not edition_vars:
                     # No user-visible variables in this edition group.
@@ -1552,16 +1580,23 @@ class Pipeline:
         self,
         dataset_ids: set[str],
         *,
-        include_gcp_and_preset: bool,
+        include_preset: bool,
     ) -> dict[str, str]:
         """Filter the configured variables map to those owned by
         ``dataset_ids``.
 
-        ``include_gcp_and_preset`` is set when iterating the *reference
-        edition* group: GCP and PRESET variables are always on the
-        reference edition today (GCP 2016 isn't registered yet; every
-        PRESET references GCP columns) so they ride along with whatever
-        group is being processed for that edition.
+        GCP routing (issue #91 Stage 2): GCP variables (``G\\d+.<col>``)
+        are now treated as ordinary dataset variables routed by their
+        resolved release's source edition. They're included iff
+        ``"gcp" in dataset_ids``.
+
+        PRESET routing (unchanged from F.2): PRESET variables are
+        explicitly always-reference-edition per spec-temporal.md §9
+        PRESET note. They're included iff ``include_preset=True``,
+        which the orchestrator sets for the reference-edition group
+        only. Every shipped PRESET's source columns are GCP-on-the-
+        reference-edition; cross-dataset PRESETs (DSS + ERP) still
+        live on the reference edition for orchestration purposes.
         """
         from .datasets import registry  # noqa: PLC0415
         from .datasets._registry import RegistryError  # noqa: PLC0415
@@ -1571,18 +1606,16 @@ class Pipeline:
             if "." not in ref:
                 continue
             namespace = ref.split(".", 1)[0]
-            # GCP-shape ``G##.col`` refs → gcp dataset (today only).
+            # GCP-shape ``G##.col`` refs route to the "gcp" dataset id.
             is_gcp = bool(namespace) and namespace[0] == "G" and namespace[1:].isdigit()
             if is_gcp:
-                if include_gcp_and_preset:
+                if "gcp" in dataset_ids:
                     out[friendly] = ref
                 continue
-            # PRESET refs (``PRESET.<id>``) are treated as living on the
-            # reference edition for now — every PRESET's source columns
-            # are GCP. See _enrich_temporal docstring + spec-temporal.md
-            # §9 PRESET note.
+            # PRESET refs (``PRESET.<id>``) live on the reference edition
+            # per spec-temporal.md §9.
             if namespace == "PRESET":
-                if include_gcp_and_preset:
+                if include_preset:
                     out[friendly] = ref
                 continue
             # Otherwise resolve the namespace to a registered dataset id
@@ -1590,10 +1623,11 @@ class Pipeline:
             try:
                 spec, _field = registry.resolve_variable(ref)
             except RegistryError:
-                # Unknown namespace — fall through to GCP path if the
-                # reference-edition group is being built; otherwise skip.
-                if include_gcp_and_preset:
-                    out[friendly] = ref
+                # Unknown namespace — skip silently. (Previously fell
+                # through to the GCP catalog which surfaced a clearer
+                # error elsewhere; with GCP now a first-class
+                # registered dataset, unknown namespaces are simply
+                # not routable in temporal mode.)
                 continue
             if spec.id in dataset_ids:
                 out[friendly] = ref
@@ -1637,10 +1671,32 @@ class Pipeline:
         sees its own slice of the variables map. Cross-sectional and
         single-edition temporal runs pass ``None`` and get the full
         variables map.
+
+        GCP cross-edition routing (issue #91 Stage 2): when the
+        bucket's resolved GCP release isn't the configured
+        ``census.year`` (e.g. row dated 2017 → GCP 2016 vs the
+        configured 2021), this method swaps in a per-release
+        ``DataPacksDataSource`` + ``VariableCatalog`` so the
+        sub-enricher's GCP lookup targets the right edition's data.
+        Other datasets continue to use the registered-fetcher
+        per-release path via ``dataset_release_overrides``.
         """
+        # GCP per-release routing. The bucket's GCP release determines
+        # which DataPacks the sub-enricher reads from.
+        gcp_release = release_overrides.get("gcp")
+        configured_gcp_release = str(self._config.census.year)
+        if gcp_release is None or gcp_release == configured_gcp_release:
+            # No GCP routing needed: either no GCP in bucket or the
+            # bucket's GCP release matches the pipeline's configured
+            # default (e.g. 2021). Use the configured enricher's
+            # datapacks + catalog.
+            datapacks = self._enricher._datapacks
+            catalog = self._enricher._catalog
+        else:
+            datapacks, catalog = self._get_gcp_datapacks(gcp_release)
         return CensusEnricher(
-            datapacks=self._enricher._datapacks,
-            catalog=self._enricher._catalog,
+            datapacks=datapacks,
+            catalog=catalog,
             variables=variables_override
             if variables_override is not None
             else self._enricher._variables,
@@ -1649,6 +1705,33 @@ class Pipeline:
             dataset_release_overrides=release_overrides,
             sa2_areas_km2=self._enricher._sa2_areas_km2,
         )
+
+    def _get_gcp_datapacks(self, release: str) -> tuple[DataPacksDataSource, VariableCatalog]:
+        """Return the per-release GCP (DataPacks, Catalog) tuple for
+        ``release`` (issue #91 Stage 2).
+
+        Cache first; factory second. Raises a clear ``RuntimeError``
+        when the caller needs a release the pipeline can't construct
+        (test-built pipelines without a factory and without a matching
+        ``extra_gcp_datapacks`` entry).
+        """
+        cached = self._gcp_datapacks_by_release.get(release)
+        if cached is not None:
+            return cached
+        if self._gcp_datapacks_factory is None:
+            raise RuntimeError(
+                f"Temporal-mode bucket requires a GCP DataPack for release "
+                f"{release!r}, but this Pipeline was constructed without a "
+                f"``gcp_datapacks_factory`` and without an "
+                f"``extra_gcp_datapacks`` entry for that release. Either "
+                f"use Pipeline.from_config (which wires the factory "
+                f"automatically) or pass "
+                f"``extra_gcp_datapacks={{{release!r}: (DataPacksDataSource(...), "
+                f"VariableCatalog(...))}}`` to Pipeline(...)."
+            )
+        built = self._gcp_datapacks_factory(release)
+        self._gcp_datapacks_by_release[release] = built
+        return built
 
     # ---- temporal-mode G-NAF dispatch (spec-temporal.md §12, Phase G) ----
 
