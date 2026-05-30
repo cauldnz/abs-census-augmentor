@@ -166,6 +166,12 @@ class DssDataSource(_AbsXlsxDataset):
     def _parse_xlsx(self, xlsx_path: Path) -> pd.DataFrame:
         import openpyxl  # noqa: PLC0415
 
+        # Lazy import — keeps the 63 KB static mapping out of memory for
+        # callers who never parse a pre-Q2-2023 DSS file.
+        from ._dss_sa2_5digit_edition_2 import (  # noqa: PLC0415
+            SA2_5DIG_TO_MAIN_EDITION_2,
+        )
+
         wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
         if "SA2" not in wb.sheetnames:
             wb.close()
@@ -205,13 +211,30 @@ class DssDataSource(_AbsXlsxDataset):
                 continue
             col_names.append(_payment_column_name(raw))
 
+        # Issue #99: pre-Q2-2023 DSS releases use 5-digit ``SA2_5DIG16``
+        # codes (e.g. ``11007`` Braidwood) rather than the 9-digit
+        # ``SA2_MAIN16`` form (``101021007``) that Q2-2023+ files
+        # adopted. Detect on first data row and convert via the
+        # bundled static mapping. ABS Edition 2 codes are frozen so
+        # the mapping never goes stale.
+        unknown_5digit_codes: list[str] = []
         records: list[dict[str, object]] = []
         for row in rows[header_idx + 1 :]:
             if len(row) < 2:
                 continue
             sa2_raw = row[0]
             sa2 = "" if sa2_raw is None else str(sa2_raw).strip()
-            if not (len(sa2) == 9 and sa2.isdigit()):
+            if len(sa2) == 5 and sa2.isdigit():
+                # Older DSS release with 5-digit SA2 codes — convert to
+                # the 9-digit Edition 2 form so the resulting index
+                # joins cleanly with the cross-edition spatial lookup
+                # (which produces 9-digit codes).
+                converted = SA2_5DIG_TO_MAIN_EDITION_2.get(sa2)
+                if converted is None:
+                    unknown_5digit_codes.append(sa2)
+                    continue
+                sa2 = converted
+            elif not (len(sa2) == 9 and sa2.isdigit()):
                 continue
             rec: dict[str, object] = {"sa2_code_2021": sa2}
             for col_idx, col_name in enumerate(col_names):
@@ -224,6 +247,17 @@ class DssDataSource(_AbsXlsxDataset):
             records.append(rec)
 
         wb.close()
+        if unknown_5digit_codes:
+            _log.warning(
+                "DSS workbook %s contained %d 5-digit SA2 codes not in the "
+                "bundled Edition 2 mapping (sample: %s); those rows were "
+                "skipped. If you see this against a fresh ABS release the "
+                "mapping may need regenerating from a current Edition 2 "
+                "boundary download.",
+                xlsx_path,
+                len(unknown_5digit_codes),
+                unknown_5digit_codes[:5],
+            )
         if not records:
             raise RuntimeError(f"No SA2 data rows in {xlsx_path}")
 
