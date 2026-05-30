@@ -315,7 +315,7 @@ def test_compute_sa2_areas_km2_warns_on_many_nulls(caplog: pytest.LogCaptureFixt
     geoms: list[object] = [real_poly if i < 40 else None for i in range(100)]
     boundaries = gpd.GeoDataFrame(
         {"SA2_CODE21": codes},
-        geometry=geoms,  # type: ignore[arg-type]
+        geometry=geoms,
         crs="EPSG:4326",
     )
     with caplog.at_level("WARNING", logger="census_augment.spatial"):
