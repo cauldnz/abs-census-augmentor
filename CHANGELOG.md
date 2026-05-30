@@ -9,6 +9,63 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — #91 Stage 2: per-release GCP DataPacks routing in temporal mode
+
+Completes the architectural fix for cross-edition GCP in temporal
+mode. PR #94 shipped Stage 1 (loud error replacing silent NaN); this
+PR wires the proper per-release routing so 2016-era rows actually
+get values from the 2016 DataPack rather than failing.
+
+**What changed:**
+
+- `Pipeline.__init__` gains two optional kwargs:
+  - `extra_gcp_datapacks: dict[str, tuple[DataPacksDataSource, VariableCatalog]]`
+    — pre-populated per-release pairs (tests use this).
+  - `gcp_datapacks_factory: Callable[[str], tuple[DataPacksDataSource, VariableCatalog]]`
+    — lazy constructor for per-release pairs (production wires this via
+    `from_config`).
+- `Pipeline.from_config` builds the factory automatically, closing
+  over `data_dir` and the configured base URL. The factory respects
+  F.4's 2016 = short-header constraint and uses the user's configured
+  descriptor for 2021.
+- New `_get_gcp_datapacks(release)` helper — cache-first, factory-
+  second, clear `RuntimeError` if both are missing.
+- `_enricher_for_bucket` consults `_get_gcp_datapacks(release)` when
+  the bucket's resolved GCP release differs from the configured
+  default. The sub-enricher then reads from the right release's
+  DataPacks + catalog.
+- `_variables_for_datasets` drops the stale `include_gcp_and_preset`
+  shortcut for GCP. GCP variables now route by their resolved
+  release's source edition like every other registered dataset.
+  PRESETs remain always-reference-edition per spec-temporal.md §9.
+- The Stage 1 loud-error guard at the top of `_enrich_temporal` is
+  removed — its job is done. The defensive `RuntimeError` from
+  `_get_gcp_datapacks` covers test-built Pipelines that omit the
+  factory + extras.
+
+**Side effects:**
+
+- The `gcp_sa2_code_source` column now correctly emits the source-
+  edition SA2 code for non-reference GCP releases (Edition-2 codes for
+  2016 rows). Stage 1 left this column populated with the
+  reference-edition code because the orchestrator never invoked GCP
+  per-edition; with the per-release path live, the column is
+  meaningful.
+
+**Tests:**
+
+- `test_temporal_gcp_cross_edition_raises_when_no_factory_wired`
+  replaces the Stage 1 test. Verifies the defensive `RuntimeError`
+  fires from `_get_gcp_datapacks` when a hand-constructed Pipeline
+  omits both the factory and the extras.
+- `test_temporal_gcp_cross_edition_succeeds_with_per_release_extras`
+  is the success-path companion. A two-row input straddling
+  2017 + 2023 routes correctly to the 2016 and 2021 DataPacks
+  respectively, with the values encoded by the stub enricher to
+  prove the right DataPack was used per row.
+- The existing `test_temporal_gcp_no_cross_edition_runs_cleanly`
+  is unchanged — it exercises the no-routing-needed path.
+
 ### Fixed — #92: ERP temporal-release resolution via historical-year projection
 
 Temporal-mode runs that requested `ERP.*` variables for rows whose

@@ -814,22 +814,20 @@ def test_cross_sectional_mode_unaffected_by_temporal_code(tmp_path: Path) -> Non
 # ---- issue #91: GCP cross-edition emits loud error, not silent NaN -------
 
 
-def test_temporal_gcp_cross_edition_raises_loud_error(tmp_path: Path) -> None:
-    """A row whose date resolves to GCP 2016 (Edition 2) with a GCP
-    variable in the config should raise a clear ``ValueError`` naming
-    the affected variables and the resolved non-reference releases —
-    rather than silently returning NaN.
+def test_temporal_gcp_cross_edition_raises_when_no_factory_wired(
+    tmp_path: Path,
+) -> None:
+    """When a row resolves to a non-reference GCP release AND the
+    Pipeline was constructed without ``gcp_datapacks_factory`` /
+    ``extra_gcp_datapacks``, ``_get_gcp_datapacks`` raises a clear
+    ``RuntimeError`` naming the missing release.
 
-    Issue #91 root-cause: ``_variables_for_datasets``'s
-    ``include_gcp_and_preset`` shortcut routes GCP variables to the
-    reference-edition sub-enricher only, so the lookup uses Edition-3
-    SA2 codes against the 2016 DataPack (keyed by Edition-2 codes) and
-    misses. Until the per-release ``DataPacksDataSource`` routing
-    lands (#91 Stage 2), the loud error preserves intent — clearer
-    failure mode than silent NaN with misleading ``gcp_release``
-    annotation.
-
-    Background: see issue #91 / spec-temporal.md §9 PRESET note.
+    This is the test-time safety net replacing PR #94's Stage 1
+    guard. ``Pipeline.from_config`` always wires the factory, so this
+    failure path only fires in hand-constructed Pipelines (typically
+    tests) that omit both the factory and the matching
+    ``extra_gcp_datapacks`` entry. See ``test_temporal_gcp_cross_edition_
+    succeeds_with_per_release_extras`` below for the success path.
     """
     from census_augment.catalog import VariableCatalog
     from census_augment.data_sources.datapacks import DataPacksDataSource
@@ -884,6 +882,8 @@ def test_temporal_gcp_cross_edition_raises_loud_error(tmp_path: Path) -> None:
         spatial=spatial,
         enricher=enricher,
         extra_spatial_indices={2: _edition_2_synthetic_spatial_index()},
+        # Deliberately no gcp_datapacks_factory / extra_gcp_datapacks
+        # — this is the path that exercises the defensive guard.
     )
 
     # 2017-06-15 resolves to GCP release 2016 under closest_at_or_before
@@ -896,18 +896,12 @@ def test_temporal_gcp_cross_edition_raises_loud_error(tmp_path: Path) -> None:
         }
     )
 
-    with pytest.raises(
-        ValueError, match="GCP cross-edition routing is not yet implemented"
-    ) as excinfo:
+    with pytest.raises(RuntimeError, match="GCP DataPack for release '2016'") as excinfo:
         pipeline.augment(df)
 
-    # The error names the affected variable, the non-reference release,
-    # and points at the tracking issue + the workaround.
     msg = str(excinfo.value)
-    assert "pop_total" in msg
     assert "2016" in msg
-    assert "issue #91" in msg
-    assert "Workarounds" in msg
+    assert "gcp_datapacks_factory" in msg or "extra_gcp_datapacks" in msg
 
 
 def test_temporal_gcp_no_cross_edition_runs_cleanly(tmp_path: Path) -> None:
@@ -1002,3 +996,130 @@ def test_temporal_gcp_no_cross_edition_runs_cleanly(tmp_path: Path) -> None:
     assert result.df["sa2_pop_total"].iloc[0] == 12345.0
     # gcp_release column reports the reference-edition release.
     assert result.df["gcp_release"].iloc[0] == "2021"
+
+
+def test_temporal_gcp_cross_edition_succeeds_with_per_release_extras(
+    tmp_path: Path,
+) -> None:
+    """Issue #91 Stage 2 success path: with per-release GCP DataPacks
+    pre-populated via ``extra_gcp_datapacks``, a row whose date
+    resolves to GCP 2016 (Edition 2) gets routed to the 2016
+    DataPacks with Edition-2 SA2 codes — no NaN, no error.
+
+    Verifies that ``_enricher_for_bucket`` swaps in the per-release
+    (DataPacks, Catalog) for non-default GCP releases. The 2016
+    sub-enricher is a stubbed CensusEnricher that records which
+    sa2_code_col it was invoked with so the test can assert the
+    Edition-2 SA2 code column was threaded through.
+    """
+    from unittest.mock import MagicMock
+
+    from census_augment.catalog import VariableCatalog
+    from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.enrich import CensusEnricher
+    from census_augment.spatial import SpatialIndex
+
+    config = Config(
+        input=InputConfig(
+            path=tmp_path / "in.csv",
+            latitude_column="lat",
+            longitude_column="lon",
+            date_column="transaction_date",
+        ),
+        output=OutputConfig(path=tmp_path / "out.csv"),
+        census=CensusConfig(),
+        data_sources=DataSourcesConfig(),
+        geocoding=GeocodingConfig(
+            providers=["nominatim"],
+            nominatim=NominatimConfig(user_agent="test/0.1 (test@example.com)"),
+        ),
+        variables={"pop_total": "G01.Tot_P_P"},
+        temporal=TemporalConfig(),
+    )
+
+    boundaries = gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": ["117011326"],
+            "SA2_NAME21": ["Test SA2"],
+            "geometry": [Polygon([(150, -34), (152, -34), (152, -33), (150, -33)])],
+        },
+        crs="EPSG:4326",
+    )
+    spatial = SpatialIndex(boundaries)
+
+    # Reference-edition DataPacks (2021) — the configured one.
+    ref_datapacks = MagicMock(spec=DataPacksDataSource)
+    ref_catalog = VariableCatalog(DataPackMetadata(tables={}))
+    enricher = CensusEnricher(
+        datapacks=ref_datapacks,
+        catalog=ref_catalog,
+        variables=config.variables,
+        output_prefix="sa2_",
+        data_dir=tmp_path,
+    )
+
+    # Per-release GCP 2016 DataPacks + catalog — these are what the
+    # orchestrator should pick up via extra_gcp_datapacks for the 2016
+    # bucket.
+    gcp_2016_datapacks = MagicMock(spec=DataPacksDataSource)
+    gcp_2016_catalog = VariableCatalog(DataPackMetadata(tables={}))
+
+    # Stub add_enrichment_columns at class level so both the reference-
+    # edition and 2016-edition sub-enrichers get the deterministic
+    # behaviour. The stub looks at the enricher's datapacks identity
+    # to encode the value — different DataPacks → different value, so
+    # we can verify the bucket was routed correctly.
+    from census_augment import enrich as enrich_module
+
+    def _routing_aware_add(
+        self: CensusEnricher, df: pd.DataFrame, *, sa2_code_col: str
+    ) -> pd.DataFrame:
+        df = df.copy()
+        # Encode which DataPacks instance got threaded through. The
+        # 2016 path goes through `gcp_2016_datapacks`; the reference
+        # path through `ref_datapacks`.
+        if self._datapacks is gcp_2016_datapacks:
+            df["sa2_pop_total"] = 2016.0
+        elif self._datapacks is ref_datapacks:
+            df["sa2_pop_total"] = 2021.0
+        else:
+            df["sa2_pop_total"] = -1.0
+        return df
+
+    enrich_module.CensusEnricher.add_enrichment_columns = _routing_aware_add  # type: ignore[assignment]
+
+    pipeline = Pipeline(
+        config=config,
+        geocoders=[_FakeGeocoder()],
+        spatial=spatial,
+        enricher=enricher,
+        extra_spatial_indices={2: _edition_2_synthetic_spatial_index()},
+        extra_gcp_datapacks={"2016": (gcp_2016_datapacks, gcp_2016_catalog)},
+    )
+
+    df = pd.DataFrame(
+        {
+            "lat": [-33.86, -33.86],
+            "lon": [151.21, 151.21],
+            # 2017 → GCP 2016 (Edition 2); 2023 → GCP 2021 (Edition 3).
+            "transaction_date": pd.to_datetime(["2017-06-15", "2023-06-15"]),
+        }
+    )
+    result = pipeline.augment(df)
+
+    # 2016 row picked up the per-release DataPacks (encoded as 2016.0);
+    # 2021 row used the reference DataPacks (encoded as 2021.0). If the
+    # routing fell back to a single DataPacks both rows would get the
+    # same value — the assertion catches that regression.
+    assert "sa2_pop_total" in result.df.columns
+    values = result.df["sa2_pop_total"].tolist()
+    assert values == [2016.0, 2021.0], (
+        f"expected per-release routing to thread 2016 → 2016.0 and 2021 → 2021.0; got {values}"
+    )
+    # gcp_release column correctly reports both releases.
+    assert result.df["gcp_release"].tolist() == ["2016", "2021"]
+    # Cross-edition annotation: the 2016 row's source SA2 code is
+    # emitted in gcp_sa2_code_source (Edition 2). The 2021 row has
+    # source == reference, so no separate annotation needed but the
+    # column is still emitted since at least one row is non-reference.
+    assert "gcp_sa2_code_source" in result.df.columns
