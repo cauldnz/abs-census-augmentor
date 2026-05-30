@@ -260,3 +260,65 @@ def test_compute_sa2_areas_km2_no_crs_raises() -> None:
     )
     with pytest.raises(ValueError, match="must have a CRS"):
         compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")
+
+
+def test_compute_sa2_areas_km2_skips_null_geometry() -> None:
+    """Issue #101: real ABS boundary releases include a handful of pseudo-SA2s
+    (off-shore, migratory, "No usual address") with no geometry. The helper
+    must skip them silently rather than raising ``AttributeError`` on
+    ``None.area``. Affected SA2s are simply absent from the returned dict.
+    """
+    boundaries = gpd.GeoDataFrame(
+        {"SA2_CODE21": ["REAL_001", "NULL_001", "REAL_002"]},
+        geometry=[
+            Polygon([(145.0, -32.0), (146.0, -32.0), (146.0, -31.0), (145.0, -31.0)]),
+            None,
+            Polygon([(146.0, -32.0), (147.0, -32.0), (147.0, -31.0), (146.0, -31.0)]),
+        ],
+        crs="EPSG:4326",
+    )
+    areas = compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")
+    # Null-geometry SA2 omitted; real ones present.
+    assert set(areas) == {"REAL_001", "REAL_002"}
+    assert areas["REAL_001"] > 0
+    assert areas["REAL_002"] > 0
+
+
+def test_compute_sa2_areas_km2_skips_empty_geometry() -> None:
+    """Empty geometries (``Polygon()``) are also skipped — they have ``.area = 0``
+    but represent the same "no spatial extent" pseudo-SA2 case as ``None``.
+    Letting them through would produce ``0.0`` areas which divide-by-zero
+    downstream when computing density.
+    """
+    boundaries = gpd.GeoDataFrame(
+        {"SA2_CODE21": ["REAL_001", "EMPTY_001"]},
+        geometry=[
+            Polygon([(145.0, -32.0), (146.0, -32.0), (146.0, -31.0), (145.0, -31.0)]),
+            Polygon(),
+        ],
+        crs="EPSG:4326",
+    )
+    areas = compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")
+    assert "EMPTY_001" not in areas
+    assert areas["REAL_001"] > 0
+
+
+def test_compute_sa2_areas_km2_warns_on_many_nulls(caplog: pytest.LogCaptureFixture) -> None:
+    """If a non-trivial fraction of boundaries lack geometry, emit a WARNING.
+    Real ABS releases have only ~5-15 pseudo-SA2s out of ~2,300+. Anything
+    more suggests a corrupted boundary file or a CRS interaction, and is
+    worth surfacing.
+    """
+    # 100 SA2s, 60 with null geometry — well over the >max(50, total/100) threshold.
+    real_poly = Polygon([(145.0, -32.0), (146.0, -32.0), (146.0, -31.0), (145.0, -31.0)])
+    codes = [f"SA2_{i:03d}" for i in range(100)]
+    geoms: list[object] = [real_poly if i < 40 else None for i in range(100)]
+    boundaries = gpd.GeoDataFrame(
+        {"SA2_CODE21": codes},
+        geometry=geoms,  # type: ignore[arg-type]
+        crs="EPSG:4326",
+    )
+    with caplog.at_level("WARNING", logger="census_augment.spatial"):
+        areas = compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")
+    assert len(areas) == 40
+    assert any("null/empty geometry" in rec.message for rec in caplog.records)

@@ -9,6 +9,46 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — #101: `compute_sa2_areas_km2` crashed on null geometries (blocked every `Pipeline.create()`)
+
+Since PR #97 added unconditional SA2-area computation to
+`Pipeline.from_config`, every `Pipeline.create()` call against a real
+ABS boundary file raised `AttributeError: 'NoneType' object has no
+attribute 'area'`. Cause: real ABS boundary releases include a small
+number of pseudo-SA2s (off-shore / migratory / "No usual address")
+with no geometry, and `compute_sa2_areas_km2` called `.area` on every
+row without a guard. This blocked the entire public `Pipeline.create()`
+entry point for any downstream consumer on current main — confirmed
+by [aus-fuel-forecaster](https://github.com/cauldnz/aus-fuel-forecaster)
+hitting it when bumping their pin past PR #97.
+
+**What changed:**
+
+- `compute_sa2_areas_km2` now skips rows where `geom is None` or
+  `geom.is_empty`. Affected SA2s are simply absent from the returned
+  dict; density downstream produces NaN for those codes, which is the
+  correct behaviour (no area → no density).
+- When the fraction of null/empty rows is small (the normal ABS case:
+  ~5-15 out of ~2,300+), a DEBUG line is logged.
+- When the fraction exceeds `max(50, total // 100)` — well above the
+  usual pseudo-SA2 count — a WARNING surfaces, since that signals a
+  likely-corrupted boundary file rather than the expected pseudo rows.
+
+**Tests:**
+
+- `test_compute_sa2_areas_km2_skips_null_geometry` — mixed real +
+  `None` geometries; null SA2 omitted, real ones present.
+- `test_compute_sa2_areas_km2_skips_empty_geometry` — `Polygon()`
+  (zero-area but not None) also skipped, so density doesn't divide by
+  zero downstream.
+- `test_compute_sa2_areas_km2_warns_on_many_nulls` — 60/100 nulls
+  triggers the WARNING.
+
+The unblock means `Pipeline.create()` works again against any real ABS
+boundary release. ERP `population_density_per_km2` continues to work
+for SA2s that *do* have geometry, and returns NaN (as designed) for
+the pseudo-rows.
+
 ### Fixed — #99: DSS parser fails on pre-Q2-2023 releases ("No SA2 data rows")
 
 `DssDataSource._parse_xlsx` raised `RuntimeError: No SA2 data rows`
