@@ -352,3 +352,114 @@ def test_load_caches_parquet(dss_data_dir: Path) -> None:
     df1 = ds.load()
     df2 = ds.load()
     pd.testing.assert_frame_equal(df1, df2)
+
+
+# ---- issue #99: 5-digit SA2 codes (pre-Q2-2023 DSS releases) ------------
+
+
+def test_parse_xlsx_converts_5digit_sa2_codes_to_9digit(
+    dss_data_dir: Path,
+) -> None:
+    """Pre-Q2-2023 DSS releases publish SA2 codes in 5-digit form
+    (e.g. ``11007`` Braidwood). The parser must convert via the
+    bundled Edition 2 mapping so the resulting index contains 9-digit
+    SA2 codes that join cleanly with the cross-edition spatial lookup.
+
+    Issue #99 reproducer: before this fix, the parser required
+    ``len(sa2) == 9`` and silently skipped every 5-digit row,
+    producing an empty record set + "No SA2 data rows".
+    """
+    from census_augment.datasets._dss import DssDataSource
+
+    # 5-digit SA2 codes drawn from the real Edition 2 boundary:
+    # 11007 = Braidwood (Edition 2 9-digit: 101021007)
+    # 11008 = Karabar (101021008)
+    fake_xlsx_bytes = _make_dss_xlsx(
+        [
+            ("11007", {"Age Pension": 510, "JobSeeker Payment": 25}),
+            ("11008", {"Age Pension": 745, "JobSeeker Payment": 35}),
+        ]
+    )
+    fake_file = dss_data_dir / "dss-2022-Q4.xlsx"
+    fake_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_file.write_bytes(fake_xlsx_bytes)
+
+    ds = DssDataSource(root=dss_data_dir)
+    df = ds._parse_xlsx(fake_file)
+
+    # Index is 9-digit form (converted via bundled Edition 2 mapping).
+    assert df.index.name == "sa2_code_2021"
+    assert "101021007" in df.index, (
+        f"5-digit 11007 (Braidwood) should map to Edition 2 9-digit "
+        f"101021007; got index: {df.index.tolist()}"
+    )
+    assert "101021008" in df.index
+    # Original 5-digit codes are NOT preserved as index keys.
+    assert "11007" not in df.index
+    # Payment columns extracted correctly.
+    assert df.loc["101021007", "age_pension_recipients"] == 510
+    assert df.loc["101021008", "age_pension_recipients"] == 745
+
+
+def test_parse_xlsx_handles_mixed_5digit_and_9digit_codes(
+    dss_data_dir: Path,
+) -> None:
+    """Defensive: if a single workbook ever mixes formats, both flavours
+    parse cleanly. (Unlikely in practice — ABS files are consistent
+    within a release — but cheap insurance against future drift.)
+    """
+    from census_augment.datasets._dss import DssDataSource
+
+    fake_xlsx_bytes = _make_dss_xlsx(
+        [
+            ("11007", {"Age Pension": 510}),  # 5-digit (Edition 2 short)
+            ("101031007", {"Age Pension": 600}),  # 9-digit (Edition 3 long)
+        ]
+    )
+    fake_file = dss_data_dir / "dss-mixed.xlsx"
+    fake_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_file.write_bytes(fake_xlsx_bytes)
+
+    ds = DssDataSource(root=dss_data_dir)
+    df = ds._parse_xlsx(fake_file)
+
+    # 5-digit converted to Edition 2 9-digit.
+    assert "101021007" in df.index
+    # 9-digit kept verbatim (no edition translation — that's the
+    # cross-edition orchestrator's job, not the fetcher's).
+    assert "101031007" in df.index
+
+
+def test_parse_xlsx_unknown_5digit_code_logs_warning_and_skips(
+    dss_data_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A 5-digit code not in the bundled mapping (e.g. an SA2 that
+    didn't exist in Edition 2) is skipped with a clear WARNING — the
+    parse doesn't fail outright, and rows for known SA2s are still
+    returned.
+    """
+    import logging
+
+    from census_augment.datasets._dss import DssDataSource
+
+    fake_xlsx_bytes = _make_dss_xlsx(
+        [
+            ("11007", {"Age Pension": 510}),  # known
+            ("99999", {"Age Pension": 0}),  # unknown — not in Edition 2
+        ]
+    )
+    fake_file = dss_data_dir / "dss-unknown.xlsx"
+    fake_file.parent.mkdir(parents=True, exist_ok=True)
+    fake_file.write_bytes(fake_xlsx_bytes)
+
+    ds = DssDataSource(root=dss_data_dir)
+    with caplog.at_level(logging.WARNING, logger="census_augment.datasets._dss"):
+        df = ds._parse_xlsx(fake_file)
+
+    # Known SA2 present, unknown skipped.
+    assert "101021007" in df.index
+    assert len(df) == 1
+    # Warning logged, naming the unknown code.
+    assert any(
+        "99999" in record.message and "5-digit" in record.message for record in caplog.records
+    )

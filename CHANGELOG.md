@@ -9,6 +9,60 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — #99: DSS parser fails on pre-Q2-2023 releases ("No SA2 data rows")
+
+`DssDataSource._parse_xlsx` raised `RuntimeError: No SA2 data rows`
+when given a DSS Payment Demographic XLSX from December 2022 or
+earlier. Root cause (probed via real CKAN downloads per the
+"Real Data First" rule in `CLAUDE.md`): pre-Q2-2023 DSS releases
+publish SA2 codes in the 5-digit `SA2_5DIG16` form (e.g. `11007`
+Braidwood) rather than the 9-digit `SA2_MAIN16` form (`101021007`)
+adopted from Q2-2023 onwards. The parser's `len(sa2) == 9` guard
+silently skipped every data row, leaving zero records.
+
+**What changed:**
+
+- New bundled static mapping
+  `src/census_augment/datasets/_dss_sa2_5digit_edition_2.py` — 2,310
+  entries covering every ASGS Edition 2 SA2, generated from the live
+  ABS Edition 2 boundary file. Edition 2 codes are frozen, so the
+  mapping never goes stale.
+- `_parse_xlsx` now detects 5-digit codes and converts them to the
+  9-digit form via the bundled mapping. Unknown 5-digit codes are
+  logged via `logging.warning` and skipped (consistent with how the
+  parser already handles malformed rows). 9-digit codes pass through
+  unchanged.
+- The mapping is imported lazily inside `_parse_xlsx` so callers
+  that never parse a pre-Q2-2023 file don't pay the ~63 KB cost.
+- New `tools/generate_dss_sa2_5to9.py` regenerates the mapping
+  reproducibly from `BoundariesDataSource(year=2016, asgs_edition=2)`.
+  Verifies zero collisions (none in real Edition 2 data — every
+  5-digit code maps to a unique 9-digit code).
+
+**Verification (live data):**
+
+- December 2022 (Q4) DSS file: 2,292 SA2s parsed (was 0); Braidwood
+  (`101021007`) has 510 Age Pension recipients.
+- December 2024 DSS file: 2,454 SA2s parsed — no regression on the
+  9-digit format.
+
+**Tests:**
+
+- `test_parse_xlsx_converts_5digit_sa2_codes_to_9digit` — synthetic
+  XLSX with `"11007"` / `"11008"` codes; asserts conversion to
+  `"101021007"` / `"101021008"` in the resulting index.
+- `test_parse_xlsx_handles_mixed_5digit_and_9digit_codes` — mixed
+  formats in one workbook, both end up in the index.
+- `test_parse_xlsx_unknown_5digit_code_logs_warning_and_skips` —
+  uses `"99999"` (not in Edition 2); asserts warning logged, row
+  skipped, known SA2 still present.
+
+Pre-Q2-2023 DSS releases (2014-Q3 through 2022-Q4) are now usable
+in temporal mode. `dss_payments.md` already routes them to the
+Edition 2 GCP pair via `asgs_edition_by_release`; the cross-edition
+spatial lookup produces 9-digit Edition 2 codes that join cleanly
+with the parser's converted output.
+
 ### Fixed — #91 Stage 2: per-release GCP DataPacks routing in temporal mode
 
 Completes the architectural fix for cross-edition GCP in temporal
