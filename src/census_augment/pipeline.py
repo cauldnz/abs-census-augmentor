@@ -384,11 +384,20 @@ class Pipeline:
         # Edition 3 uses SA2_CODE21/SA2_NAME21). The boundary source's
         # edition spec is the single source of truth.
         edition = boundaries_ds.edition
+        loaded_boundaries = boundaries_ds.load()
         spatial = SpatialIndex(
-            boundaries_ds.load(),
+            loaded_boundaries,
             code_column=edition.sa2_code_column,
             name_column=edition.sa2_name_column,
         )
+
+        # SA2 area lookup for the ERP density column. Computed once from
+        # the already-loaded boundary GDF so we don't pay an extra disk
+        # read. Passed to the enricher which threads it to the ERP
+        # fetcher via ``attach_sa2_areas``.
+        from .spatial import compute_sa2_areas_km2 as _compute_areas  # noqa: PLC0415
+
+        sa2_areas_km2 = _compute_areas(loaded_boundaries, code_column=edition.sa2_code_column)
 
         # Per-edition spatial-index factory (Phase F.2 / spec-temporal.md §2).
         # Constructs a SpatialIndex for any ASGS edition the temporal
@@ -446,6 +455,7 @@ class Pipeline:
             variables=config.variables,
             output_prefix=config.output.prefix,
             data_dir=data_dir,
+            sa2_areas_km2=sa2_areas_km2,
         )
 
         cache: GeocodeCache
@@ -1637,6 +1647,7 @@ class Pipeline:
             output_prefix=self._enricher._output_prefix,
             data_dir=self._enricher._data_dir,
             dataset_release_overrides=release_overrides,
+            sa2_areas_km2=self._enricher._sa2_areas_km2,
         )
 
     # ---- temporal-mode G-NAF dispatch (spec-temporal.md §12, Phase G) ----
