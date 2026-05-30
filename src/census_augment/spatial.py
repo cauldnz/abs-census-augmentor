@@ -8,11 +8,14 @@ EPSG:7844 / GDA2020) before the join.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
+
+_log = logging.getLogger(__name__)
 
 
 class SpatialIndex:
@@ -166,6 +169,12 @@ def compute_sa2_areas_km2(
         Areas range from <1 km² (inner-city SA2s) to >50,000 km² (remote
         SA2s); the function preserves the full range without bucketing.
 
+    SA2s with null geometry are omitted from the returned mapping. Real
+    ABS boundary releases include a handful of pseudo-SA2s — off-shore,
+    migratory, "No usual address" rows — that carry no geometry by
+    design (issue #101). Density downstream falls back to NaN for those
+    codes, which is the right behaviour (no area → no density).
+
     Used by :class:`ErpDataSource` to compute
     ``ERP.population_density_per_km2`` = ``population_total / area_km2``.
     """
@@ -177,7 +186,35 @@ def compute_sa2_areas_km2(
         raise ValueError("boundaries GeoDataFrame must have a CRS")
     # EPSG:3577 — GDA94 / Australian Albers. Equal-area projection.
     in_equal_area = boundaries.to_crs("EPSG:3577")
-    return {
-        str(code): float(geom.area / 1_000_000.0)
-        for code, geom in zip(in_equal_area[code_column], in_equal_area.geometry, strict=False)
-    }
+
+    areas: dict[str, float] = {}
+    null_codes: list[str] = []
+    for code, geom in zip(in_equal_area[code_column], in_equal_area.geometry, strict=False):
+        if geom is None or getattr(geom, "is_empty", False):
+            null_codes.append(str(code))
+            continue
+        areas[str(code)] = float(geom.area / 1_000_000.0)
+
+    if null_codes:
+        total = len(in_equal_area)
+        # ABS typically has ~5-15 pseudo-SA2s per edition out of ~2,300-2,500.
+        # Warn loudly if it's a lot more than that — likely a corrupted boundary
+        # file or a wrong CRS interaction, not just the usual pseudo-rows.
+        if total and len(null_codes) > max(50, total // 100):
+            _log.warning(
+                "compute_sa2_areas_km2: %d/%d boundaries had null/empty geometry "
+                "(sample: %s) — that's a higher fraction than the usual ABS pseudo-SA2s. "
+                "Worth checking the boundary file.",
+                len(null_codes),
+                total,
+                null_codes[:5],
+            )
+        else:
+            _log.debug(
+                "compute_sa2_areas_km2: skipped %d SA2(s) with null/empty geometry "
+                "(sample: %s) — expected for off-shore / migratory / 'No usual "
+                "address' pseudo-SA2s in real ABS boundary releases.",
+                len(null_codes),
+                null_codes[:5],
+            )
+    return areas
