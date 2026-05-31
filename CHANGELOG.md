@@ -9,6 +9,34 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-05-31
+
+Maintenance + historical-data minor release on top of v2.0.0. Highlights:
+
+- **Two critical bug fixes** that unblocked downstreams: `#101` (null
+  geometries crashed every `Pipeline.create()` on real ABS boundaries)
+  and `#99` (DSS parser failed on every pre-Q2-2023 release because of
+  5-digit SA2 codes — eight more years of quarterly DSS data now usable).
+- **`#91` cross-edition GCP routing** landed in two stages (loud error
+  → proper per-release `DataPacksDataSource` routing). Temporal mode
+  now reads 2016-era rows from the 2016 DataPack as designed.
+- **`#92` ERP temporal-release resolution** via historical-year
+  projection — ERP now works across any year, projecting historical
+  populations from the latest release.
+- **`ERP.population_density_per_km2`** column — first density variable
+  in the catalogue, computed from boundary area in EPSG:3577.
+- **5 new cross-dataset PRESETs** — `pct_age_pension_recipients`,
+  `pct_jobseeker_recipients`, `pct_disability_support_recipients`,
+  `pct_carer_payment_recipients`, `welfare_density_index`,
+  `pct_youth_allowance_recipients`, `pct_parenting_payment_recipients`,
+  `child_dependency_density` (some shipped in v2.0.0 too; final five
+  in this release).
+- **Phase F.6** — ASGS Edition 1 boundary support + SEIFA 2011 release,
+  completing the temporal-historical coverage all the way back to 2011.
+
+No breaking changes. All 1.x → 2.x migrations from v2.0.0 still apply
+unchanged.
+
 ### Fixed — #101: `compute_sa2_areas_km2` crashed on null geometries (blocked every `Pipeline.create()`)
 
 Since PR #97 added unconditional SA2-area computation to
