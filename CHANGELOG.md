@@ -9,6 +9,33 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Docs — refresh BACKLOG checkpoint + spec.md §20.6 dataset registry
+
+Docs-only sweep, no behaviour change. Two drift fixes that accumulated
+across the v2.1.0 / v2.2.0 ship sequence:
+
+- **`BACKLOG.md` session checkpoint** rewritten end-of-day 2026-06-01
+  with the full v2.0.0 → v2.2.0 timeline (Phase F.6, ERP density, #99
+  + #101 unblocks, cross-level dataset thread, v2.1.0 / v2.2.0
+  releases, #108 verify-script fix). "Where to pick up next"
+  refreshed — the cross-level engineering thread is closed; suggested
+  next steps reflect that. Same staleness pattern that #88 fixed
+  once already.
+
+- **`spec.md` §20.6 active registry table** updated:
+  - Heading renamed from "Initial registry (v1.3)" to "Active registry".
+  - `ato_personal_income` row corrected to `abs_personal_income` /
+    `ABS_PIA` (renamed in v2.0.0; the table still showed the old
+    name).
+  - SEIFA / GCP rows now reflect Edition 1+2+3 coverage (was 2016+2021).
+  - DSS row notes the Edition 2 / Edition 3 split per `asgs_edition_by_release`
+    + the 5-digit `SA2_5DIG16` support added in v2.1.0 / #99.
+  - ERP row notes the `population_density_per_km2` column added in v2.1.0.
+  - New rows: `abs_building_approvals` (v2.2.0) and
+    `aihw_mh_prescriptions` (v2.2.0; first cross-level dataset).
+  - Added a "geography" column distinguishing SA2-native from
+    cross-level datasets.
+
 ### Fixed — #108: PRESET source-column check false-positive on cross-dataset refs
 
 The weekly `Real-data parser check` workflow opened issue #108 on
