@@ -9,6 +9,65 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-01
+
+Cross-level dataset support release. Two new active datasets (ABS
+Building Approvals at SA2, AIHW Mental Health Prescriptions at SA4),
+the foundation helper that makes SA3/SA4/GCC/STE joins a pure dict
+lookup off the existing SA2 boundary attributes, and the LGA-SA2
+spatial cross-walk infrastructure for future LGA-only datasets.
+
+### Headlines
+
+- **New dataset: ABS Building Approvals** (catalogue 8731.0). 9
+  metric columns covering new house / other residential / total
+  dwelling approval counts and corresponding `$'000` values plus
+  alterations / non-residential / total building. SA2-native — the
+  previous "deferred — LGA-native" framing in the backlog was wrong;
+  real-data probing showed ABS publishes 8 per-state SA2 cubes
+  directly. Monthly updates; release axis is financial year.
+
+- **New dataset: AIHW Mental Health Prescriptions** (NMHSPF). 4
+  metric columns (patients / prescriptions / rates per 1,000 ERP).
+  First **cross-level** dataset — published at SA4, downscaled to
+  SA2 via the boundary's `SA4_CODE21` attribute. Every SA2 inside an
+  SA4 inherits the SA4's value (the honest "no within-parent
+  variation" contract per `spec.md` §20.7).
+
+- **Foundation: `compute_sa2_parent_codes()`** in
+  `census_augment.spatial`. Real-data finding from live probing
+  (2026-06-01): the ABS SA2 boundary file already carries the ASGS
+  hierarchy as attribute columns (`SA3_CODE21`, `SA4_CODE21`,
+  `GCC_CODE21`, `STE_CODE21`), so cross-level joins onto SA2 are a
+  pure dict lookup — no separate boundary fetch needed.
+
+- **Infrastructure: LGA boundary fetcher + LGA-SA2 spatial cross-walk.**
+  Proactive plumbing for future LGA-only datasets.
+  `LgaBoundariesDataSource` + `LgaSa2Correspondence` (area-weighted
+  intersection in EPSG:3577) with both downscale directions
+  (counts-preserving sum, rates weighted-average) and parquet sidecar
+  caching. No consumer wired today; the foundation means the next
+  LGA-only dataset is a small addition rather than a multi-day lift.
+
+- **Spec growth:** `spec.md` §20.7 "Cross-level data" documents the
+  two downscale strategies — ASGS-hierarchy parents (SA3 / SA4 / GCC
+  / STE: pure dict join) and non-hierarchy parents (LGA / PHN:
+  area-weighted spatial correspondence). The honest contract is made
+  explicit throughout.
+
+- **Reproducibility:** `tools/probe_new_datasets.py` — re-runnable
+  probe that downloads representative slices of every upstream the
+  cross-level PRs need (SA3 boundary, LGA 2025 boundary, ABS BA NSW
+  SA2 cube, AIHW MH Prescriptions ZIP) and dumps their schema. Per
+  CLAUDE.md's Real Data First rule.
+
+### Stats
+
+- 758 tests passing (was 695 at the start of the cross-level thread —
+  +63 across the four PRs).
+- 0 open issues, 0 open PRs at release time.
+- No breaking changes — fully backwards-compatible with v2.1.0.
+
 ### Added — LGA boundary fetcher + LGA-SA2 spatial cross-walk
 
 Proactive infrastructure for future LGA-keyed datasets (e.g. NSW
