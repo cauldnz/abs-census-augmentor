@@ -218,3 +218,105 @@ def compute_sa2_areas_km2(
                 null_codes[:5],
             )
     return areas
+
+
+# ---- SA2 parent-geography lookup -----------------------------------------
+#
+# ABS Edition 3 SA2 boundaries carry the ASGS hierarchy as attribute columns
+# alongside SA2_CODE21/SA2_NAME21: SA3_CODE21, SA4_CODE21, GCC_CODE21,
+# STE_CODE21, and the matching _NAME variants. Every SA2 belongs to exactly
+# one parent at each level, so we can build cheap O(1) SA2 -> parent lookup
+# dicts straight from the boundary attribute table — no separate boundary
+# fetch needed.
+#
+# Used by the cross-level downscale pattern: when a dataset is published at
+# SA3 / SA4 / GCC / STE level, look up the SA2's parent code via these
+# dicts and join. Every SA2 inside the same parent inherits the parent's
+# value (no within-parent variation, no weighting needed because SA3/SA4/
+# GCC/STE are strict aggregations of SA2 in ASGS).
+#
+# LGAs are NOT in the ASGS hierarchy and DO cross SA2 boundaries — they need
+# a separate spatial-intersection correspondence (handled in
+# `correspondence.py`, not here).
+
+
+def compute_sa2_parent_codes(
+    boundaries: gpd.GeoDataFrame,
+    *,
+    sa2_code_column: str = "SA2_CODE21",
+    parent_code_columns: dict[str, str] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Build SA2 -> parent-code lookup dicts from a boundary GeoDataFrame.
+
+    The ABS boundary file already carries the ASGS hierarchy (SA3 / SA4 /
+    GCC / STE) as attribute columns. This helper turns those columns into
+    per-level ``{sa2_code: parent_code}`` dicts so cross-level data can be
+    joined onto SA2 rows by looking up the SA2's parent code at the level
+    the source dataset is keyed at.
+
+    Args:
+        boundaries: GeoDataFrame containing SA2 polygons + a code column +
+            the parent-geography columns named by ``parent_code_columns``.
+        sa2_code_column: Column holding the SA2 code. Defaults to the
+            ASGS Edition 3 convention.
+        parent_code_columns: Mapping from a parent-level label (e.g.
+            ``"SA3"``, ``"SA4"``, ``"GCC"``, ``"STE"``) to the boundary
+            column that holds that level's code. Defaults to the four
+            Edition 3 attributes: ``{"SA3": "SA3_CODE21", "SA4":
+            "SA4_CODE21", "GCC": "GCC_CODE21", "STE": "STE_CODE21"}``.
+            Pass an empty dict to short-circuit and return ``{}``.
+
+    Returns:
+        A dict of per-level dicts: ``{"SA3": {sa2_code: sa3_code, ...},
+        "SA4": {...}, ...}``. SA2s with a null parent code are omitted from
+        the inner dict for that level (real ABS data has a handful — the
+        same pseudo-SA2s that lack geometry).
+
+    Raises:
+        ValueError: if ``sa2_code_column`` or any value in
+        ``parent_code_columns`` is missing from the boundary GDF.
+
+    Used by the cross-level downscale pattern in dataset enrichers (see
+    e.g. ``AihwMentalHealthPrescriptionsDataSource``, which keys on SA4).
+    """
+    if parent_code_columns is None:
+        # Edition 3 defaults — matches the SA2_2021_AUST_SHP_GDA2020 file
+        # attribute schema. Older editions use _MAIN16 / _MAIN11 suffixes;
+        # callers handling 2016 / 2011 boundaries pass the right names.
+        parent_code_columns = {
+            "SA3": "SA3_CODE21",
+            "SA4": "SA4_CODE21",
+            "GCC": "GCC_CODE21",
+            "STE": "STE_CODE21",
+        }
+
+    if sa2_code_column not in boundaries.columns:
+        raise ValueError(
+            f"SA2 code column {sa2_code_column!r} not found in boundaries; "
+            f"got: {list(boundaries.columns)}"
+        )
+
+    missing = [c for c in parent_code_columns.values() if c not in boundaries.columns]
+    if missing:
+        raise ValueError(
+            f"parent code column(s) {missing!r} not found in boundaries; "
+            f"got: {list(boundaries.columns)}. For ABS Edition 3 boundary "
+            f"files the attributes are SA3_CODE21 / SA4_CODE21 / GCC_CODE21 "
+            f"/ STE_CODE21; older editions use the matching _MAIN16 / _MAIN11 "
+            f"columns."
+        )
+
+    out: dict[str, dict[str, str]] = {label: {} for label in parent_code_columns}
+    sa2_series = boundaries[sa2_code_column]
+    for level, col in parent_code_columns.items():
+        parent_series = boundaries[col]
+        level_dict = out[level]
+        for sa2_code, parent_code in zip(sa2_series, parent_series, strict=False):
+            if sa2_code is None or parent_code is None:
+                continue
+            sa2_str = str(sa2_code)
+            parent_str = str(parent_code)
+            if not sa2_str or not parent_str or parent_str.lower() == "nan":
+                continue
+            level_dict[sa2_str] = parent_str
+    return out

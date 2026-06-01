@@ -9,6 +9,60 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — `compute_sa2_parent_codes()` helper for cross-level dataset joins
+
+Foundation for the upcoming non-SA2-native dataset PRs (ABS Building
+Approvals at SA2, AIHW Mental Health Prescriptions at SA4). Real-data
+probing (live-fetched 2026-06-01 via `tools/probe_new_datasets.py`)
+confirmed that the ABS SA2 boundary file already carries the full ASGS
+hierarchy as attribute columns: `SA3_CODE21`, `SA4_CODE21`,
+`GCC_CODE21`, `STE_CODE21` (plus the matching `_NAME` siblings). So
+joining SA3 / SA4 / GCC / STE-keyed datasets onto SA2 rows needs **no
+separate boundary fetch** — the lookup is a pure dict join via the
+existing boundary attributes.
+
+**What changed:**
+
+- New helper `census_augment.spatial.compute_sa2_parent_codes(
+  boundaries, *, sa2_code_column, parent_code_columns)` returns a
+  per-level `dict[str, dict[str, str]]` mapping each SA2 to its parent
+  code at every requested level. Defaults pick up Edition 3 attribute
+  names; callers handling Edition 2 / Edition 1 boundaries pass the
+  matching `_MAIN16` / `_MAIN11` column names.
+- Skips SA2s with null parent codes (mirrors the pseudo-SA2 handling
+  in `compute_sa2_areas_km2`).
+- Loud `ValueError` if `sa2_code_column` or any parent column is
+  missing from the boundary GDF.
+
+**Spec:**
+
+- New `spec.md` §20.7 "Cross-level data (datasets keyed above SA2)"
+  documents the two strategies — ASGS-hierarchy parents (SA3/SA4/GCC/
+  STE: pure dict join via boundary attributes) and non-hierarchy
+  parents (LGA/PHN: area-weighted spatial correspondence). The honest
+  contract is explicit: a SA3-keyed metric like "psychiatrists per
+  1,000 in SA3 X" has identical value for every SA2 inside SA3 X
+  — no within-parent disaggregation the source data doesn't have.
+- `spec.md` §20.8 (was §20.7) renamed "Deferred backlog". ABS
+  Building Approvals and AIHW MH Prescriptions removed from the
+  deferred list — real-data probing showed both are usable with
+  reasonable scope.
+
+**Tests:**
+
+- 7 new tests in `tests/test_spatial.py` covering Edition 3 defaults,
+  custom `parent_code_columns`, empty-dict short-circuit, missing-
+  column errors, null-parent-value skipping, and Edition 2 column
+  aliases (`SA2_MAIN16` / `SA3_MAIN16` / `SA4_MAIN16`).
+
+**Tools:**
+
+- New `tools/probe_new_datasets.py` — re-runnable probe that
+  downloads representative slices of every upstream the cross-level
+  PRs need (SA3 boundary, LGA 2025 boundary, ABS BA NSW SA2 cube,
+  AIHW MH Prescriptions ZIP) and dumps their schema. The reference
+  artifact for the next round of dataset PRs.
+
 ## [2.1.0] - 2026-05-31
 
 Maintenance + historical-data minor release on top of v2.0.0. Highlights:
