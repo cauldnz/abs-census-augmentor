@@ -430,7 +430,9 @@ def main() -> int:
 
     # ------ v1.3 datasets (SEIFA, ERP, DSS, ABS PIA) ------
     print("=== v1.3 registered datasets ===")
+    from census_augment.datasets._abs_ba import AbsBaDataSource
     from census_augment.datasets._abs_pia import AbsPiaDataSource
+    from census_augment.datasets._aihw_mh import AihwMhPrescriptionsDataSource
     from census_augment.datasets._dss import DssDataSource
     from census_augment.datasets._erp import ErpDataSource
     from census_augment.datasets._seifa import SeifaDataSource
@@ -540,6 +542,96 @@ def main() -> int:
             f"${df['median_total_income'].iloc[0]:.0f}"
         )
 
+    def _check_abs_ba() -> None:
+        # ABS Building Approvals (catalogue 8731.0). v2.2.0 added this
+        # SA2-native dataset; the real-data smoke fetches all 8 per-state
+        # cubes for the latest monthly release. Confirm the 9 metric
+        # columns + reference FY all populate.
+        ds = AbsBaDataSource(root=data_dir / "abs_building_approvals")
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s parsed; expected ~2,400+"
+        expected_cols = {
+            "new_houses_count",
+            "new_other_residential_building_count",
+            "total_dwellings_count",
+            "value_new_houses",
+            "value_total_building",
+            "reference_financial_year",
+        }
+        missing = expected_cols - set(df.columns)
+        assert not missing, f"missing expected ABS BA columns: {sorted(missing)}"
+        # Spot-check one SA2's values are non-null + non-negative.
+        sample = df[df["total_dwellings_count"].notna()].iloc[0]
+        assert int(sample["total_dwellings_count"]) >= 0
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {sample.name}: {int(sample['total_dwellings_count'])} "
+            f"total dwelling approvals, "
+            f"${float(sample['value_total_building']):,.0f}k total building value"
+        )
+
+    def _check_aihw_mh() -> None:
+        # AIHW Mental Health Prescriptions (NMHSPF). SA4-keyed source —
+        # downscaled to SA2 via the boundary file's SA4_CODE21 attribute.
+        # Requires the SA2 boundary to derive the parent-code mapping
+        # (compute_sa2_parent_codes from PR #104).
+        import geopandas as gpd  # noqa: PLC0415
+
+        from census_augment.spatial import (  # noqa: PLC0415
+            compute_sa2_parent_codes,
+        )
+
+        # Pick up the already-fetched SA2 boundary from earlier in this
+        # verify run (the Boundaries section above fetched + cached it).
+        # If that section failed, this dataset will too — which is the
+        # right cascade since there's no point downscaling without
+        # parent codes.
+        boundary_path = (
+            data_dir
+            / "boundaries"
+            / "2021"
+            / "SA2_2021_AUST_SHP_GDA2020"
+            / "SA2_2021_AUST_GDA2020.shp"
+        )
+        assert boundary_path.exists(), (
+            f"SA2 boundary shapefile not at {boundary_path} — "
+            f"earlier Boundaries section must have failed."
+        )
+        boundary = gpd.read_file(boundary_path)
+        sa2_parents = compute_sa2_parent_codes(
+            boundary,
+            sa2_code_column="SA2_CODE21",
+            parent_code_columns={"SA4": "SA4_CODE21"},
+        )
+        sa2_to_sa4 = sa2_parents["SA4"]
+
+        ds = AihwMhPrescriptionsDataSource(root=data_dir / "aihw_mh_prescriptions")
+        ds.attach_sa2_to_sa4_mapping(sa2_to_sa4)
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s parsed; expected ~2,400+"
+        expected_cols = {
+            "mh_patients_count",
+            "mh_patient_rate_per_1000",
+            "mh_prescriptions_count",
+            "mh_prescription_rate_per_1000",
+            "reference_financial_year",
+        }
+        missing = expected_cols - set(df.columns)
+        assert not missing, f"missing expected AIHW MH columns: {sorted(missing)}"
+        # Spot-check: at least one SA2 has a populated patients_count;
+        # if every value is null the downscale mapping is wrong.
+        non_null = df[df["mh_patients_count"].notna()]
+        assert len(non_null) >= 1000, (
+            f"only {len(non_null)} SA2s have non-null MH patient counts; "
+            f"downscale mapping may be broken"
+        )
+        sample = non_null.iloc[0]
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {sample.name}: {int(sample['mh_patients_count']):,} "
+            f"MH patients, rate {sample['mh_patient_rate_per_1000']}/1,000"
+        )
+
     if not _check("SEIFA 2016+2021 (~2,196/2,366 SA2s, 4 indexes)", _check_seifa):
         failures.append("seifa")
     if not _check("ERP by SA2 (~2,454 SA2s, 25-year history)", _check_erp):
@@ -548,6 +640,16 @@ def main() -> int:
         failures.append("dss_payments")
     if not _check("ABS Personal Income (~2,450 SA2s)", _check_abs_pia):
         failures.append("abs_personal_income")
+    if not _check(
+        "ABS Building Approvals (~2,450 SA2s, 9 metrics, 8 per-state cubes)",
+        _check_abs_ba,
+    ):
+        failures.append("abs_building_approvals")
+    if not _check(
+        "AIHW MH Prescriptions (~2,450 SA2s, 4 metrics, SA4 -> SA2 downscale)",
+        _check_aihw_mh,
+    ):
+        failures.append("aihw_mh_prescriptions")
 
     # ------ PRESET source resolution against real GCP DataPack ------
     # Acid test for the "Real Data First" rule (see CLAUDE.md): every
