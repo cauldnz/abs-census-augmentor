@@ -37,6 +37,7 @@ from pathlib import Path
 import responses
 
 from census_augment.datasets import registry
+from census_augment.datasets._abs_ba import ABS_BA_LANDING_URL, AbsBaDataSource
 from census_augment.datasets._abs_pia import ATO_LANDING_URL, AbsPiaDataSource
 from census_augment.datasets._dss import CKAN_PACKAGE_URL, DssDataSource
 from census_augment.datasets._erp import (
@@ -50,6 +51,8 @@ from census_augment.datasets._seifa import DEFAULT_SEIFA_2021_URL, SeifaDataSour
 # them here keeps the lock-door test in lockstep with how each fetcher's
 # own tests model its on-disk shape — if a fetcher's parser changes, its
 # own test fixture is updated and this test inherits the change.
+from tests.test_dataset_abs_ba import _make_landing_html as _ba_landing_html
+from tests.test_dataset_abs_ba import _make_state_xlsx
 from tests.test_dataset_abs_pia import _make_ato_xlsx
 from tests.test_dataset_abs_pia import _make_landing_html as _pia_landing_html
 from tests.test_dataset_dss import _make_ckan_response, _make_dss_xlsx
@@ -257,6 +260,55 @@ def test_spec_matches_fetcher__seifa(tmp_path: Path) -> None:
     _check_spec_matches("seifa", set(df.columns))
 
 
+# ---- ABS Building Approvals ------------------------------------------------
+
+
+@responses.activate
+def test_spec_matches_fetcher__abs_building_approvals(tmp_path: Path) -> None:
+    """ABS Building Approvals spec ⊆ ``AbsBaDataSource.load().columns``.
+
+    Eight per-state cubes; the fixture builder is the same as
+    ``test_dataset_abs_ba``'s. We only need one SA2 row to land in the
+    parsed DataFrame for the spec-column check.
+    """
+    responses.add(
+        responses.GET,
+        ABS_BA_LANDING_URL,
+        body=_ba_landing_html("202603"),
+        status=200,
+    )
+
+    base = (
+        "https://www.abs.gov.au/statistics/industry/building-and-construction/"
+        "building-approvals-australia/mar-2026/"
+    )
+    # All 9 ABS BA metric columns populated in the fixture so any spec
+    # column the fetcher claims to emit ends up in the DataFrame.
+    full_record = {
+        "new_houses_count": 100,
+        "new_other_residential_building_count": 50,
+        "total_dwellings_count": 150,
+        "value_new_houses": 600_000,
+        "value_new_other_residential_building": 250_000,
+        "value_alterations_additions_conversions": 80_000,
+        "value_total_residential_building": 930_000,
+        "value_non_residential_building": 200_000,
+        "value_total_building": 1_130_000,
+    }
+    for product in ("do002", "do006", "do010", "do014", "do018", "do022", "do026", "do030"):
+        # Stick one SA2 into NSW; other states empty.
+        records = [("117011326", full_record)] if product == "do002" else []
+        responses.add(
+            responses.GET,
+            f"{base}87310{product}_202603.xlsx",
+            body=_make_state_xlsx(sa2_records=records),
+            status=200,
+        )
+
+    df = AbsBaDataSource(root=tmp_path / "abs-ba-cache").load()
+    _check_spec_matches("abs_building_approvals", set(df.columns))
+
+
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
 
 
@@ -271,6 +323,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "dss_payments",
         "abs_personal_income",
         "seifa",
+        "abs_building_approvals",
     }
     intentionally_skipped = {
         "gcp",  # multi-table loader; covered via VariableCatalog tests
