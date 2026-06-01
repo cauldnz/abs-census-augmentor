@@ -653,12 +653,20 @@ def main() -> int:
 
     # ------ PRESET source resolution against real GCP DataPack ------
     # Acid test for the "Real Data First" rule (see CLAUDE.md): every
-    # PRESET feature's `source_fields()` must resolve cleanly against
-    # the live GCP catalog. This is the gate that should have caught
-    # #23 — its absence is what let v1.3 ship six PRESETs that all
-    # referenced columns the real DataPack didn't have.
+    # PRESET feature's `source_fields()` must resolve cleanly. For GCP
+    # refs (G01.*, G02.* etc) we use the live GCP VariableCatalog — same
+    # surface that should have caught #23. For non-GCP refs (DSS.*,
+    # ERP.*, ABS_PIA.*, etc — cross-dataset PRESETs introduced in v2.0+)
+    # we use the registry's namespace-aware ``resolve_variable``, which
+    # validates that the namespace + field map to a registered dataset.
+    # The per-column lock-down for non-GCP datasets lives in
+    # ``tests/test_spec_matches_fetcher_columns.py`` — checking it here
+    # too would require fetching every dataset just to introspect
+    # ``.load().columns``, which is overkill for a weekly drift check.
+    # Closes #108.
     print("=== PRESET source-column resolution ===")
     from census_augment.catalog import VariableCatalog
+    from census_augment.datasets import registry as dataset_registry
     from census_augment.features import features
 
     if metadata is None:
@@ -670,28 +678,48 @@ def main() -> int:
             print("  (skipped; no PRESETs registered.)")
         else:
 
+            def _is_gcp_ref(ref: str) -> bool:
+                # GCP refs are "G<digits>.<field>" — matches the catalog's
+                # table-id convention. Non-GCP refs use namespace prefixes
+                # like "DSS.", "ERP.", "ABS_PIA.", etc.
+                namespace = ref.partition(".")[0]
+                return namespace.startswith("G") and namespace[1:].isdigit()
+
             def _make_preset_check(
                 spec: object,
             ) -> Callable[[], None]:
                 def _check_preset() -> None:
-                    # `spec` is a FeatureSpec; collect every source ref
-                    # it'd ask the catalog for and resolve each one.
-                    # If the GCP catalog can't find it, the spec is
-                    # broken — same surface that #23 originally hit.
                     refs = spec.source_fields()  # type: ignore[attr-defined]
                     unresolved: list[tuple[str, str]] = []
+                    gcp_count = 0
+                    cross_count = 0
                     for ref in sorted(refs):
                         try:
-                            catalog.resolve(ref)
+                            if _is_gcp_ref(ref):
+                                # Real GCP catalog lookup — the #23 gate.
+                                catalog.resolve(ref)
+                                gcp_count += 1
+                            else:
+                                # Registry namespace lookup — confirms the
+                                # PRESET's cross-dataset ref points at a
+                                # registered namespace + field. Per-column
+                                # lock-down is in test_spec_matches_fetcher.
+                                dataset_registry.resolve_variable(ref)
+                                cross_count += 1
                         except Exception as e:  # noqa: BLE001
                             unresolved.append((ref, str(e).splitlines()[0]))
                     assert not unresolved, (
-                        f"PRESET {spec.id!r} refs columns not in "  # type: ignore[attr-defined]
-                        f"the real GCP DataPack: {unresolved}"
+                        f"PRESET {spec.id!r} source refs unresolved: "  # type: ignore[attr-defined]
+                        f"{unresolved}"
                     )
+                    suffix = ""
+                    if gcp_count and cross_count:
+                        suffix = f" ({gcp_count} GCP + {cross_count} cross-dataset)"
+                    elif cross_count:
+                        suffix = f" ({cross_count} cross-dataset)"
                     print(
                         f"         -> {spec.id}: {len(refs)} source refs "  # type: ignore[attr-defined]
-                        "all resolve."
+                        f"all resolve.{suffix}"
                     )
 
                 return _check_preset
