@@ -8,7 +8,11 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import Polygon
 
-from census_augment.spatial import SpatialIndex, compute_sa2_areas_km2
+from census_augment.spatial import (
+    SpatialIndex,
+    compute_sa2_areas_km2,
+    compute_sa2_parent_codes,
+)
 
 # Points chosen to fall cleanly inside the three fixture polygons:
 #   Sydney CBD       : lon 151.20-151.22, lat -33.87 to -33.85
@@ -322,3 +326,134 @@ def test_compute_sa2_areas_km2_warns_on_many_nulls(caplog: pytest.LogCaptureFixt
         areas = compute_sa2_areas_km2(boundaries, code_column="SA2_CODE21")
     assert len(areas) == 40
     assert any("null/empty geometry" in rec.message for rec in caplog.records)
+
+
+# ---- compute_sa2_parent_codes helper --------------------------------------
+
+
+def _make_parent_geo_gdf() -> gpd.GeoDataFrame:
+    """Build a tiny boundary GDF carrying the ASGS Edition 3 parent
+    columns. Models real ABS shape: each SA2 belongs to exactly one SA3,
+    SA4, GCC, STE.
+    """
+    rows = [
+        # SA2_CODE21, SA2_NAME, SA3, SA4, GCC, STE
+        ("101011001", "Cobargo - Bermagui", "10101", "101", "1RNSW", "1"),
+        ("101011002", "Eden", "10101", "101", "1RNSW", "1"),
+        ("101021007", "Braidwood", "10102", "101", "1RNSW", "1"),
+        ("201011021", "Brunswick - Coburg", "20101", "201", "2GMEL", "2"),
+    ]
+    poly = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    return gpd.GeoDataFrame(
+        {
+            "SA2_CODE21": [r[0] for r in rows],
+            "SA2_NAME21": [r[1] for r in rows],
+            "SA3_CODE21": [r[2] for r in rows],
+            "SA4_CODE21": [r[3] for r in rows],
+            "GCC_CODE21": [r[4] for r in rows],
+            "STE_CODE21": [r[5] for r in rows],
+        },
+        geometry=[poly] * len(rows),
+        crs="EPSG:4326",
+    )
+
+
+def test_compute_sa2_parent_codes_default_edition3_columns() -> None:
+    """Defaults pick up the Edition 3 attribute names and build a per-level
+    dict mapping every SA2 to its parent code at SA3 / SA4 / GCC / STE.
+    """
+    gdf = _make_parent_geo_gdf()
+    parents = compute_sa2_parent_codes(gdf)
+
+    # All four expected levels are present, with one entry per SA2 row.
+    assert set(parents) == {"SA3", "SA4", "GCC", "STE"}
+    for level_dict in parents.values():
+        assert len(level_dict) == 4  # one per SA2
+
+    # Spot-check the hierarchy: two SA2s share an SA3, all three NSW SA2s
+    # share an SA4 and GCC ("Rest of NSW") and STE ("1"); the Melbourne SA2
+    # has its own SA3/SA4/GCC/STE.
+    assert parents["SA3"]["101011001"] == "10101"
+    assert parents["SA3"]["101011002"] == "10101"
+    assert parents["SA3"]["101021007"] == "10102"
+    assert parents["SA3"]["201011021"] == "20101"
+    assert parents["SA4"]["101011001"] == parents["SA4"]["101021007"] == "101"
+    assert parents["GCC"]["101021007"] == "1RNSW"
+    assert parents["GCC"]["201011021"] == "2GMEL"
+    assert parents["STE"]["101011001"] == "1"
+    assert parents["STE"]["201011021"] == "2"
+
+
+def test_compute_sa2_parent_codes_custom_parent_columns() -> None:
+    """Pass a smaller ``parent_code_columns`` to compute only the levels
+    you actually need (e.g. just SA4 for AIHW MH Prescriptions).
+    """
+    gdf = _make_parent_geo_gdf()
+    parents = compute_sa2_parent_codes(gdf, parent_code_columns={"SA4": "SA4_CODE21"})
+    assert set(parents) == {"SA4"}
+    assert parents["SA4"]["101011001"] == "101"
+    assert parents["SA4"]["201011021"] == "201"
+
+
+def test_compute_sa2_parent_codes_empty_columns_returns_empty() -> None:
+    """An empty ``parent_code_columns`` dict short-circuits to ``{}`` —
+    no per-level dicts created, no boundary scan needed.
+    """
+    gdf = _make_parent_geo_gdf()
+    assert compute_sa2_parent_codes(gdf, parent_code_columns={}) == {}
+
+
+def test_compute_sa2_parent_codes_missing_sa2_column_raises() -> None:
+    gdf = _make_parent_geo_gdf()
+    with pytest.raises(ValueError, match="SA2 code column 'NOT_THERE'"):
+        compute_sa2_parent_codes(gdf, sa2_code_column="NOT_THERE")
+
+
+def test_compute_sa2_parent_codes_missing_parent_column_raises() -> None:
+    gdf = _make_parent_geo_gdf()
+    with pytest.raises(ValueError, match=r"parent code column\(s\) \['MISSING'\]"):
+        compute_sa2_parent_codes(gdf, parent_code_columns={"SA3": "SA3_CODE21", "X": "MISSING"})
+
+
+def test_compute_sa2_parent_codes_skips_null_parent_values() -> None:
+    """Pseudo-SA2s (the same ones that lack geometry in real ABS files)
+    sometimes have null parent codes too. Those SA2s are omitted from the
+    inner dict for the affected level rather than crashing.
+    """
+    gdf = _make_parent_geo_gdf()
+    # Knock out one SA2's SA3 code.
+    gdf.loc[2, "SA3_CODE21"] = None
+    parents = compute_sa2_parent_codes(gdf)
+    # The nulled SA2 is missing from the SA3 dict.
+    assert "101021007" not in parents["SA3"]
+    # Other SA2s and other levels are unaffected.
+    assert parents["SA3"]["101011001"] == "10101"
+    assert "101021007" in parents["SA4"]
+
+
+def test_compute_sa2_parent_codes_edition2_column_aliases() -> None:
+    """ABS Edition 2 boundaries use ``_MAIN16`` suffix conventions
+    (``SA2_MAIN16``, ``SA3_MAIN16``, ...). The helper handles them via the
+    ``sa2_code_column`` + ``parent_code_columns`` knobs — same logic,
+    different column names.
+    """
+    rows = [
+        ("101011001", "10101", "101"),
+        ("101021007", "10102", "101"),
+    ]
+    gdf = gpd.GeoDataFrame(
+        {
+            "SA2_MAIN16": [r[0] for r in rows],
+            "SA3_MAIN16": [r[1] for r in rows],
+            "SA4_MAIN16": [r[2] for r in rows],
+        },
+        geometry=[Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])] * len(rows),
+        crs="EPSG:4283",
+    )
+    parents = compute_sa2_parent_codes(
+        gdf,
+        sa2_code_column="SA2_MAIN16",
+        parent_code_columns={"SA3": "SA3_MAIN16", "SA4": "SA4_MAIN16"},
+    )
+    assert parents["SA3"]["101011001"] == "10101"
+    assert parents["SA4"]["101021007"] == "101"

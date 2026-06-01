@@ -937,14 +937,58 @@ census-augment discover --search income           # search across all variables
 | `dss_payments` | `DSS` | DSS data.gov.au CKAN | quarterly | ~5 MB / quarter | active (v1.3) |
 | `ato_personal_income` | `ATO` | ABS Personal Income XLSX | annual | ~4 MB | active (v1.3) |
 
-### 20.7 Deferred backlog
+### 20.7 Cross-level data (datasets keyed above SA2)
 
-Tracked but not in v1.3 scope:
+Some upstream datasets publish at a coarser level than SA2 — SA3, SA4,
+GCC (Greater Capital City), state/territory, PHN, or LGA. The augmentor
+joins them onto its SA2 rows via two strategies depending on whether
+the parent level nests in the ASGS hierarchy.
 
-- **Non-SA2-native (sub-SA2 or cross-SA2 aggregation):** AIHW Health Atlases (SA3-native), ABS Building Approvals (LGA-native), Geoscape Buildings (point-level), ABS National Health Survey (state/capital city level only).
+**Strategy 1 — ASGS-hierarchy parents (SA3, SA4, GCC, STE):** Every SA2
+belongs to exactly one parent at each level. The ABS SA2 boundary file
+already carries the parent code as an attribute column
+(`SA3_CODE21`, `SA4_CODE21`, `GCC_CODE21`, `STE_CODE21` in Edition 3),
+so the lookup is a pure dict join — no spatial work needed. The
+augmentor exposes the parent codes via
+`census_augment.spatial.compute_sa2_parent_codes()`, which builds
+`{sa2_code: parent_code}` lookup dicts directly from the boundary
+attribute table. Cross-level datasets keyed at SA3/SA4/etc store one
+value per parent code; every SA2 inside that parent inherits the value
+unchanged (no within-parent disaggregation — the source publishes no
+finer detail). This is the strict-aggregation case: SA3 = union of its
+SA2s, so the "downscale" is the identity replication.
+
+**Strategy 2 — non-hierarchy parents (LGA, PHN):** LGAs and Primary
+Health Networks do *not* nest cleanly into SA2 — they overlap. Joining
+LGA-keyed data onto SA2 requires a real spatial correspondence: for
+each (SA2, LGA) pair that overlap, compute the area-weighted overlap
+fraction, then aggregate the LGA value into each SA2 weighted by its
+share of the LGA. The augmentor builds this on-the-fly at construction
+time using EPSG:3577 (Australian Albers equal-area) intersection;
+results are cached to disk so the geometric work runs once per boundary
+edition. See `census_augment.correspondence` (added in the PR that
+introduces the first LGA-keyed dataset).
+
+The "no within-parent variation" property is the honest contract: a
+SA3-keyed metric like "psychiatrists per 1,000 population in SA3 X"
+has identical value for every SA2 inside SA3 X by construction. The
+augmentor doesn't fabricate sub-SA3 variation it doesn't have.
+
+### 20.8 Deferred backlog
+
+Tracked but not in active scope:
+
+- **Point-level inputs requiring aggregation:** Geoscape Buildings (point-level — aggregation strategy choice).
 - **Single-state datasets:** NSW BOCSAR, VIC Crime Statistics, NSW Education NAPLAN, state land-titles. State-by-state stitching is a separate engineering problem.
 - **Licensing / effort:** CommBank Spending Insights (proprietary), AEC polling-place data (booth-to-SA2 aggregation methodology choice non-trivial).
 - **Scope (different tool):** BoM weather / climate (station-keyed; sibling tool `abs-weather-augmentor`).
+
+ABS Building Approvals (catalogue 8731.0) and AIHW Mental Health Prescriptions
+were on this list until v2.2.0; live probing showed ABS BA publishes SA2-native
+state cubes directly, and AIHW MH publishes static SA4 CSVs — both are now
+implemented per §20.6. AIHW Health Atlases at SA3 remain GUI-only on the
+AIHW Regional Profiles dashboard with no static URL; revisit if AIHW
+exposes a stable SA3 download.
 
 ---
 

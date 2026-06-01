@@ -6,63 +6,71 @@ them up; they're not raw brainstorms.
 
 ---
 
-## Session checkpoint — 2026-05-27
+## Session checkpoint — 2026-06-01
 
-State of main is **clean** (669 tests passing, mypy + ruff clean,
-zero open issues / PRs at session end). Now at **v2.0.0** —
-reconciled `pyproject.toml` with the accumulated `[Unreleased]`
-block via PR #86 + the release-cut PR.
+State of main is **clean** (695 tests passing, mypy + ruff clean,
+zero open issues / PRs at session end). Now at **v2.1.0** — bug-fix +
+historical-data minor release cut after #99 / #101 unblocked critical
+downstream consumers.
 
-### Shipped this session (Day 2)
+### Shipped since v2.0.0 (2026-05-27)
 
-- **#86** — three cross-dataset PRESETs (DSS + ERP):
-  `pct_age_pension_recipients`, `pct_jobseeker_recipients`,
-  `welfare_density_index`. First features to span two registered
-  datasets; markdown-only authoring (framework already supported).
-- **v2.0.0 release cut** — `pyproject.toml` 1.4.2 → 2.0.0.
-  CHANGELOG `[Unreleased]` (48 entries) rolled into `[2.0.0]`
-  with a "Migration from 1.x" section listing the five
-  breaking changes.
-- Plus an automatic `demo-publish.yml` run refreshing the GIFs to
-  show the 9 PRESETs (was 6).
+**Day 3:** Phase F.6 — SEIFA 2011 + ASGS Edition 1 boundary support
+(`edition_1_spec()`, 2,214 SA2s, GDA94). #88 fixed stale Phase G
+checkpoint guidance.
 
-### Shipped this session (Day 3)
+**Day 4 (overnight PRs):** #91 Stage 2 — per-release GCP DataPacks
+routing in temporal mode (proper fix building on Stage 1's loud-error
+guard); `ERP.population_density_per_km2` column via
+`compute_sa2_areas_km2` + `attach_sa2_areas` pattern; test-vehicle
+migration ERP → SEIFA for cross-edition xfails.
 
-- **#88** — corrected the stale Phase G "next priority"
-  guidance in the previous checkpoint. Phase G was already done in
-  v2.0.0 (PR #70).
-- **F.6 — SEIFA 2011 + ASGS Edition 1 boundary support**. SEIFA
-  2011 release added to the `seifa` dataset's `available_releases`;
-  same `.xls` parser as 2016, no core code changes needed.
-  `edition_1_spec()` registered for ASGS Edition 1 (2,214 SA2s,
-  GDA94). `tools/fetch_real_data.py --edition 1` fetches the
-  boundary. GCP 2011 documented as auto-fetch-out-of-scope (ABS
-  login wall); a "user-supplied ZIP" fallback path is in the
-  backlog for power users.
+**Day 5 (today):** Two critical bug-fix unblocks landed and merged.
+**#99** — DSS parser failed on every pre-Q2-2023 release because of
+5-digit `SA2_5DIG16` codes; fixed via a bundled static Edition 2
+mapping (2,310 entries). Eight more years of quarterly DSS unlocked
+(2014-Q3 → 2022-Q4). **#101** — `compute_sa2_areas_km2` crashed on
+null pseudo-SA2 geometries in real ABS boundaries; broke every
+`Pipeline.create()` since ERP density landed. Fixed with defensive
+guards + WARNING on anomalously-high null fraction.
+**v2.1.0 cut** — `[Unreleased]` (10 entries) promoted to `[2.1.0]`,
+pyproject bumped, tagged, GitHub release published.
 
-### Where to pick up tomorrow
+### Where to pick up next — cross-level dataset work (in flight)
 
-Suggested ordering by ROI:
+After v2.1.0 the next major thread is non-SA2-native dataset support.
+Real-data probing (`tools/probe_new_datasets.py`, run 2026-06-01)
+**changed the plan**:
 
-1. **More cross-dataset PRESETs.** Candidates listed in "Future
-   PRESET features" below. Each ~30 min of markdown authoring.
-   Smallest wins; consolidates yesterday's ERP age/sex unlock
-   further. Likely 3-5 PRESETs land in a single PR.
+- **ABS Building Approvals (cat 8731.0)** publishes SA2-native state
+  cubes directly. Was deferred for "LGA-native" reasons — wrong
+  premise. Now in scope as a normal SA2 dataset.
+- **AIHW Mental Health Prescriptions (NMHSPF)** publishes static CSVs
+  at PHN + SA4 level (not SA3 as AIHW navigation prose suggests).
+  AIHW's SA3 data is GUI-only on the Regional Profiles dashboard.
 
-2. **User-supplied DataPack ZIP fallback** (for GCP 2011 unlock —
-   see new section below). ~2 hours of clean engineering.
+Both unblocked by one foundational discovery: the SA2 boundary file
+already carries ASGS hierarchy parent codes (`SA3_CODE21`,
+`SA4_CODE21`, `GCC_CODE21`, `STE_CODE21`) as attribute columns. No
+separate SA3 boundary fetch needed. Helper:
+`census_augment.spatial.compute_sa2_parent_codes()` (PR A).
 
-3. **Address-retirement awareness** (Phase G refinement,
-   spec-temporal.md §17 deferred): "address X existed in 2018,
-   retired in 2022; row dated 2020 should hit X even though X is
-   missing from the 2025 release." Today an unmatched address
-   falls through to fuzzy / Nominatim — same fallback as Phase F.2.
-   Marked out-of-scope in the original Phase G design but worth
-   revisiting if user demand surfaces.
+**PR sequence (in flight):**
+
+1. **PR A — Foundation (this PR).** `compute_sa2_parent_codes()` +
+   spec.md §20.7 "Cross-level data" section + BACKLOG update.
+2. **PR B — ABS Building Approvals.** SA2-native; 8 per-state monthly
+   XLSX cubes. Straightforward dataset registration.
+3. **PR C — AIHW MH Prescriptions.** SA4-keyed via the helper from
+   PR A. Long-format CSV, 10 financial years 2015-16 → 2024-25.
+4. **PR D — LGA boundary + LGA-SA2 spatial cross-walk.** Built
+   proactively (no consumer yet) for future LGA-only datasets.
+   Area-weighted intersection in EPSG:3577, disk-cached per boundary
+   edition.
 
 ### Done (no longer "next priority")
 
-- ~~`ERP.population_density_per_km2`.~~ Shipped via
+- ~~`ERP.population_density_per_km2`.~~ Shipped in v2.1.0 via
   `ErpDataSource.attach_sa2_areas()` + `Pipeline.from_config` wiring.
   Density computed from `population_total / SA2 area km²`; SA2 areas
   derived from the boundary GeoDataFrame at pipeline construction via
@@ -72,10 +80,10 @@ Suggested ordering by ROI:
   PR #70 (commit 063a9c0). The `gnaf_release` output column, per-row
   release dispatch, and `Pipeline.from_config` wiring are all live.
   14 dedicated tests in `tests/test_pipeline_temporal.py` and
-  `tests/test_temporal_helpers.py`. Yesterday's checkpoint
-  incorrectly promoted this as next priority — it was already in
-  the 48 `[Unreleased]` entries that rolled into v2.0.0. Corrected
-  to avoid the same loop next session.
+  `tests/test_temporal_helpers.py`.
+
+- ~~More cross-dataset PRESETs.~~ All 8 candidates from "Future PRESET
+  features" shipped through v2.1.0.
 
 ### Smaller deferred items
 
