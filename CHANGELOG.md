@@ -9,6 +9,59 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — ABS Building Approvals dataset (`abs_building_approvals`)
+
+New dataset registration for ABS catalogue **8731.0 Building Approvals,
+Australia** at SA2 level. Catalogue identifier `ABS_BA`. Lives at
+`datasets/abs_building_approvals.md` with the fetcher in
+`src/census_augment/datasets/_abs_ba.py`.
+
+Real-data finding (live-probed 2026-06-01): the dataset was on the
+"deferred — LGA-native" list, but ABS actually publishes **SA2-native
+state cubes directly** (8 per-state XLSX files per monthly release). No
+LGA cross-walk needed. Each per-state cube has `Table_1` with 9-digit
+SA2 codes in column A mixed with parent-level aggregates (state, GCC,
+SA4, SA3); the parser filters strictly to 9-digit numeric codes.
+
+**Columns exposed** (9 metrics + 1 metadata):
+
+- `ABS_BA.new_houses_count` — approvals for new free-standing houses
+- `ABS_BA.new_other_residential_building_count` — approvals for new
+  apartments / units / townhouses
+- `ABS_BA.total_dwellings_count` — sum of the two above
+- `ABS_BA.value_new_houses` (`$'000`)
+- `ABS_BA.value_new_other_residential_building` (`$'000`)
+- `ABS_BA.value_alterations_additions_conversions` (`$'000`)
+- `ABS_BA.value_total_residential_building` (`$'000`)
+- `ABS_BA.value_non_residential_building` (`$'000`)
+- `ABS_BA.value_total_building` (`$'000`)
+- `ABS_BA.reference_financial_year` — e.g. `"2024-25"`
+
+**Releases:** Australian financial year. The fetcher discovers the
+latest monthly snapshot from the ABS landing page; each release ships
+both the complete previous FY (`do002`/`do006`/... product series) and
+the current FYTD (`do003`/`do007`/...). `release="latest"` resolves to
+the most recent complete FY.
+
+**Architecture:** multi-file fan-out shape doesn't fit
+`_AbsXlsxDataset`'s single-file base, so the fetcher implements the
+`DatasetFetcher` Protocol directly. Eight per-state cube downloads per
+release, combined SA2-keyed DataFrame parquet-cached after first
+parse. A WARNING surfaces if any state cube is empty (real ABS data
+always has SA2 rows in every state/territory) — but combined-empty
+across all 8 cubes raises a hard error.
+
+**Tests:** 12 new tests in `tests/test_dataset_abs_ba.py` covering
+landing-page resolution (latest / specific FY / FYTD / unknown / no
+links / Jul–Dec vs Jan–Jun fiscal year windows), end-to-end multi-state
+combine, aggregate-code filtering, suppressed-cell handling,
+all-states-empty error, and parquet-cache round-trip. Lock-door check
+added to `test_spec_matches_fetcher_columns.py`.
+
+**Suggested derived features** (documented in the spec, not yet wired
+as PRESETs): `housing_supply_rate` (approvals per 1,000 residents),
+`pct_apartment_approvals`, `mean_dwelling_approval_value`.
+
 ### Added — `compute_sa2_parent_codes()` helper for cross-level dataset joins
 
 Foundation for the upcoming non-SA2-native dataset PRs (ABS Building
