@@ -9,6 +9,40 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed — #108: PRESET source-column check false-positive on cross-dataset refs
+
+The weekly `Real-data parser check` workflow opened issue #108 on
+2026-06-01 after 8 PRESETs failed source resolution. Diagnosis: the
+check was a false positive — `tools/verify_real_parsers.py` calls the
+**GCP-only `VariableCatalog.resolve()`** for *every* PRESET source ref,
+including cross-dataset refs like `DSS.age_pension_recipients` and
+`ERP.population_65_plus` that have no business going through the GCP
+catalog. The script was designed before cross-dataset PRESETs existed;
+v2.0.0 introduced them and the check went stale.
+
+**What changed:**
+
+- `tools/verify_real_parsers.py` now routes GCP refs (`G<digits>.<field>`)
+  through `VariableCatalog.resolve()` (the original #23 gate) and
+  non-GCP refs through `registry.resolve_variable()` (which validates
+  the namespace + field map to a registered dataset). Per-column
+  lock-down for non-GCP datasets stays in
+  `tests/test_spec_matches_fetcher_columns.py` — running it twice
+  (once at unit-test time, again at weekly-drift time) would require
+  fetching every dataset just to introspect `.load().columns`.
+
+- The probe output now annotates mixed PRESETs with the split, e.g.
+  `pct_age_pension_recipients: 2 source refs all resolve. (2 cross-dataset)`.
+
+The 8 PRESETs that "failed" (`pct_age_pension_recipients`,
+`pct_carer_payment_recipients`, `pct_commonwealth_rent_assistance_recipients`,
+`pct_disability_support_pension_recipients`, `pct_jobseeker_recipients`,
+`pct_parenting_payment_recipients`, `pct_youth_allowance_recipients`,
+`welfare_density_index`) all work correctly in the actual pipeline —
+covered by `tests/test_enrich_presets.py` end-to-end. This was an
+oversight in the verify script, not a regression in the PRESETs
+themselves.
+
 ### Tools — real-data smokes for ABS Building Approvals and AIHW MH Prescriptions
 
 Added live-source drift detection for the two new v2.2.0 datasets.
