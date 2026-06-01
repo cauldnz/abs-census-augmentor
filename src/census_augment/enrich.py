@@ -60,6 +60,7 @@ class CensusEnricher:
         data_dir: Path | None = None,
         dataset_release_overrides: dict[str, str] | None = None,
         sa2_areas_km2: dict[str, float] | None = None,
+        sa2_to_sa4: dict[str, str] | None = None,
     ) -> None:
         self._datapacks = datapacks
         self._catalog = catalog
@@ -78,6 +79,17 @@ class CensusEnricher:
         #: and threads it through. Other datasets ignore it.
         self._sa2_areas_km2: dict[str, float] | None = (
             dict(sa2_areas_km2) if sa2_areas_km2 is not None else None
+        )
+        #: Optional SA2-code → SA4-code lookup (the bare 3-digit SA4
+        #: code, matching ABS Edition 3's SA4_CODE21 attribute). When
+        #: provided, the AIHW MH Prescriptions fetcher gets it attached
+        #: via ``attach_sa2_to_sa4_mapping`` so its ``load()`` returns
+        #: SA2-keyed rows downscaled from SA4. ``Pipeline.from_config``
+        #: derives this from the boundary GDF via
+        #: ``compute_sa2_parent_codes(boundaries)["SA4"]``. Other
+        #: datasets ignore it.
+        self._sa2_to_sa4: dict[str, str] | None = (
+            dict(sa2_to_sa4) if sa2_to_sa4 is not None else None
         )
         self._validate_no_synthetic_prefix_collision()
 
@@ -237,6 +249,16 @@ class CensusEnricher:
             and hasattr(fetcher, "attach_sa2_areas")
         ):
             fetcher.attach_sa2_areas(self._sa2_areas_km2)
+        # AIHW MH Prescriptions cross-level downscale: SA4-keyed source
+        # needs the SA2 -> SA4 mapping wired so load() can downscale.
+        # Without this attachment, the fetcher raises a clear error
+        # explaining how to attach one.
+        if (
+            dataset_id == "aihw_mh_prescriptions"
+            and self._sa2_to_sa4 is not None
+            and hasattr(fetcher, "attach_sa2_to_sa4_mapping")
+        ):
+            fetcher.attach_sa2_to_sa4_mapping(self._sa2_to_sa4)
         return fetcher
 
     # ---- PRESET integration --------------------------------------------

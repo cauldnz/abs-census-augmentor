@@ -9,6 +9,75 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW Mental Health Prescriptions dataset (`aihw_mh_prescriptions`)
+
+First **cross-level** dataset in the augmentor — published by AIHW at
+SA4 (89 SA4 codes) and downscaled to SA2 via the boundary's
+`SA4_CODE21` attribute (see PR #104 / `spec.md` §20.7 Strategy 1).
+Catalogue identifier `AIHW_MHP`. Lives at
+`datasets/aihw_mh_prescriptions.md` with the fetcher in
+`src/census_augment/datasets/_aihw_mh.py`.
+
+Source: AIHW National Mental Health Service Planning Framework
+(NMHSPF) "Regional activity data" Mental Health Prescriptions ZIP.
+Hardcoded URL per release — AIHW uses opaque `getmedia` UUIDs that
+are stable per release; new annual releases require adding the UUID
+to `_AIHW_RX_URLS_BY_RELEASE`.
+
+**Columns exposed** (4 metrics + 1 metadata):
+
+- `AIHW_MHP.mh_patients_count` — patients dispensed at least one
+  mental-health-related prescription in SA4 over the FY
+- `AIHW_MHP.mh_patient_rate_per_1000` — patients per 1,000 ERP
+- `AIHW_MHP.mh_prescriptions_count` — total prescriptions in SA4
+- `AIHW_MHP.mh_prescription_rate_per_1000` — prescriptions per 1,000 ERP
+- `AIHW_MHP.reference_financial_year` — e.g. `"2024-25"`
+
+**Releases:** Australian financial year. 2024-25 wired today; covers
+medicines under PBS + RPBS (antidepressants, antipsychotics,
+anxiolytics, hypnotics, psychostimulants).
+
+**Cross-level downscale:** the fetcher requires a SA2 → SA4 mapping
+attached via `attach_sa2_to_sa4_mapping(mapping)` before `load()`
+(analogous to ERP's `attach_sa2_areas`). `Pipeline.from_config` wires
+the mapping automatically from the SA2 boundary via PR #104's
+`compute_sa2_parent_codes(boundaries)["SA4"]`. Without an attached
+mapping, `load()` raises a clear error explaining how to attach one.
+
+Every SA2 inside SA4 X gets SA4 X's value unchanged — the honest
+"no within-parent variation" contract per `spec.md` §20.7. SA2s
+mapped to an SA4 that AIHW didn't publish for (rare edge cases like
+migratory pseudo-SA4s) get null values rather than being dropped, so
+the join with other datasets stays well-formed.
+
+**Parser quirks** (live-probed 2026-06-01):
+
+- ZIP contains long-format CSV mixing SA4 + PHN rows; filter to
+  `GeographicAreaType == "SA4"`.
+- `GeographicAreaCode` carries `SA4` prefix (e.g. `SA4101`); stripped
+  before joining to the boundary's bare 3-digit `SA4_CODE21`.
+- CSV encoding is **Windows-1252 (cp1252)**, not UTF-8 — source uses
+  en-dash characters in age ranges and FY labels.
+- `FinancialYear` values use Unicode en-dash (`2024–25`); the parser
+  normalises to ASCII hyphen for matching against `release` strings.
+- New `Measure` labels introduced by AIHW in future releases are
+  WARN-and-drop (not hard-fail) — the fetcher stays additively
+  resilient.
+
+**Tests:** 12 new in `tests/test_dataset_aihw_mh.py` covering release
+resolution, mapping-attachment guard, end-to-end downscale,
+missing-SA4 null fallback, en-dash FY normalisation, empty-CSV raises
+with available-years list, missing-CSV-in-ZIP raises with directory
+listing, parquet-cache round-trip, and unknown-measure WARN-not-fail.
+
+**Pipeline + enricher wiring:** `Pipeline.from_config` derives the
+SA2→SA4 lookup via `compute_sa2_parent_codes()` (only when the
+boundary has the `SA4_CODE21` attribute — synthetic test boundaries
+without it skip the derivation silently). `CensusEnricher` accepts a
+new `sa2_to_sa4` kwarg and attaches it in `_make_fetcher` for the
+AIHW dataset; the temporal-mode sub-enricher reconstruction threads
+it through too.
+
 ### Added — ABS Building Approvals dataset (`abs_building_approvals`)
 
 New dataset registration for ABS catalogue **8731.0 Building Approvals,

@@ -425,9 +425,35 @@ class Pipeline:
         # the already-loaded boundary GDF so we don't pay an extra disk
         # read. Passed to the enricher which threads it to the ERP
         # fetcher via ``attach_sa2_areas``.
-        from .spatial import compute_sa2_areas_km2 as _compute_areas  # noqa: PLC0415
+        from .spatial import (  # noqa: PLC0415
+            compute_sa2_areas_km2 as _compute_areas,
+        )
+        from .spatial import (  # noqa: PLC0415
+            compute_sa2_parent_codes as _compute_parents,
+        )
 
         sa2_areas_km2 = _compute_areas(loaded_boundaries, code_column=edition.sa2_code_column)
+
+        # SA2 -> parent-geography lookups (SA3 / SA4 / GCC / STE),
+        # derived from the boundary attribute columns. Used by datasets
+        # that publish above SA2 -- currently AIHW MH Prescriptions
+        # (SA4-keyed). Real ABS boundary files already carry every
+        # parent code per SA2 as attributes, so this is a pure dict
+        # join. Synthetic test boundaries may not include the parent
+        # columns; in that case we just skip the lookup and any dataset
+        # that needs it raises its own informative error at load time.
+        sa2_to_sa4: dict[str, str] | None = None
+        if edition.edition == 3 and "SA4_CODE21" in loaded_boundaries.columns:
+            sa2_parents = _compute_parents(
+                loaded_boundaries,
+                sa2_code_column=edition.sa2_code_column,
+                parent_code_columns={"SA4": "SA4_CODE21"},
+            )
+            sa2_to_sa4 = sa2_parents.get("SA4")
+        # Edition 2 / Edition 1 boundaries: AIHW MH only ships an
+        # Edition 3 release so cross-edition downscale is moot.
+        # _MAIN16 / _MAIN11 parent column wiring can be added when a
+        # historical SA4-keyed dataset surfaces.
 
         # Per-edition spatial-index factory (Phase F.2 / spec-temporal.md §2).
         # Constructs a SpatialIndex for any ASGS edition the temporal
@@ -486,6 +512,7 @@ class Pipeline:
             output_prefix=config.output.prefix,
             data_dir=data_dir,
             sa2_areas_km2=sa2_areas_km2,
+            sa2_to_sa4=sa2_to_sa4,
         )
 
         # Per-release GCP DataPacks factory (issue #91 Stage 2). Closes
@@ -1704,6 +1731,7 @@ class Pipeline:
             data_dir=self._enricher._data_dir,
             dataset_release_overrides=release_overrides,
             sa2_areas_km2=self._enricher._sa2_areas_km2,
+            sa2_to_sa4=self._enricher._sa2_to_sa4,
         )
 
     def _get_gcp_datapacks(self, release: str) -> tuple[DataPacksDataSource, VariableCatalog]:
