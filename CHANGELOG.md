@@ -9,6 +9,26 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Tools — real-data smokes for ABS Building Approvals and AIHW MH Prescriptions
+
+Added live-source drift detection for the two new v2.2.0 datasets.
+`tools/verify_real_parsers.py` now exercises:
+
+- **`AbsBaDataSource.load()`** against the latest ABS catalogue 8731.0
+  release. Fetches all 8 per-state SA2 cubes, parses, and asserts
+  ~2,400+ SA2s and the 9 expected metric columns + reference FY.
+  Catches future ABS layout drift (header position shift, column
+  rename, etc.) the day it lands.
+- **`AihwMhPrescriptionsDataSource.load()`** against the AIHW NMHSPF
+  2024-25 release. Reads the SA2 boundary cached by the earlier
+  Boundaries section, derives the SA2 → SA4 mapping via
+  `compute_sa2_parent_codes()`, attaches it, loads, and asserts the
+  downscale produced non-null patient counts for ≥1,000 SA2s.
+
+Same `[ OK ] / [FAIL]` style as the existing dataset probes. Not part
+of the pytest suite — meant for the weekly `Real-data parser check`
+GitHub workflow + ad-hoc local runs.
+
 ## [2.2.0] - 2026-06-01
 
 Cross-level dataset support release. Two new active datasets (ABS
