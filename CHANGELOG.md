@@ -9,6 +9,72 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — LGA boundary fetcher + LGA-SA2 spatial cross-walk
+
+Proactive infrastructure for future LGA-keyed datasets (e.g. NSW
+BOCSAR crime stats, state planning indicators) — no consumer wired
+today but the plumbing is in place so each future LGA-only dataset is
+a small addition rather than a multi-day foundation.
+
+**New modules:**
+
+- `census_augment.data_sources.lga_boundaries.LgaBoundariesDataSource`
+  fetches `LGA_<YYYY>_AUST_GDA2020.zip` from the ABS Edition 3
+  digital-boundary-files endpoint. Annual releases (2021–2025) wired
+  via `KNOWN_LGA_YEARS`; `year="latest"` resolves to the most recent.
+  Feather sidecar caching mirrors the SA2 boundary loader. Real-data
+  probe (2026-06-01): 567 LGAs in EPSG:7844 (GDA2020). Filename
+  pattern differs from SA2 — **no `_SHP_` infix** (the kind of detail
+  the Real Data First rule exists to catch; tests assert this).
+
+- `census_augment.correspondence.LgaSa2Correspondence` +
+  `compute_lga_sa2_correspondence(sa2, lga)` — area-weighted spatial
+  intersection in EPSG:3577 (Australian Albers Equal-Area). Computes
+  the SA2 × LGA intersection once, derives both weight directions
+  from the intersection areas, drops sliver intersections below 1 m²
+  (digitisation noise between SA2 / LGA boundary files).
+
+**Two weight directions** (the right one depends on data units):
+
+- `sa2_share_of_lga` (0..1) for **count downscale** — LGA value × this
+  = each SA2's portion of the LGA's count. Per-LGA sums preserved.
+- `lga_share_of_sa2` (0..1) for **rate / intensity downscale** —
+  weighted-average of LGA values across LGAs each SA2 overlaps.
+  Partial coverage handled by renormalising over the LGAs the user
+  actually has values for (no implicit zero-fill).
+
+**API:** `LgaSa2Correspondence.downscale_counts(lga_values)` and
+`.downscale_rates(lga_values)` are the headline methods; lookup
+helpers `lgas_for_sa2(code)` / `sa2s_for_lga(code)` expose the raw
+weight tables. Plus `save_correspondence(corr, path)` /
+`load_correspondence(path)` for parquet-sidecar caching (so the
+~30 s real-data intersection runs once per (SA2 release, LGA release)
+pair).
+
+**Spec:** per `spec.md` §20.7 Strategy 2 (added in PR #104), LGA-keyed
+data needs the spatial correspondence because LGAs are *not* part of
+the ASGS hierarchy and overlap SA2 boundaries.
+
+**Tests:** 30 new tests across `tests/test_correspondence.py` and
+`tests/test_lga_boundaries.py`:
+
+- LGA boundary: filename / URL (incl. assertion that `_SHP_` is
+  absent), code/name column tracking, year resolution (latest /
+  specific / unknown), fetch + extract + feather round-trip.
+- Correspondence: one-to-one nested (SA2 inside LGA → weight = 1),
+  one SA2 split across two LGAs (60/40 by area), one LGA split
+  across two SA2s (sum-of-shares = 1 invariant), sliver-drop at the
+  1 m² threshold, auto-detection of `LGA_CODE*` column, downscale
+  counts (per-LGA sum invariant), downscale rates (weighted-avg with
+  partial-coverage renormalisation), unknown-LGA tolerance, null-
+  geometry tolerance, save/load round-trip, and CRS-missing /
+  column-missing / no-overlap error paths.
+
+**Not wired today** (deliberate scope): no LGA-keyed dataset uses
+this yet. When the first LGA consumer surfaces, `Pipeline.from_config`
+will gain LGA-boundary loading + correspondence wiring (~30 lines
+mirroring the SA4 attachment pattern from PR #106).
+
 ### Added — AIHW Mental Health Prescriptions dataset (`aihw_mh_prescriptions`)
 
 First **cross-level** dataset in the augmentor — published by AIHW at
