@@ -6,78 +6,119 @@ them up; they're not raw brainstorms.
 
 ---
 
-## Session checkpoint — 2026-06-01
+## Session checkpoint — 2026-06-01 (end of day)
 
-State of main is **clean** (695 tests passing, mypy + ruff clean,
-zero open issues / PRs at session end). Now at **v2.1.0** — bug-fix +
-historical-data minor release cut after #99 / #101 unblocked critical
-downstream consumers.
+State of main is **clean** (758 tests passing, mypy + ruff clean,
+zero open issues / PRs at session end). Now at **v2.2.0** — cross-level
+dataset support release shipped late on 2026-06-01.
 
 ### Shipped since v2.0.0 (2026-05-27)
 
-**Day 3:** Phase F.6 — SEIFA 2011 + ASGS Edition 1 boundary support
-(`edition_1_spec()`, 2,214 SA2s, GDA94). #88 fixed stale Phase G
-checkpoint guidance.
+**Day 3 (2026-05-29):** Phase F.6 — SEIFA 2011 + ASGS Edition 1
+boundary support (`edition_1_spec()`, 2,214 SA2s, GDA94). #88 fixed
+stale Phase G checkpoint guidance.
 
-**Day 4 (overnight PRs):** #91 Stage 2 — per-release GCP DataPacks
-routing in temporal mode (proper fix building on Stage 1's loud-error
-guard); `ERP.population_density_per_km2` column via
-`compute_sa2_areas_km2` + `attach_sa2_areas` pattern; test-vehicle
-migration ERP → SEIFA for cross-edition xfails.
+**Day 4 (overnight 2026-05-30 → 2026-05-31):** #91 Stage 2 — per-
+release GCP DataPacks routing in temporal mode (proper fix building
+on Stage 1's loud-error guard); `ERP.population_density_per_km2`
+column via `compute_sa2_areas_km2` + `attach_sa2_areas` pattern;
+test-vehicle migration ERP → SEIFA for cross-edition xfails.
 
-**Day 5 (today):** Two critical bug-fix unblocks landed and merged.
+**Day 5 morning (2026-05-31):** Two critical bug-fix unblocks landed.
 **#99** — DSS parser failed on every pre-Q2-2023 release because of
 5-digit `SA2_5DIG16` codes; fixed via a bundled static Edition 2
 mapping (2,310 entries). Eight more years of quarterly DSS unlocked
 (2014-Q3 → 2022-Q4). **#101** — `compute_sa2_areas_km2` crashed on
 null pseudo-SA2 geometries in real ABS boundaries; broke every
 `Pipeline.create()` since ERP density landed. Fixed with defensive
-guards + WARNING on anomalously-high null fraction.
-**v2.1.0 cut** — `[Unreleased]` (10 entries) promoted to `[2.1.0]`,
-pyproject bumped, tagged, GitHub release published.
+guards + WARNING on anomalously-high null fraction. **v2.1.0 cut**
+mid-day to ship those unblocks for downstream consumers.
 
-### Where to pick up next — cross-level dataset work (in flight)
+**Day 5 afternoon (2026-06-01):** Cross-level dataset thread — four
+sequential PRs landing two new datasets and the parent-code +
+correspondence infrastructure.
 
-After v2.1.0 the next major thread is non-SA2-native dataset support.
-Real-data probing (`tools/probe_new_datasets.py`, run 2026-06-01)
-**changed the plan**:
+- **PR #104** — `compute_sa2_parent_codes()` foundation helper. Real-
+  data finding: the SA2 boundary already carries `SA3_CODE21`,
+  `SA4_CODE21`, `GCC_CODE21`, `STE_CODE21` as attributes, so cross-
+  level joins onto SA2 are a pure dict lookup — no separate boundary
+  fetch needed. `spec.md` §20.7 "Cross-level data" added.
+- **PR #105** — `abs_building_approvals` dataset (catalogue 8731.0).
+  Was on the "deferred — LGA-native" list; real-data probe showed
+  ABS publishes SA2-native per-state cubes directly. 9 metric
+  columns, 8 per-state XLSX cubes per monthly release.
+- **PR #106** — `aihw_mh_prescriptions` dataset (NMHSPF). First
+  cross-level dataset. Published at SA4 (not SA3 as AIHW prose
+  suggested) and downscaled to SA2 via the boundary's `SA4_CODE21`
+  attribute. 4 metric columns, 10 FYs available.
+- **PR #107** — `LgaBoundariesDataSource` + `LgaSa2Correspondence`
+  proactive infrastructure for future LGA-only datasets. Area-
+  weighted intersection in EPSG:3577 with both downscale directions
+  (counts-preserving sum, rates weighted-average) + parquet sidecar
+  caching. No consumer wired today.
 
-- **ABS Building Approvals (cat 8731.0)** publishes SA2-native state
-  cubes directly. Was deferred for "LGA-native" reasons — wrong
-  premise. Now in scope as a normal SA2 dataset.
-- **AIHW Mental Health Prescriptions (NMHSPF)** publishes static CSVs
-  at PHN + SA4 level (not SA3 as AIHW navigation prose suggests).
-  AIHW's SA3 data is GUI-only on the Regional Profiles dashboard.
+**Day 5 evening (2026-06-01):**
 
-Both unblocked by one foundational discovery: the SA2 boundary file
-already carries ASGS hierarchy parent codes (`SA3_CODE21`,
-`SA4_CODE21`, `GCC_CODE21`, `STE_CODE21`) as attribute columns. No
-separate SA3 boundary fetch needed. Helper:
-`census_augment.spatial.compute_sa2_parent_codes()` (PR A).
+- **PR #110** — Real-data smokes for ABS BA + AIHW MH added to
+  `tools/verify_real_parsers.py` for live-source drift detection.
+- **v2.2.0 cut** (PR #109 → tag → GitHub release) — five additive
+  entries promoted to `[2.2.0]`, `pyproject.toml` 2.1.0 → 2.2.0.
+- **PR #111 / closes #108** — `tools/verify_real_parsers.py`'s
+  PRESET source-check was routing cross-dataset refs (DSS.*, ERP.*)
+  through the GCP-only `VariableCatalog.resolve()`. Stale check
+  predating v2.0.0's cross-dataset PRESETs; fixed by splitting GCP
+  refs and non-GCP refs into separate resolver paths. The 8
+  "failing" PRESETs all work end-to-end in tests; the bug was in the
+  verify script.
 
-**PR sequence (in flight):**
+### Where to pick up next
 
-1. **PR A — Foundation (this PR).** `compute_sa2_parent_codes()` +
-   spec.md §20.7 "Cross-level data" section + BACKLOG update.
-2. **PR B — ABS Building Approvals.** SA2-native; 8 per-state monthly
-   XLSX cubes. Straightforward dataset registration.
-3. **PR C — AIHW MH Prescriptions.** SA4-keyed via the helper from
-   PR A. Long-format CSV, 10 financial years 2015-16 → 2024-25.
-4. **PR D — LGA boundary + LGA-SA2 spatial cross-walk.** Built
-   proactively (no consumer yet) for future LGA-only datasets.
-   Area-weighted intersection in EPSG:3577, disk-cached per boundary
-   edition.
+No active engineering thread. The cross-level dataset infrastructure
+is in place; the next LGA-only dataset that surfaces (NSW BOCSAR crime
+stats, state planning indicators, etc.) is a small addition that
+plugs into `Pipeline.from_config` + the existing
+`LgaSa2Correspondence` machinery.
+
+Candidates by ROI when motivated:
+
+1. **First LGA-only dataset** consumer to validate the correspondence
+   end-to-end against real data (e.g. add an "ABS Building Approvals
+   at LGA" variant — ABS publishes both SA2 and LGA cubes; we picked
+   SA2 in v2.2.0, but LGA would exercise the new correspondence
+   pipeline). ~1-2 hours.
+
+2. **User-supplied DataPack ZIP fallback** for GCP 2011 unlock —
+   ~2 hours of clean engineering, concrete shape spelled out in the
+   "User-supplied DataPack ZIP fallback" section below. Power-user
+   unlock for the only Edition 1 dataset (GCP 2011) that's still
+   behind ABS's login wall.
+
+3. **Address-retirement awareness** (Phase G refinement,
+   spec-temporal.md §17 deferred): "address X existed in 2018, retired
+   in 2022; row dated 2020 should hit X even though X is missing from
+   the 2025 release." Today an unmatched address falls through to
+   fuzzy / Nominatim. Bigger lift; revisit if user demand surfaces.
+
+4. **More cross-dataset PRESETs / new AIHW datasets / new ABS
+   datasets** at the marginal-cost level — each is mostly markdown
+   authoring now that the cross-level plumbing is in place.
 
 ### Done (no longer "next priority")
 
-- ~~`ERP.population_density_per_km2`.~~ Shipped in v2.1.0 via
+- ~~Cross-level dataset support.~~ Shipped in **v2.2.0**: foundation
+  helper (`compute_sa2_parent_codes`), ABS Building Approvals dataset
+  (SA2-native), AIHW MH Prescriptions dataset (SA4-keyed via the
+  foundation), LGA boundary + LGA-SA2 spatial cross-walk infrastructure.
+  All four PRs (#104, #105, #106, #107) merged today.
+
+- ~~`ERP.population_density_per_km2`.~~ Shipped in **v2.1.0** via
   `ErpDataSource.attach_sa2_areas()` + `Pipeline.from_config` wiring.
   Density computed from `population_total / SA2 area km²`; SA2 areas
   derived from the boundary GeoDataFrame at pipeline construction via
-  `census_augment.spatial.compute_sa2_areas_km2()`. See CHANGELOG.
+  `census_augment.spatial.compute_sa2_areas_km2()`.
 
 - ~~Phase G — G-NAF release-per-row.~~ Shipped in **v2.0.0** via
-  PR #70 (commit 063a9c0). The `gnaf_release` output column, per-row
+  PR #70 (commit `063a9c0`). The `gnaf_release` output column, per-row
   release dispatch, and `Pipeline.from_config` wiring are all live.
   14 dedicated tests in `tests/test_pipeline_temporal.py` and
   `tests/test_temporal_helpers.py`.
@@ -89,8 +130,12 @@ separate SA3 boundary fetch needed. Helper:
 
 - `_template.md` wheel exclusion (4 KB hygiene; design choice in
   this BACKLOG)
+- LGA boundary smoke missing from `tools/verify_real_parsers.py` —
+  PR #110 added smokes for the two new dataset fetchers but the
+  bare boundary fetcher (`LgaBoundariesDataSource`) doesn't have
+  one. Drift-detection gap of ~15 minutes' fix when motivated.
 - Stale remote / local branch cleanup if anything has accumulated
-  again (was thorough yesterday — should still be clean unless new
+  again (was thorough at v2.1.0 — should still be clean unless new
   worktrees were created)
 
 ---

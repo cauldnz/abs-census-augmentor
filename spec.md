@@ -927,15 +927,22 @@ census-augment discover --dataset seifa      # show schema of one
 census-augment discover --search income           # search across all variables
 ```
 
-### 20.6 Initial registry (v1.3)
+### 20.6 Active registry
 
-| id | namespace | source | cadence | size | status |
-|---|---|---|---|---|---|
-| `gcp` | `G01..G62` | ABS GCP DataPack (2016 + 2021 releases) | per-census | ~35-40 MB / release | active (2016 in v1.6 / F.4) |
-| `seifa` | `SEIFA` | ABS SEIFA SA2 workbook (2016 .xls, 2021 .xlsx) | per-census | ~150-700 KB | active (v1.3 / 2016 in v1.5) |
-| `erp_by_sa2` | `ERP` | ABS Regional Population XLSX | annual | ~3 MB | active (v1.3) |
-| `dss_payments` | `DSS` | DSS data.gov.au CKAN | quarterly | ~5 MB / quarter | active (v1.3) |
-| `ato_personal_income` | `ATO` | ABS Personal Income XLSX | annual | ~4 MB | active (v1.3) |
+Datasets currently registered and shipping with the augmentor.
+``census-augment discover --datasets`` enumerates the live set; this
+table is the design-time reference, kept in sync with the markdown
+specs under ``datasets/``.
+
+| id | namespace | source | geography | cadence | size | added |
+|---|---|---|---|---|---|---|
+| `gcp` | `G01..G62` | ABS GCP DataPack (2011 + 2016 + 2021 releases) | SA2 native (per edition) | per-census | ~35-40 MB / release | v1.0 (2021 in v1.0; 2016 in v2.0 / F.4) |
+| `seifa` | `SEIFA` | ABS SEIFA SA2 workbook (.xls 2011/2016, .xlsx 2021) | SA2 native (per edition) | per-census | ~150-700 KB | v1.3 (2016 in v2.0 / F.3; 2011 in v2.0 / F.6) |
+| `erp_by_sa2` | `ERP` | ABS Regional Population XLSX (cat 3218.0 + 3235.0) | SA2 native | annual | ~3 MB | v1.3 (density column in v2.1.0) |
+| `dss_payments` | `DSS` | DSS data.gov.au CKAN quarterly publication | SA2 native (Edition 2 codes pre-Q2-2023, Edition 3 from Q2-2023) | quarterly | ~5 MB / quarter | v1.3 (5-digit Edition 2 code support in v2.1.0 / #99) |
+| `abs_personal_income` | `ABS_PIA` | ABS Personal Income in Australia XLSX (cat 6524.0.55.002) | SA2 native | annual | ~4 MB | v1.3 (renamed from `ato_personal_income` / `ATO.*` in v2.0.0) |
+| `abs_building_approvals` | `ABS_BA` | ABS Building Approvals XLSX (cat 8731.0) | SA2 native (8 per-state cubes) | monthly | ~1.5 MB / release (8 × ~180 KB) | v2.2.0 |
+| `aihw_mh_prescriptions` | `AIHW_MHP` | AIHW NMHSPF Mental Health Prescriptions ZIP | **SA4** (cross-level — downscaled via boundary's `SA4_CODE21` attribute) | annual | ~880 KB | v2.2.0 |
 
 ### 20.7 Cross-level data (datasets keyed above SA2)
 
