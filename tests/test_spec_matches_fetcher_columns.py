@@ -39,6 +39,10 @@ import responses
 from census_augment.datasets import registry
 from census_augment.datasets._abs_ba import ABS_BA_LANDING_URL, AbsBaDataSource
 from census_augment.datasets._abs_pia import ATO_LANDING_URL, AbsPiaDataSource
+from census_augment.datasets._aihw_mh import (
+    _AIHW_RX_URLS_BY_RELEASE,
+    AihwMhPrescriptionsDataSource,
+)
 from census_augment.datasets._dss import CKAN_PACKAGE_URL, DssDataSource
 from census_augment.datasets._erp import (
     ERP_AGE_SEX_LANDING_URL,
@@ -54,6 +58,7 @@ from census_augment.datasets._seifa import DEFAULT_SEIFA_2021_URL, SeifaDataSour
 from tests.test_dataset_abs_ba import _make_landing_html as _ba_landing_html
 from tests.test_dataset_abs_ba import _make_state_xlsx
 from tests.test_dataset_abs_pia import _make_ato_xlsx
+from tests.test_dataset_aihw_mh import _full_sa4_rows, _make_aihw_zip
 from tests.test_dataset_abs_pia import _make_landing_html as _pia_landing_html
 from tests.test_dataset_dss import _make_ckan_response, _make_dss_xlsx
 from tests.test_dataset_erp import (
@@ -309,6 +314,31 @@ def test_spec_matches_fetcher__abs_building_approvals(tmp_path: Path) -> None:
     _check_spec_matches("abs_building_approvals", set(df.columns))
 
 
+# ---- AIHW Mental Health Prescriptions --------------------------------------
+
+
+@responses.activate
+def test_spec_matches_fetcher__aihw_mh_prescriptions(tmp_path: Path) -> None:
+    """AIHW MH Prescriptions spec ⊆ ``AihwMhPrescriptionsDataSource.load().columns``.
+
+    The dataset is SA4-keyed; we attach a synthetic SA2 -> SA4 mapping
+    so the fetcher's load() can downscale to a SA2-keyed DataFrame
+    matching the rest of the registry contract.
+    """
+    rows = _full_sa4_rows("SA4101", "Central Coast")
+    responses.add(
+        responses.GET,
+        _AIHW_RX_URLS_BY_RELEASE["2024-25"],
+        body=_make_aihw_zip(rows=rows),
+        status=200,
+    )
+
+    ds = AihwMhPrescriptionsDataSource(root=tmp_path / "aihw-cache")
+    ds.attach_sa2_to_sa4_mapping({"102011028": "101"})
+    df = ds.load()
+    _check_spec_matches("aihw_mh_prescriptions", set(df.columns))
+
+
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
 
 
@@ -324,6 +354,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "abs_personal_income",
         "seifa",
         "abs_building_approvals",
+        "aihw_mh_prescriptions",
     }
     intentionally_skipped = {
         "gcp",  # multi-table loader; covered via VariableCatalog tests
