@@ -96,6 +96,28 @@ def _is_gcp_variable_ref(ref: str) -> bool:
     return bool(namespace) and namespace[0] == "G" and namespace[1:].isdigit()
 
 
+# Variable-namespace prefixes that route to LGA-keyed datasets and
+# therefore need the LGA-SA2 spatial correspondence wired up at pipeline
+# construction. Currently a single entry; future LGA-only datasets that
+# need the same correspondence should add their namespace here.
+_LGA_DATASET_NAMESPACES: frozenset[str] = frozenset({"ABS_BA_LGA"})
+
+
+def _config_references_lga_dataset(variables: dict[str, str]) -> bool:
+    """True if any variable ref routes to a registered LGA-keyed dataset.
+
+    Used by :meth:`Pipeline.from_config` to decide whether to derive the
+    LGA-SA2 spatial correspondence (an expensive ~30 s intersection,
+    plus a ~40 MB LGA boundary fetch). Skipped when no LGA dataset is
+    referenced — most pipelines pay zero LGA overhead.
+    """
+    for ref in variables.values():
+        namespace = ref.partition(".")[0]
+        if namespace in _LGA_DATASET_NAMESPACES:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class RunSummary:
     """End-of-run statistics (spec §7.5).
@@ -455,6 +477,48 @@ class Pipeline:
         # _MAIN16 / _MAIN11 parent column wiring can be added when a
         # historical SA4-keyed dataset surfaces.
 
+        # LGA-SA2 spatial correspondence (v2.2.0+). Derived lazily — we
+        # only fetch the LGA boundary + compute the intersection if
+        # any LGA-keyed dataset is actually referenced in the config.
+        # The result is cached to a parquet sidecar so subsequent
+        # pipeline construction is fast.
+        lga_sa2_correspondence: object | None = None
+        if _config_references_lga_dataset(config.variables):
+            from .correspondence import (  # noqa: PLC0415
+                compute_lga_sa2_correspondence,
+                load_correspondence,
+                save_correspondence,
+            )
+            from .data_sources.lga_boundaries import (  # noqa: PLC0415
+                LgaBoundariesDataSource,
+            )
+
+            lga_root = data_dir / "boundaries" / "lga" / "2025"
+            corr_cache = lga_root / "lga-sa2-correspondence.parquet"
+            if corr_cache.exists():
+                lga_sa2_correspondence = load_correspondence(corr_cache)
+                _log.debug("Loaded cached LGA-SA2 correspondence from %s", corr_cache)
+            else:
+                lga_ds = LgaBoundariesDataSource(
+                    year="latest",
+                    root=lga_root,
+                )
+                lga_gdf = lga_ds.load()
+                _log.info(
+                    "Computing LGA-SA2 correspondence "
+                    "(SA2 from edition %d boundary, LGA from %d release)...",
+                    edition.edition,
+                    lga_ds.year,
+                )
+                lga_sa2_correspondence = compute_lga_sa2_correspondence(
+                    sa2=loaded_boundaries,
+                    lga=lga_gdf,
+                    sa2_code_column=edition.sa2_code_column,
+                    lga_code_column=lga_ds.code_column,
+                )
+                save_correspondence(lga_sa2_correspondence, corr_cache)
+                _log.info("Cached LGA-SA2 correspondence to %s", corr_cache)
+
         # Per-edition spatial-index factory (Phase F.2 / spec-temporal.md §2).
         # Constructs a SpatialIndex for any ASGS edition the temporal
         # orchestrator asks for. We capture ``data_dir`` and the boundaries
@@ -513,6 +577,7 @@ class Pipeline:
             data_dir=data_dir,
             sa2_areas_km2=sa2_areas_km2,
             sa2_to_sa4=sa2_to_sa4,
+            lga_sa2_correspondence=lga_sa2_correspondence,
         )
 
         # Per-release GCP DataPacks factory (issue #91 Stage 2). Closes
@@ -1732,6 +1797,7 @@ class Pipeline:
             dataset_release_overrides=release_overrides,
             sa2_areas_km2=self._enricher._sa2_areas_km2,
             sa2_to_sa4=self._enricher._sa2_to_sa4,
+            lga_sa2_correspondence=self._enricher._lga_sa2_correspondence,
         )
 
     def _get_gcp_datapacks(self, release: str) -> tuple[DataPacksDataSource, VariableCatalog]:

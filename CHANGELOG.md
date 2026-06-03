@@ -9,6 +9,90 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — ABS Building Approvals LGA dataset (`abs_building_approvals_lga`)
+
+First production dataset to exercise the v2.2.0 `LgaSa2Correspondence`
+machinery against real ABS data. LGA-keyed sibling to the existing
+SA2-native `abs_building_approvals` dataset; both can coexist in one
+config under separate namespaces (`ABS_BA` vs `ABS_BA_LGA`).
+
+ABS publishes catalogue 8731.0 at both SA2 and LGA granularities. The
+SA2-native publication is the more direct join for most analyses; the
+LGA publication carries slightly different aggregates (allocation
+decisions differ at LGA level vs SA2 level). This dataset reads the
+LGA cubes and area-weight downscales to SA2 via
+`LgaSa2Correspondence.downscale_counts()`.
+
+**Columns exposed** (9 metrics + 1 metadata, identical to the SA2
+sibling but downscaled):
+
+- `ABS_BA_LGA.new_houses_count` (downscaled to SA2 by area share)
+- `ABS_BA_LGA.new_other_residential_building_count`
+- `ABS_BA_LGA.total_dwellings_count`
+- `ABS_BA_LGA.value_new_houses` (`$'000`)
+- `ABS_BA_LGA.value_new_other_residential_building`
+- `ABS_BA_LGA.value_alterations_additions_conversions`
+- `ABS_BA_LGA.value_total_residential_building`
+- `ABS_BA_LGA.value_non_residential_building`
+- `ABS_BA_LGA.value_total_building`
+- `ABS_BA_LGA.reference_financial_year`
+
+Downscaled count columns are `float` (not `int`) because area-weight
+redistribution produces fractional contributions per SA2.
+
+**Real-data finding** (live-probed 2026-06-01 against NSW March 2026
+cube): the LGA cube's data sheet is named **`Table 1`** (with space),
+**not** `Table_1` (with underscore) as in the SA2 cube. The two
+parsers do not share the sheet-name string. Real-Data-First catch —
+the kind of small-but-critical schema difference that would have
+silently broken the parser had I copy-pasted from the SA2 module
+without verifying.
+
+Per-state product codes are offset by 2 from the SA2 series
+(`do004`/`do008`/...`do032` for complete FY; `do005`/`do009`/...
+for FYTD). The sheet has 5-digit LGA codes in column A (vs the SA2
+cube's mixed-level codes); filter strictly to 5-digit numerics to
+drop the state-aggregate row.
+
+**Cross-level downscale wiring:**
+
+- The fetcher requires a `LgaSa2Correspondence` attached via
+  `attach_correspondence(corr)` before `load()` (mirrors AIHW MH
+  Prescriptions' `attach_sa2_to_sa4_mapping`).
+- `Pipeline.from_config` derives the correspondence automatically
+  when **any** `ABS_BA_LGA.*` variable is referenced in config:
+  1. Detects the LGA namespace via a new `_LGA_DATASET_NAMESPACES`
+     constant
+  2. Fetches the LGA boundary via `LgaBoundariesDataSource("latest")`
+  3. Computes `compute_lga_sa2_correspondence(sa2, lga)`
+  4. Caches to a parquet sidecar under
+     `<data_dir>/boundaries/lga/2025/lga-sa2-correspondence.parquet`
+     so subsequent pipeline init reuses it (~30 s intersection runs
+     once per SA2-release × LGA-release pair)
+- `CensusEnricher` accepts a new `lga_sa2_correspondence` kwarg;
+  `_make_fetcher` attaches it to the `abs_building_approvals_lga`
+  fetcher. Temporal-mode sub-enricher reconstruction threads it
+  through too.
+- Pipelines that don't reference an LGA dataset pay zero LGA cost
+  (no boundary fetch, no intersection).
+
+**Tests:** 12 new in `tests/test_dataset_abs_ba_lga.py` covering
+release resolution, correspondence-attachment guard (load without
+correspondence raises with guidance, non-`LgaSa2Correspondence`
+TypeError), end-to-end downscale with per-LGA sum invariant,
+state-aggregate row filtering (5-digit code guard), warn-and-skip
+on boundary-vs-publication LGA mismatch, parquet round-trip, and an
+**integration smoke** that uses a real
+`compute_lga_sa2_correspondence` (not a synthetic one) to exercise
+the geometric-intersection path end-to-end.
+
+Lock-door entries added to `test_spec_matches_fetcher_columns.py` and
+`test_wheel_bundles_specs.py`.
+
+**Tools**: `tools/probe_new_datasets.py` retains the v2.2.0 probe
+findings; the new LGA cube schema is also documented in this PR's
+description for reproducibility.
+
 ### Tools — LGA boundary fetch + smoke
 
 Closes the drift-detection gap left by v2.2.0 / PR #107. The

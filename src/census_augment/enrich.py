@@ -61,6 +61,7 @@ class CensusEnricher:
         dataset_release_overrides: dict[str, str] | None = None,
         sa2_areas_km2: dict[str, float] | None = None,
         sa2_to_sa4: dict[str, str] | None = None,
+        lga_sa2_correspondence: object | None = None,
     ) -> None:
         self._datapacks = datapacks
         self._catalog = catalog
@@ -91,6 +92,15 @@ class CensusEnricher:
         self._sa2_to_sa4: dict[str, str] | None = (
             dict(sa2_to_sa4) if sa2_to_sa4 is not None else None
         )
+        #: Optional LGA → SA2 area-weighted spatial correspondence
+        #: (a :class:`census_augment.correspondence.LgaSa2Correspondence`).
+        #: When provided, the ABS BA LGA fetcher gets it attached via
+        #: ``attach_correspondence`` so its ``load()`` downscales
+        #: LGA-keyed values to SA2 rows. Pipeline.from_config derives
+        #: this from the LGA boundary + SA2 boundary. Other datasets
+        #: ignore it. Typed as ``object`` so this module doesn't need
+        #: to import ``correspondence``.
+        self._lga_sa2_correspondence: object | None = lga_sa2_correspondence
         self._validate_no_synthetic_prefix_collision()
 
     def build_lookup(self) -> pd.DataFrame:
@@ -259,6 +269,15 @@ class CensusEnricher:
             and hasattr(fetcher, "attach_sa2_to_sa4_mapping")
         ):
             fetcher.attach_sa2_to_sa4_mapping(self._sa2_to_sa4)
+        # ABS BA LGA cross-level downscale: LGA-keyed source needs the
+        # LGA -> SA2 area-weighted correspondence attached so load() can
+        # downscale. Same shape as the SA4 attachment above.
+        if (
+            dataset_id == "abs_building_approvals_lga"
+            and self._lga_sa2_correspondence is not None
+            and hasattr(fetcher, "attach_correspondence")
+        ):
+            fetcher.attach_correspondence(self._lga_sa2_correspondence)
         return fetcher
 
     # ---- PRESET integration --------------------------------------------
