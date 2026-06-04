@@ -40,6 +40,7 @@ try:
     )
     from census_augment.data_sources.boundaries import BoundariesDataSource
     from census_augment.data_sources.datapacks import DataPacksDataSource
+    from census_augment.data_sources.lga_boundaries import LgaBoundariesDataSource
     from census_augment.data_sources.gnaf import (
         DEFAULT_GNAF_S3_BASE_URL,
         GnafDataSource,
@@ -86,6 +87,16 @@ def main() -> int:
         "--skip-nominatim",
         action="store_true",
         help="Skip the Nominatim sample query",
+    )
+    p.add_argument(
+        "--skip-lga",
+        action="store_true",
+        help=(
+            "Skip the LGA boundary download (~40 MB). The LGA boundary "
+            "is only needed by datasets that downscale from LGA-keyed "
+            "sources via census_augment.correspondence (added v2.2.0). "
+            "Default: include."
+        ),
     )
     p.add_argument(
         "--skip-gnaf",
@@ -216,6 +227,23 @@ def main() -> int:
     print(f"  URL:    {mb_ds.url}")
     mb_shp = mb_ds.fetch(refresh=args.refresh)
     print(f"  shp:    {mb_shp}")
+
+    # LGA boundary (v2.2.0+) — needed by datasets that downscale from
+    # LGA-keyed sources via census_augment.correspondence. Annual
+    # release cadence; we fetch the latest (currently 2025). Opt out
+    # with --skip-lga if you're not using any LGA-keyed dataset.
+    if args.skip_lga:
+        print("=== LGA boundary ===")
+        print("  (skipped via --skip-lga)")
+    else:
+        print("=== LGA boundary (2025) ===")
+        lga_ds = LgaBoundariesDataSource(
+            year="latest",
+            root=data_dir / "boundaries" / "lga" / "2025",
+        )
+        print(f"  URL:    {lga_ds.url}")
+        lga_shp = lga_ds.fetch(refresh=args.refresh)
+        print(f"  shp:    {lga_shp}")
 
     if not args.skip_nominatim:
         print("=== Nominatim sample ===")

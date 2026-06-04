@@ -9,6 +9,36 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Tools — LGA boundary fetch + smoke
+
+Closes the drift-detection gap left by v2.2.0 / PR #107. The
+`LgaBoundariesDataSource` shipped without a probe in
+`verify_real_parsers.py`; the weekly Real-data parser check workflow
+would never have surfaced an ABS-side change to the LGA boundary
+schema or URL pattern.
+
+**`tools/fetch_real_data.py`**:
+
+- New `--skip-lga` flag (default: include).
+- Default Edition 3 run now also fetches the latest LGA boundary
+  (~40 MB) under `<data_dir>/boundaries/lga/<year>/`. Needed by any
+  dataset that downscales from LGA-keyed sources via
+  `census_augment.correspondence`. Opt out with `--skip-lga` when
+  not using any LGA-keyed dataset.
+
+**`tools/verify_real_parsers.py`**:
+
+- New self-skipping `LGA boundary (<year>)` section that loads the
+  cached LGA boundary and asserts:
+  - 500+ rows (real ABS: 567 for LGA 2025)
+  - Code + name columns present (`LGA_CODE25` / `LGA_NAME25` for 2025)
+  - CRS is GDA2020 (EPSG:7844)
+  - 500+ rows have non-null geometry (catches a future ABS file
+    structure shift the same way the SA2 smokes do)
+- Self-skipping pattern matches the Edition 1 / Edition 2 sections —
+  partial caches don't bork the run; clear "run fetch_real_data first"
+  message when the LGA cache is empty.
+
 ### Docs — refresh BACKLOG checkpoint + spec.md §20.6 dataset registry
 
 Docs-only sweep, no behaviour change. Two drift fixes that accumulated

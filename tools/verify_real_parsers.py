@@ -31,6 +31,10 @@ try:
     from census_augment.data_sources.datapacks import DataPacksDataSource
     from census_augment.data_sources.gnaf import GnafDataSource
     from census_augment.geocoding.gnaf import GnafGeocoder
+    from census_augment.data_sources.lga_boundaries import (
+        KNOWN_LGA_YEARS,
+        LgaBoundariesDataSource,
+    )
     from census_augment.data_sources.mb_correspondence import MbCorrespondenceDataSource
     from census_augment.paths import default_data_dir
 except ModuleNotFoundError as e:
@@ -213,6 +217,75 @@ def main() -> int:
                 _load_edition_1_boundary,
             ):
                 failures.append("boundaries_edition_1")
+
+    # ------ LGA boundary (v2.2.0 / PR #107) ------
+    #
+    # Cross-checks LgaBoundariesDataSource's URL + filename + DBF
+    # column-name claims against the live ABS LGA download. LGA
+    # boundaries update annually; the smoke targets the latest known
+    # year. Skipped if the LGA cache hasn't been populated yet — same
+    # self-skipping pattern as the Edition 1 / 2 sections above. Run
+    # ``uv run python tools/fetch_real_data.py`` (with `--skip-lga`
+    # absent) to populate.
+    latest_lga_year = max(KNOWN_LGA_YEARS)
+    lga_root = data_dir / "boundaries" / "lga" / str(latest_lga_year)
+    if lga_root.exists():
+        print(f"=== LGA boundary ({latest_lga_year}) ===")
+        lga_boundaries = LgaBoundariesDataSource(
+            year=latest_lga_year,
+            root=lga_root,
+        )
+        if not lga_boundaries.is_cached():
+            print(
+                f"  (skipped; no cached LGA {latest_lga_year} boundary. "
+                "Run `uv run python tools/fetch_real_data.py` (without "
+                "--skip-lga) to populate it.)"
+            )
+        else:
+
+            def _load_lga_boundary() -> None:
+                gdf = lga_boundaries.load()
+                # ABS publishes ~537-567 LGAs depending on the year;
+                # 2025 has 567 per the 2026-06-01 live probe.
+                assert len(gdf) > 500, f"only {len(gdf)} LGAs (expected ~530-570)"
+                code_col = lga_boundaries.code_column
+                name_col = lga_boundaries.name_column
+                assert code_col in gdf.columns, (
+                    f"missing {code_col!r}; got: {list(gdf.columns)[:5]}"
+                )
+                assert name_col in gdf.columns, (
+                    f"missing {name_col!r}; got: {list(gdf.columns)[:5]}"
+                )
+                # LGA boundary is GDA2020 (EPSG:7844) — same as the SA2
+                # Edition 3 boundary. Round-trip through .shp doesn't
+                # always preserve EPSG; check the datum name as backup.
+                assert gdf.crs is not None, "CRS is None"
+                crs_epsg = gdf.crs.to_epsg()
+                crs_name = (gdf.crs.name or "").upper()
+                assert crs_epsg == 7844 or "GDA2020" in crs_name, (
+                    f"unexpected CRS for LGA boundary: epsg={crs_epsg}, name={gdf.crs.name!r}"
+                )
+                # Spot-check non-null geometry on a sample LGA. ABS LGA
+                # files have very few pseudo-rows (unlike SA2 which has
+                # off-shore / migratory rows), but it's still worth
+                # confirming at least one row has real geometry.
+                non_null = gdf[gdf.geometry.notna()]
+                assert len(non_null) > 500, (
+                    f"only {len(non_null)} LGAs have geometry; expected ~530-570"
+                )
+                print(
+                    f"         -> {len(gdf)} LGAs ({len(non_null)} with "
+                    f"geometry), sample {non_null[code_col].iloc[0]} "
+                    f"({non_null[name_col].iloc[0]})"
+                )
+
+            if not _check(
+                f"LGA {latest_lga_year} load + schema "
+                f"(LGA_CODE{str(latest_lga_year)[-2:]} / "
+                f"LGA_NAME{str(latest_lga_year)[-2:]}) + CRS (GDA2020)",
+                _load_lga_boundary,
+            ):
+                failures.append("boundaries_lga")
 
     # ------ DataPacks ------
     print("=== DataPacks ===")
