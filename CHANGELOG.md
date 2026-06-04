@@ -9,6 +9,43 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Fixed / Docs — post-v2.4.0 cleanup sweep (dead code, doc drift, dangling tool reference)
+
+Housekeeping pass surfaced by a code audit. No behaviour change to any
+shipped feature; tests unchanged at 785.
+
+**Restored a dangling tool reference.** `tools/probe_new_datasets.py`
+was committed on the real-data-probe branch but that branch never
+merged to `main` — yet `_abs_ba.py`, `lga_boundaries.py`, and the
+CHANGELOG all referenced it. Restored the file from its original commit
+so the references resolve. The probe is a genuine Real-Data-First
+artifact (re-runnable schema dump for SA3 / LGA boundary / ABS BA / AIHW
+upstreams) and the docs promised it exists.
+
+**Dead code removed:**
+
+- `_aihw_mh.py` — unused `import re` and its `_ = re` lint-silencer.
+- `_abs_ba_lga.py` — vestigial `share = …` assignment (the loop
+  recomputes `group_share` per group) and its `_ = share` silencer.
+- `_abs_ba.py` / `_abs_ba_lga.py` — the write-only `self._yyyymm`
+  attribute (set in `_resolve_release`, never read).
+
+**Documentation drift fixed:**
+
+- `spec.md` §5 project-structure tree regenerated against the actual
+  source layout — added the cross-level modules (`correspondence.py`,
+  `lga_boundaries.py`, `_edition.py`, `_xlsx_base.py`, `_temporal.py`,
+  `_spec_loader.py`, `_abs_ba.py`, `_abs_ba_lga.py`, `_aihw_mh.py`,
+  `_abs_pia.py`, the DSS 5→9 mapping) and the new datasets / tools;
+  corrected the renamed `ato_personal_income` → `abs_personal_income`.
+- `spec.md` status banner `v1.4.1` → `v2.4.0`; test-count comment
+  `24 files, ~515 tests` → `36 files, ~785 tests`.
+- `README.md` dataset/PRESET catalogue line updated (was "SEIFA / ERP /
+  DSS / ATO" + "six curated PRESET ratios"; now reflects the 8 datasets
+  + 17 PRESETs).
+- `_xlsx_base.py` and `pipeline.py` comments / docstrings: stale `ATO`
+  references corrected to `ABS Personal Income` / `ABS_PIA`.
+
 ## [2.4.0] - 2026-06-01 (late)
 
 Third same-day follow-up release, bundling two user-facing additions

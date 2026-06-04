@@ -1,9 +1,9 @@
-"""Shared plumbing for the SEIFA / ERP / DSS / ATO XLSX datasets.
+"""Shared plumbing for the SEIFA / ERP / DSS / ABS Personal Income XLSX datasets.
 
-The four v1.3 registered datasets all share an identical skeleton:
+The four single-file XLSX datasets all share an identical skeleton:
 
 - Lazy release resolution (static URL for SEIFA, landing-page scrape
-  for ERP / ATO, CKAN lookup for DSS) populating
+  for ERP / ABS Personal Income, CKAN lookup for DSS) populating
   ``self._resolved_release`` and ``self._resolved_url``.
 - Streaming download to a ``.tmp`` file with atomic-rename, gated on
   ``_xlsx_path.exists()`` for cache hits, retrying transient ABS
@@ -17,11 +17,11 @@ The only dataset-specific bits are:
 - The release-resolution mechanism (overrides ``_resolve_release``).
 - The XLSX parser (overrides ``_parse_xlsx``).
 - Optional per-release columns the parser doesn't produce (DSS adds
-  ``release_quarter``, ATO adds ``reference_financial_year`` —
-  overrides ``_post_parse``).
+  ``release_quarter``, ABS Personal Income adds
+  ``reference_financial_year`` — overrides ``_post_parse``).
 
 Before this base existed each of `_seifa.py` / `_erp.py` / `_dss.py` /
-`_ato.py` reimplemented the plumbing inline, producing four ~330-line
+`_abs_pia.py` reimplemented the plumbing inline, producing four ~330-line
 modules where ~70% of the code was identical. Pulling the shared base
 collapses them to ~150 lines each, all dataset-specific.
 
@@ -186,8 +186,8 @@ class _AbsXlsxDataset:
     def _post_parse(self, df: pd.DataFrame) -> pd.DataFrame:
         """Inject release-derived columns into the parsed DataFrame.
 
-        Default: no-op. DSS adds ``release_quarter`` here; ATO adds
-        ``reference_financial_year``. SEIFA / ERP don't need this hook
-        because their parsers produce all columns directly.
+        Default: no-op. DSS adds ``release_quarter`` here; ABS Personal
+        Income adds ``reference_financial_year``. SEIFA / ERP don't need
+        this hook because their parsers produce all columns directly.
         """
         return df

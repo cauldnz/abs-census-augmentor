@@ -1,6 +1,6 @@
 # Australian Census Augmentation Tool — Specification
 
-> **Status:** Implemented through v1.4.1 (current).
+> **Status:** Implemented through v2.4.0 (current).
 > **Purpose:** Hand-off specification for implementation by Claude Code. Update this document as design decisions evolve.
 >
 > Release history at a glance:
@@ -159,15 +159,15 @@ abs-census-augmentor/
 │   ├── seifa.md
 │   ├── erp_by_sa2.md
 │   ├── dss_payments.md
-│   └── ato_personal_income.md
+│   ├── abs_personal_income.md
+│   ├── abs_building_approvals.md       # SA2-native (§20.6)
+│   ├── abs_building_approvals_lga.md   # LGA → SA2 downscale (§20.7)
+│   └── aihw_mh_prescriptions.md        # SA4 → SA2 downscale (§20.7)
 ├── features/                       # Markdown specs for PRESET features (§21.1)
 │   ├── _template.md
-│   ├── pct_drive_to_work.md
-│   ├── motor_vehicles_per_dwelling.md
-│   ├── pct_renters.md
-│   ├── pct_employed_full_time.md
-│   ├── pct_aged_65_plus.md
-│   └── pct_one_parent_family.md
+│   └── *.md                        # 17 PRESETs: pct_drive_to_work,
+│                                   #   housing_supply_rate, welfare_density_index,
+│                                   #   pct_age_pension_recipients, … (§21.4)
 ├── docs/                           # Handbook (markdown) + embedded README assets
 │   ├── index.md                    # Handbook TOC / entry point
 │   ├── usage-library.md            # Pipeline.augment, AugmentResult
@@ -192,15 +192,20 @@ abs-census-augmentor/
 │       ├── config.py               # Pydantic schema + YAML loader
 │       ├── paths.py                # User-cache directory resolution (§9)
 │       ├── catalog.py              # GCP variable resolution + search + suggestions
-│       ├── spatial.py              # Point-in-polygon → SA2 (fallback path)
+│       ├── spatial.py              # Point-in-polygon → SA2; area + parent-code lookups (§20.7)
+│       ├── correspondence.py       # LGA ↔ SA2 area-weighted spatial cross-walk (§20.7)
 │       ├── enrich.py               # CensusEnricher: dispatch + PRESET integration (§7.4, §21.2)
-│       ├── pipeline.py             # Orchestration; multi-provider, MB/spatial split
+│       ├── pipeline.py             # Orchestration; multi-provider, MB/spatial split, cross-level wiring
 │       ├── features.py             # FeatureSpec + FeatureRegistry + FeatureEvaluator (§21)
 │       ├── _http_retry.py          # Shared retry helper for ABS streaming downloads
+│       ├── _spec_loader.py         # Shared front-matter spec-file iterator (datasets + features)
+│       ├── _temporal.py            # Temporal-mode helpers (per-row release resolution)
 │       ├── data_sources/
 │       │   ├── _base.py            # Shared download/extract base
-│       │   ├── boundaries.py       # Shapefile download + load
-│       │   ├── datapacks.py        # CSV + Excel-metadata parser
+│       │   ├── _edition.py         # ASGS edition specs (Editions 1/2/3 boundary URLs + columns)
+│       │   ├── boundaries.py       # SA2 shapefile download + load
+│       │   ├── lga_boundaries.py   # LGA shapefile download + load (§20.7)
+│       │   ├── datapacks.py        # CSV + Excel-metadata parser (+ GCP 2011 local-zip fallback)
 │       │   ├── mb_correspondence.py # MB_CODE → SA2_CODE lookup (fast path)
 │       │   └── gnaf.py             # G-NAF Core fetch + DuckDB indexing
 │       ├── datasets/               # Pluggable-dataset framework (§20)
@@ -208,10 +213,14 @@ abs-census-augmentor/
 │       │   ├── _spec.py            # DatasetSpec parser
 │       │   ├── _protocol.py        # DatasetFetcher Protocol
 │       │   ├── _registry.py        # Registry + namespace resolution
+│       │   ├── _xlsx_base.py       # Shared fetch/load base for single-file XLSX datasets
 │       │   ├── _seifa.py           # SeifaDataSource
 │       │   ├── _erp.py             # ErpDataSource
-│       │   ├── _dss.py             # DssDataSource
-│       │   └── _ato.py             # AtoDataSource
+│       │   ├── _dss.py             # DssDataSource (+ _dss_sa2_5digit_edition_2.py mapping)
+│       │   ├── _abs_pia.py         # AbsPiaDataSource (ABS Personal Income)
+│       │   ├── _abs_ba.py          # AbsBaDataSource (Building Approvals, SA2-native)
+│       │   ├── _abs_ba_lga.py      # AbsBaLgaDataSource (Building Approvals, LGA → SA2)
+│       │   └── _aihw_mh.py         # AihwMhPrescriptionsDataSource (SA4 → SA2)
 │       └── geocoding/
 │           ├── base.py             # Geocoder Protocol + GeocodeResult dataclass
 │           ├── cache.py            # Hash-keyed JSON cache (sharded)
@@ -220,8 +229,13 @@ abs-census-augmentor/
 │           └── nominatim.py        # NominatimGeocoder (Tier 4); fallback
 ├── tools/                          # Real-data verification (see §17) + demo rendering
 │   ├── README.md
-│   ├── fetch_real_data.py
-│   ├── verify_real_parsers.py
+│   ├── fetch_real_data.py          # Download real ABS/G-NAF artefacts into the cache
+│   ├── verify_real_parsers.py      # Exercise every parser against the live sources
+│   ├── probe_new_datasets.py       # Re-runnable schema probe for new upstreams (Real Data First)
+│   ├── generate_dss_sa2_5to9.py    # Regenerate the DSS 5→9-digit SA2 mapping
+│   ├── inspect_seifa_2016.py       # One-off SEIFA 2016 schema probe
+│   ├── inspect_gcp_2016.py         # One-off GCP 2016 schema probe
+│   ├── profile_run.py              # Pipeline profiling helper
 │   └── demo/                       # VHS scripts + Dockerfile for README GIFs
 │       ├── Dockerfile
 │       ├── demo.tape
@@ -230,7 +244,7 @@ abs-census-augmentor/
 │       └── input.csv
 └── tests/                          # Hermetic test suite (no real network)
     ├── conftest.py                 # Shared fixtures (synthetic SA2 + DataPack + G-NAF)
-    └── test_*.py                   # 24 files, ~515 tests as of v1.4.1
+    └── test_*.py                   # 36 files, ~785 tests as of v2.4.0
 ```
 
 Wheel installs additionally see (force-included from `datasets/` and `features/`

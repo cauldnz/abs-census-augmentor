@@ -118,9 +118,7 @@ class AbsBaDataSource:
         self._chunk_size = chunk_size
         self._timeout = timeout
         self._resolved_release: str | None = None
-        # Resolved month suffix and per-state file URLs cached after
-        # _resolve_release() runs once.
-        self._yyyymm: str | None = None
+        # Per-state file URLs cached after _resolve_release() runs once.
         self._state_urls: dict[str, str] = {}
 
     # ---- DatasetFetcher protocol --------------------------------------
@@ -343,7 +341,6 @@ class AbsBaDataSource:
             self._state_urls[state] = entry[1]
 
         self._resolved_release = chosen_label
-        self._yyyymm = latest_yyyymm
         _log.info(
             "Resolved ABS BA release=%s (series=%s, yyyymm=%s, %d states)",
             chosen_label,
