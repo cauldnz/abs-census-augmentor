@@ -9,6 +9,37 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-01 (late)
+
+Third same-day follow-up release, bundling two user-facing additions
+that landed after v2.3.0.
+
+### Headlines
+
+- **GCP 2011 unlock (user-supplied DataPack ZIP).** The 2011 GCP / BCP
+  DataPack lives behind ABS's login wall with no public direct URL; the
+  parser machinery handles it fine but auto-fetch couldn't. New
+  `local_zip` constructor parameter on `DataPacksDataSource`, a
+  `CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP` environment variable, and a
+  pre-staged-cache-path fallback all let power users plug in a
+  manually-downloaded ZIP. SEIFA 2011 was the only usable Edition 1
+  dataset before; GCP 2011 now joins it.
+- **Three ABS Building Approvals PRESETs** — `housing_supply_rate`
+  (new dwellings per 1,000 residents), `pct_apartment_approvals`
+  (apartment share of new dwellings), `mean_dwelling_approval_value`
+  (mean build cost per dwelling, $). Catalogue now has 17 PRESETs.
+- **PRESET `scale` multiplier** — new optional `scale: float = 1.0`
+  field on `FeatureSpec`, applied after the percentage `× 100` and
+  before bounds. Lets "per N" rate metrics and unit conversions express
+  their natural unit. Default `1.0` is a no-op; all pre-existing PRESETs
+  unaffected.
+
+### Stats
+
+- 785 tests passing (was 770 at v2.3.0)
+- 0 open issues, 0 open PRs at release time
+- No breaking changes — fully backwards-compatible with v2.3.0
+
 ### Added — three ABS Building Approvals PRESETs + `scale` multiplier
 
 Three new derived-feature PRESETs sourced from the SA2-native
