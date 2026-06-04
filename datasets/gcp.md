@@ -135,6 +135,50 @@ release's metadata; consult the catalog for definitive resolution.
   files in some releases. The parser filters strictly by SA2 code
   length (= 9) so they don't leak into the join.
 
+### GCP 2011 — user-supplied ZIP fallback (v2.3.0+)
+
+The 2011 GCP DataPack lives behind ABS's login wall at
+``https://www.censusdata.abs.gov.au/datapacks`` with no public direct
+URL. The augmentor's auto-fetch can't ride that, but the parser
+machinery itself handles the 2011 release fine (same shape as 2016 /
+2021). Power users who manually download the ZIP can plug it in two
+ways:
+
+**Option 1 — `local_zip` constructor parameter:**
+
+```python
+from pathlib import Path
+from census_augment.config import CensusConfig
+from census_augment.data_sources.datapacks import DataPacksDataSource
+
+ds = DataPacksDataSource(
+    census=CensusConfig(year=2011, asgs_edition=1, datum="GDA94"),
+    base_url=...,  # doesn't matter; not contacted
+    root=<cache_root> / "census" / "2011",
+    local_zip=Path("~/Downloads/2011_BCP_SA2_for_AUS_short-header.zip").expanduser(),
+)
+```
+
+**Option 2 — `CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP` environment variable:**
+
+```bash
+export CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP=~/Downloads/2011_BCP_SA2_for_AUS_short-header.zip
+census-augment run --config config-2011.yaml
+```
+
+**Option 3 — drop it at the expected cache path:**
+
+If the user manually copies the ZIP to
+``<cache_root>/census/2011/2011_BCP_SA2_for_AUS_short-header.zip``,
+the standard ``fetch()`` skips the download and uses the cached file.
+No config changes needed.
+
+In all three cases, the rest of the parser (extract → CSV / metadata
+parse → table load) is unchanged from the 2016 / 2021 paths.
+``temporal`` mode reads 2011 from the ASGS Edition 1 boundary
+(2,214 SA2s, GDA94 / EPSG:4283) — see ``edition_1_spec()`` in
+``data_sources/_edition.py``.
+
 ## Suppression / privacy notes
 
 - ABS applies random perturbation to small counts in GCP. Sub-totals

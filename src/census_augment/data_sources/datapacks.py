@@ -1,10 +1,34 @@
-"""Census DataPack download, extraction, and metadata parsing (spec §4.2)."""
+"""Census DataPack download, extraction, and metadata parsing (spec §4.2).
+
+User-supplied ZIP fallback (added v2.3.0+): some ABS Census releases —
+specifically the 2011 GCP/BCP DataPack — live behind ABS's login wall
+at ``https://www.censusdata.abs.gov.au/datapacks`` with no public
+direct URL. The augmentor's auto-fetch can't ride that. The ``local_zip``
+constructor parameter (and the equivalent
+``CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP`` environment variable) accept the
+path to a manually-downloaded ZIP and copy it into the standard cache
+location so the rest of the parser machinery (extract + CSV / metadata
+load) just works. The ZIP filename's contents don't need to match the
+expected name; the local file is copied to ``<root>/<expected_name>.zip``
+so subsequent runs find it via the standard cache check.
+
+Equivalently — and the simpler power-user path — anyone can drop the
+ZIP at ``<root>/<expected_filename>`` themselves and ``fetch()`` will
+use it: the new ``zip_path.exists()`` check before the download skips
+the network call when the ZIP is already on disk.
+
+See ``BACKLOG.md`` "User-supplied DataPack ZIP fallback" for the
+design rationale and ``datasets/gcp.md`` for the GCP 2011 unlock
+documentation.
+"""
 
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 import re
+import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +38,13 @@ import requests
 
 from ..config import CensusConfig
 from ._base import _AbsZipDataSource
+
+# Environment variable name for the local-ZIP fallback. Per-process /
+# per-config, so users running multiple census years can set it on a
+# per-invocation basis without it leaking into unrelated DataPack
+# fetches (the ZIP filename has to match the expected name for the
+# requested year anyway, so any mismatch fails loudly at extract time).
+_LOCAL_ZIP_ENV_VAR = "CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP"
 
 _log = logging.getLogger(__name__)
 
@@ -157,6 +188,7 @@ class DataPacksDataSource(_AbsZipDataSource):
         session: requests.Session | None = None,
         chunk_size: int = 1024 * 1024,
         timeout: float = 600.0,
+        local_zip: Path | None = None,
     ) -> None:
         super().__init__(
             base_url=base_url,
@@ -166,6 +198,15 @@ class DataPacksDataSource(_AbsZipDataSource):
             timeout=timeout,
         )
         self._census = census
+        # Optional user-supplied ZIP path (v2.3.0+). When provided, the
+        # fetcher copies the file into the standard cache location and
+        # skips the HTTP download. Falls back to the
+        # CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP env var if the constructor
+        # arg is None — same precedence as the cache-dir env var.
+        env_value = os.environ.get(_LOCAL_ZIP_ENV_VAR)
+        if local_zip is None and env_value:
+            local_zip = Path(env_value)
+        self._local_zip: Path | None = local_zip
 
     @property
     def filename(self) -> str:
@@ -176,10 +217,76 @@ class DataPacksDataSource(_AbsZipDataSource):
         return bool(self._table_csvs())
 
     def fetch(self, refresh: bool = False) -> Path:
+        """Ensure the DataPack is available locally; return the extract dir.
+
+        Resolution order (added v2.3.0+ — pre-v2.3.0 only had the
+        ``_download()`` path):
+
+        1. If extracted CSVs are already in the cache and ``refresh`` is
+           False, use them (existing behaviour).
+        2. Else if a ``local_zip`` was provided (constructor arg or
+           ``CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP`` env var), copy it into
+           the standard cache location and extract from there.
+        3. Else if the expected ZIP file is already at ``self.zip_path``
+           (e.g. the user dropped it there manually), extract from
+           there — skip the HTTP download.
+        4. Otherwise download from ``self.url`` via ``_download()``
+           (existing behaviour).
+
+        Steps 2 + 3 are the GCP 2011 unlock path: that DataPack lives
+        behind ABS's login wall and can't be auto-fetched, but users
+        who manually download from the portal can drop the ZIP into the
+        cache and the rest of the parser machinery works unchanged.
+        """
         if not refresh and self.is_cached():
             _log.debug("Using cached DataPack at %s", self.extract_dir)
             return self.extract_dir
-        self._download()
+
+        # Decide where the ZIP comes from. Three mutually-exclusive
+        # branches:
+        #   1. User-supplied local_zip (constructor arg or env var) →
+        #      copy into cache, skip network. Re-copies on refresh.
+        #   2. ZIP already at the standard cache path (e.g. pre-staged
+        #      by the user or left from a previous run) → skip network.
+        #      Bypassed by refresh=True so that path forces a re-fetch.
+        #   3. Otherwise: HTTP download via _download().
+        if self._local_zip is not None:
+            src = Path(self._local_zip)
+            if not src.exists():
+                raise FileNotFoundError(
+                    f"local_zip path {src} does not exist. Check the "
+                    f"`local_zip=` constructor argument or the "
+                    f"{_LOCAL_ZIP_ENV_VAR!r} environment variable."
+                )
+            if not src.is_file():
+                raise ValueError(
+                    f"local_zip path {src} is not a file (must point at a single .zip archive)."
+                )
+            # Only copy if we need to (no cached ZIP, or refresh requested).
+            if refresh or not self.zip_path.exists():
+                self._root.mkdir(parents=True, exist_ok=True)
+                _log.info(
+                    "Copying user-supplied DataPack ZIP from %s to %s",
+                    src,
+                    self.zip_path,
+                )
+                shutil.copy2(src, self.zip_path)
+            else:
+                _log.debug(
+                    "Local-zip supplied but cached copy at %s is current "
+                    "(use refresh=True to overwrite)",
+                    self.zip_path,
+                )
+        elif not refresh and self.zip_path.exists():
+            # Pre-staged ZIP — the lighter-touch unlock path. Skip
+            # download. This is the new v2.3.0 short-circuit.
+            _log.debug(
+                "Using existing DataPack ZIP at %s (skipping download)",
+                self.zip_path,
+            )
+        else:
+            self._download()
+
         self._extract()
         if not self.is_cached():
             raise RuntimeError(

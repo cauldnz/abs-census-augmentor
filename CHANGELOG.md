@@ -9,6 +9,45 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — user-supplied DataPack ZIP fallback (GCP 2011 unlock)
+
+Unlocks ABS Census 2011 GCP / BCP DataPacks for power users. The 2011
+release lives behind ABS's login wall at
+``https://www.censusdata.abs.gov.au/datapacks`` with no public direct
+URL — the augmentor's auto-fetch can't ride that, but the parser
+machinery itself handles the 2011 release fine (same XLSX metadata
+shape as 2016 / 2021). Until now, the only Edition 1 dataset usable
+was SEIFA 2011 (shipped in v2.0.0 / Phase F.6); GCP 2011 was blocked
+on the auto-fetch step.
+
+Three ways to use the fallback, in precedence order:
+
+1. **`local_zip` constructor parameter** on `DataPacksDataSource` —
+   most explicit. The fetcher copies the user-supplied file into the
+   standard cache location and skips the HTTP download.
+2. **`CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP` environment variable** —
+   path-pointer fallback when the constructor arg isn't provided.
+3. **Pre-stage at the standard cache path** —
+   `<cache_root>/census/<year>/<expected_filename>.zip`. The new
+   ``zip_path.exists()`` check before the download skips the network
+   call when the ZIP is already on disk. Lightest-touch unlock; no
+   config changes needed.
+
+Backwards-compatible: existing flows that rely on `_download()` are
+unchanged. Refresh semantics: `refresh=True` with `local_zip` re-copies
+from the source (overwriting the cached ZIP); `refresh=True` without
+`local_zip` still triggers a network download as before.
+
+**Tests:** 7 new in `tests/test_datapacks.py` covering all three
+paths, precedence (constructor arg > env var), refresh semantics, and
+error paths (nonexistent file → clear `FileNotFoundError`, directory
+not file → `ValueError`).
+
+**Spec / docs:** `datasets/gcp.md` documents the three usage patterns
+with example code. The `BACKLOG.md` "User-supplied DataPack ZIP
+fallback" item that's been deferred since v1.6 (Phase F.5 / 2026-05-29)
+is now closed.
+
 ## [2.3.0] - 2026-06-01 (evening)
 
 Same-day follow-up to v2.2.0 (released a few hours earlier on the same
