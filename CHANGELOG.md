@@ -9,6 +9,48 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-01 (evening)
+
+Same-day follow-up to v2.2.0 (released a few hours earlier on the same
+day). Lands the first production consumer of v2.2.0's
+`LgaSa2Correspondence`, real-source drift detection for the LGA
+boundary, plus a small docs / verify-script cleanup pair.
+
+### Headlines
+
+- **New dataset: ABS Building Approvals at LGA** (`abs_building_approvals_lga`).
+  First production dataset to exercise v2.2.0's `LgaSa2Correspondence`
+  machinery against real ABS data. LGA-keyed sibling to the existing
+  SA2-native `abs_building_approvals` (both ABS publications of
+  catalogue 8731.0); can coexist in one config under separate
+  namespaces (`ABS_BA` vs `ABS_BA_LGA`). Real-Data-First found the
+  cube's data sheet is named `Table 1` (with space) vs the SA2 cube's
+  `Table_1` (with underscore) — would have silently broken a
+  copy-paste parser.
+- **Pipeline.from_config wires the LGA-SA2 correspondence
+  automatically** when any `ABS_BA_LGA.*` variable is referenced.
+  Boundary fetch + ~30 s geometric intersection runs once per
+  (SA2 release, LGA release) pair; parquet-cached for instant re-init.
+  Pipelines without LGA vars pay zero LGA cost.
+- **LGA boundary drift detection** — `tools/fetch_real_data.py` now
+  fetches the LGA boundary by default (opt-out via `--skip-lga`);
+  `tools/verify_real_parsers.py` has a new self-skipping smoke that
+  catches future ABS-side changes to the LGA shapefile schema.
+- **#108 fix** — `tools/verify_real_parsers.py` was routing
+  cross-dataset PRESET refs through the GCP-only `VariableCatalog`;
+  split into GCP / non-GCP resolution paths. False-positive flood that
+  the weekly drift workflow surfaced on the morning of 2026-06-01.
+- **Docs hygiene** — `BACKLOG.md` session checkpoint and `spec.md`
+  §20.6 active registry table caught up with the v2.0.0 → v2.2.0 ship
+  sequence (incl. stale `ato_personal_income` → `abs_personal_income`
+  rename in the registry table).
+
+### Stats
+
+- 770 tests passing (was 758 at v2.2.0; +12 in the LGA dataset PR)
+- 0 open issues, 0 open PRs at release time
+- No breaking changes — fully backwards-compatible with v2.2.0
+
 ### Added — ABS Building Approvals LGA dataset (`abs_building_approvals_lga`)
 
 First production dataset to exercise the v2.2.0 `LgaSa2Correspondence`
