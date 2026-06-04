@@ -38,6 +38,7 @@ import responses
 
 from census_augment.datasets import registry
 from census_augment.datasets._abs_ba import ABS_BA_LANDING_URL, AbsBaDataSource
+from census_augment.datasets._abs_ba_lga import AbsBaLgaDataSource
 from census_augment.datasets._abs_pia import ATO_LANDING_URL, AbsPiaDataSource
 from census_augment.datasets._aihw_mh import (
     _AIHW_RX_URLS_BY_RELEASE,
@@ -57,6 +58,13 @@ from census_augment.datasets._seifa import DEFAULT_SEIFA_2021_URL, SeifaDataSour
 # own test fixture is updated and this test inherits the change.
 from tests.test_dataset_abs_ba import _make_landing_html as _ba_landing_html
 from tests.test_dataset_abs_ba import _make_state_xlsx
+from tests.test_dataset_abs_ba_lga import (
+    _make_landing_html as _ba_lga_landing_html,
+)
+from tests.test_dataset_abs_ba_lga import (
+    _make_lga_state_xlsx,
+    _make_synthetic_correspondence,
+)
 from tests.test_dataset_abs_pia import _make_ato_xlsx
 from tests.test_dataset_aihw_mh import _full_sa4_rows, _make_aihw_zip
 from tests.test_dataset_abs_pia import _make_landing_html as _pia_landing_html
@@ -314,6 +322,55 @@ def test_spec_matches_fetcher__abs_building_approvals(tmp_path: Path) -> None:
     _check_spec_matches("abs_building_approvals", set(df.columns))
 
 
+# ---- ABS Building Approvals (LGA → SA2 downscale) --------------------------
+
+
+@responses.activate
+def test_spec_matches_fetcher__abs_building_approvals_lga(tmp_path: Path) -> None:
+    """ABS BA LGA spec ⊆ ``AbsBaLgaDataSource.load().columns``.
+
+    The dataset is LGA-keyed; we attach a synthetic
+    :class:`LgaSa2Correspondence` so the fetcher's load() can downscale
+    to SA2-keyed output matching the rest of the registry contract.
+    """
+    responses.add(
+        responses.GET,
+        ABS_BA_LANDING_URL,
+        body=_ba_lga_landing_html("202603"),
+        status=200,
+    )
+
+    base = (
+        "https://www.abs.gov.au/statistics/industry/building-and-construction/"
+        "building-approvals-australia/mar-2026/"
+    )
+    # Full record so every spec'd column lands in the output
+    full_record = {
+        "new_houses_count": 100,
+        "new_other_residential_building_count": 50,
+        "total_dwellings_count": 150,
+        "value_new_houses": 60_000,
+        "value_new_other_residential_building": 25_000,
+        "value_alterations_additions_conversions": 10_000,
+        "value_total_residential_building": 95_000,
+        "value_non_residential_building": 30_000,
+        "value_total_building": 125_000,
+    }
+    for product in ("do004", "do008", "do012", "do016", "do020", "do024", "do028", "do032"):
+        records = [("10500", full_record)] if product == "do004" else []
+        responses.add(
+            responses.GET,
+            f"{base}87310{product}_202603.xlsx",
+            body=_make_lga_state_xlsx(lga_records=records),
+            status=200,
+        )
+
+    ds = AbsBaLgaDataSource(root=tmp_path / "abs-ba-lga-cache")
+    ds.attach_correspondence(_make_synthetic_correspondence({"10500": [("206011001", 1.0)]}))
+    df = ds.load()
+    _check_spec_matches("abs_building_approvals_lga", set(df.columns))
+
+
 # ---- AIHW Mental Health Prescriptions --------------------------------------
 
 
@@ -354,6 +411,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "abs_personal_income",
         "seifa",
         "abs_building_approvals",
+        "abs_building_approvals_lga",
         "aihw_mh_prescriptions",
     }
     intentionally_skipped = {
