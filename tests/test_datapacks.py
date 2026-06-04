@@ -665,3 +665,182 @@ def test_metadata_cache_keyed_by_descriptor_mode(
     long_cache = xlsx.with_name(xlsx.name + ".long-header.parsed.pkl")
     assert short_cache.exists()
     assert not long_cache.exists(), "long-header cache shouldn't exist yet"
+
+
+# ---------- user-supplied local ZIP fallback (v2.3.0+) ------------------
+#
+# GCP 2011 lives behind ABS's censusdata.abs.gov.au login wall — no
+# public direct URL. The local-zip path lets users manually download the
+# ZIP and have the rest of the pipeline work. Tested with three
+# scenarios:
+#
+# 1. ``local_zip`` constructor arg pointing at an existing file
+# 2. ``CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP`` env var
+# 3. ZIP pre-staged at the standard cache path (no ``local_zip`` needed)
+#
+# All three must skip the HTTP download. Error paths (missing file,
+# directory not file) are also covered.
+
+
+@responses.activate
+def test_fetch_uses_local_zip_constructor_arg(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """``local_zip`` constructor arg points at a user-downloaded ZIP.
+    The fetcher must copy it into the cache and skip the HTTP download.
+    """
+    # NOTE: no ``responses.add`` for the URL — if the fetcher tries to
+    # download, the ``@responses.activate`` decorator will raise a
+    # ConnectionError because no mock matches the URL. That's exactly
+    # what we want: a network attempt = test failure.
+    local_zip = tmp_path / "downloaded-from-abs-portal.zip"
+    local_zip.write_bytes(fake_datapack_zip_bytes)
+
+    census = CensusConfig()
+    ds = DataPacksDataSource(
+        census=census,
+        base_url=BASE_URL,
+        root=tmp_path / "data" / "census",
+        local_zip=local_zip,
+    )
+    extract_dir = ds.fetch()
+
+    assert extract_dir.exists()
+    assert ds.is_cached()
+    # ZIP is now at the standard cache path under the expected filename.
+    assert ds.zip_path.exists()
+    assert ds.zip_path.read_bytes() == fake_datapack_zip_bytes
+    # And no network call was made.
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_fetch_uses_local_zip_env_var(
+    tmp_path: Path,
+    fake_datapack_zip_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP`` env var as the fallback
+    when no ``local_zip`` constructor arg is given.
+    """
+    local_zip = tmp_path / "from-env-var.zip"
+    local_zip.write_bytes(fake_datapack_zip_bytes)
+    monkeypatch.setenv("CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP", str(local_zip))
+
+    ds = _make_data_source(tmp_path)
+    extract_dir = ds.fetch()
+
+    assert extract_dir.exists()
+    assert ds.is_cached()
+    assert ds.zip_path.read_bytes() == fake_datapack_zip_bytes
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_fetch_constructor_arg_wins_over_env_var(
+    tmp_path: Path,
+    fake_datapack_zip_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit ``local_zip`` constructor arg overrides the env var —
+    consistent with how other config-vs-env precedence works in this
+    codebase.
+    """
+    arg_zip = tmp_path / "constructor.zip"
+    env_zip = tmp_path / "env-var.zip"
+    arg_zip.write_bytes(fake_datapack_zip_bytes)
+    env_zip.write_bytes(b"different-content-should-NOT-be-used")
+    monkeypatch.setenv("CENSUS_AUGMENT_DATAPACK_LOCAL_ZIP", str(env_zip))
+
+    census = CensusConfig()
+    ds = DataPacksDataSource(
+        census=census,
+        base_url=BASE_URL,
+        root=tmp_path / "data" / "census",
+        local_zip=arg_zip,
+    )
+    ds.fetch()
+    # Cached zip is the constructor-arg content, not the env-var one.
+    assert ds.zip_path.read_bytes() == fake_datapack_zip_bytes
+
+
+@responses.activate
+def test_fetch_skips_download_when_zip_already_at_cache_path(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """Power-user path: drop the ZIP at ``<root>/<expected_filename>``
+    directly. ``fetch()`` must use it without any ``local_zip`` config.
+
+    This is the lighter-touch unlock — no env var, no constructor arg,
+    just put the ZIP where ``fetch()`` would download it to.
+    """
+    ds = _make_data_source(tmp_path)
+    # Pre-stage the ZIP at the standard cache location.
+    ds._root.mkdir(parents=True, exist_ok=True)
+    ds.zip_path.write_bytes(fake_datapack_zip_bytes)
+
+    extract_dir = ds.fetch()
+    assert extract_dir.exists()
+    assert ds.is_cached()
+    # No network call.
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_fetch_local_zip_nonexistent_raises_loudly(tmp_path: Path) -> None:
+    """If ``local_zip`` points at a nonexistent file, fail loud with a
+    clear message — don't silently fall back to download.
+    """
+    missing = tmp_path / "does-not-exist.zip"
+    census = CensusConfig()
+    ds = DataPacksDataSource(
+        census=census,
+        base_url=BASE_URL,
+        root=tmp_path / "data" / "census",
+        local_zip=missing,
+    )
+    with pytest.raises(FileNotFoundError, match="local_zip path"):
+        ds.fetch()
+
+
+@responses.activate
+def test_fetch_local_zip_is_directory_raises(tmp_path: Path) -> None:
+    """``local_zip`` pointing at a directory rather than a file fails
+    fast with an actionable error.
+    """
+    dir_path = tmp_path / "not-a-file"
+    dir_path.mkdir()
+    census = CensusConfig()
+    ds = DataPacksDataSource(
+        census=census,
+        base_url=BASE_URL,
+        root=tmp_path / "data" / "census",
+        local_zip=dir_path,
+    )
+    with pytest.raises(ValueError, match="not a file"):
+        ds.fetch()
+
+
+@responses.activate
+def test_fetch_refresh_with_local_zip_recopies(
+    tmp_path: Path, fake_datapack_zip_bytes: bytes
+) -> None:
+    """``refresh=True`` re-applies the user-supplied ZIP rather than
+    downloading from the network. Useful when ABS publishes a new
+    release behind the login wall and the user updates their local
+    copy.
+    """
+    local_zip = tmp_path / "user-zip.zip"
+    local_zip.write_bytes(fake_datapack_zip_bytes)
+    census = CensusConfig()
+    ds = DataPacksDataSource(
+        census=census,
+        base_url=BASE_URL,
+        root=tmp_path / "data" / "census",
+        local_zip=local_zip,
+    )
+    ds.fetch()
+    # Update the user's local ZIP and refresh.
+    local_zip.write_bytes(fake_datapack_zip_bytes)
+    ds.fetch(refresh=True)
+    assert len(responses.calls) == 0

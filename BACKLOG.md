@@ -87,11 +87,10 @@ Candidates by ROI when motivated:
    SA2 in v2.2.0, but LGA would exercise the new correspondence
    pipeline). ~1-2 hours.
 
-2. **User-supplied DataPack ZIP fallback** for GCP 2011 unlock —
-   ~2 hours of clean engineering, concrete shape spelled out in the
-   "User-supplied DataPack ZIP fallback" section below. Power-user
-   unlock for the only Edition 1 dataset (GCP 2011) that's still
-   behind ABS's login wall.
+2. ~~**User-supplied DataPack ZIP fallback** for GCP 2011 unlock~~.
+   Shipped post-v2.3.0. `local_zip` parameter, env var, and pre-staged-
+   cache-path support all wired. See CHANGELOG "Added — user-supplied
+   DataPack ZIP fallback (GCP 2011 unlock)".
 
 3. **Address-retirement awareness** (Phase G refinement,
    spec-temporal.md §17 deferred): "address X existed in 2018, retired
