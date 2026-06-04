@@ -393,3 +393,126 @@ def test_pct_aged_65_plus_against_synthetic_gcp_data() -> None:
     result = FeatureEvaluator(spec).evaluate(df)
     # (200+100+50) / 2000 = 17.5%
     assert result.iloc[0] == 17.5
+
+
+# ---- scale multiplier (spec §21.3) -------------------------------------
+
+
+def test_scale_defaults_to_one_no_op() -> None:
+    """A spec without an explicit `scale` defaults to 1.0 — no change to
+    the computed ratio. Backwards-compat guard for every pre-scale PRESET.
+    """
+    spec = _make_spec()
+    assert spec.scale == 1.0
+    df = _make_df(**{"G62.num": [50.0], "G62.den": [100.0]})
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == 50.0  # plain percentage, unscaled
+
+
+def test_scale_multiplies_rate() -> None:
+    """`scale: 1000` on a rate turns a tiny raw ratio into a per-1,000
+    figure. 5 dwellings / 1000 residents → 0.005 × 1000 = 5.0.
+    """
+    spec = _make_spec(output_kind="rate", bounds=None, scale=1000.0)
+    df = _make_df(**{"G62.num": [5.0], "G62.den": [1000.0]})
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(5.0)
+
+
+def test_scale_applies_after_percentage_multiply() -> None:
+    """When both percentage and scale are set, scale is applied after the
+    ×100. (Rare combination, but the order is defined.) 0.5 ratio →
+    ×100 = 50 → ×2 scale = 100.
+    """
+    spec = _make_spec(output_kind="percentage", bounds=None, scale=2.0)
+    df = _make_df(**{"G62.num": [50.0], "G62.den": [100.0]})
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(100.0)
+
+
+def test_scale_applied_before_bounds() -> None:
+    """Bounds are checked in the scaled unit. With scale=1000 and the
+    raw ratio 0.005, the scaled value 5.0 is inside [0, 10] — no clip.
+    """
+    spec = _make_spec(
+        output_kind="rate",
+        bounds=[0, 10],
+        scale=1000.0,
+        edge_cases={
+            "zero_denominator": "null",
+            "perturbation_tolerance": "warn_only",
+            "out_of_bounds_behaviour": "clip",
+        },
+    )
+    df = _make_df(**{"G62.num": [5.0], "G62.den": [1000.0]})
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(5.0)  # inside bounds, not clipped
+
+
+def test_scale_null_denominator_still_null() -> None:
+    """Scale doesn't resurrect a null — a zero denominator yields null
+    regardless of the multiplier."""
+    spec = _make_spec(output_kind="rate", bounds=None, scale=1000.0)
+    df = _make_df(**{"G62.num": [5.0], "G62.den": [0.0]})
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert pd.isna(result.iloc[0])
+
+
+# ---- ABS BA PRESETs end-to-end -----------------------------------------
+
+
+def test_housing_supply_rate_against_synthetic_abs_ba_data() -> None:
+    """housing_supply_rate = total_dwellings / population × 1000.
+    150 dwellings / 30,000 residents = 0.005 × 1000 = 5.0 per 1,000.
+    """
+    spec = features.get("housing_supply_rate")
+    assert spec.scale == 1000.0
+    df = pd.DataFrame(
+        {
+            "ABS_BA.total_dwellings_count": [150.0],
+            "ERP.population_total": [30_000.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(5.0)
+
+
+def test_pct_apartment_approvals_against_synthetic_abs_ba_data() -> None:
+    """pct_apartment_approvals = other_residential / total_dwellings × 100.
+    90 apartments / 150 total dwellings = 60%.
+    """
+    spec = features.get("pct_apartment_approvals")
+    df = pd.DataFrame(
+        {
+            "ABS_BA.new_other_residential_building_count": [90.0],
+            "ABS_BA.total_dwellings_count": [150.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(60.0)
+
+
+def test_mean_dwelling_approval_value_against_synthetic_abs_ba_data() -> None:
+    """mean_dwelling_approval_value = (value_houses + value_other) /
+    total_dwellings × 1000 (converting $'000 to dollars).
+    ($60,000k house value + $30,000k apartment value) / 150 dwellings
+    = $600k per dwelling in $'000 × 1000 = $600,000.
+    """
+    spec = features.get("mean_dwelling_approval_value")
+    assert spec.scale == 1000.0
+    df = pd.DataFrame(
+        {
+            "ABS_BA.value_new_houses": [60_000.0],  # $'000
+            "ABS_BA.value_new_other_residential_building": [30_000.0],  # $'000
+            "ABS_BA.total_dwellings_count": [150.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    # (60000 + 30000) / 150 = 600 ($'000 per dwelling) × 1000 = 600,000
+    assert result.iloc[0] == pytest.approx(600_000.0)

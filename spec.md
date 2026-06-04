@@ -1019,6 +1019,7 @@ id: pct_drive_to_work
 status: proposed | active | deprecated
 output_kind: percentage | ratio | rate | scalar | index
 bounds: [0, 100]
+scale: 1.0          # optional, default 1.0; see §21.3
 dataset: gcp
 default: false
 tags: [transport, employment]
@@ -1088,6 +1089,16 @@ doesn't need geocoding.
 - **Bounds:** `clip` clamps to the declared bounds, `warn` (default) logs a
   WARNING when out of bounds, `error` raises. `bounds: warn` is the right
   default because clipping silently masks denominator-mismatch bugs.
+- **Scale (`scale: <float>`, default `1.0`):** a fixed multiplier applied to
+  the computed `numerator / denominator` ratio. Lets "per N" rate metrics
+  express their natural unit instead of a tiny raw ratio. Examples:
+  `scale: 1000` for a "per 1,000 residents" rate (so the headline number
+  reads as `5.2` rather than `0.0052`); `scale: 100000` for "per 100,000".
+  Applied **after** the `× 100` percentage multiply (so `percentage` +
+  `scale` compose, though that combination is rarely meaningful). `scale`
+  is multiplied in before bounds checking, so `bounds:` are interpreted in
+  the scaled unit. Default `1.0` is a no-op — every pre-existing PRESET is
+  unaffected.
 
 ### 21.4 PRESET catalogue
 
@@ -1116,6 +1127,22 @@ landed once the ERP age/sex columns shipped (see CHANGELOG entry for
 These exercise the `dataset:` front-matter accepting a list — the
 namespace-based dispatch in `enrich.py` fans out to multiple
 registered fetchers transparently.
+
+ABS Building Approvals features (sourced from `abs_building_approvals`,
+plus `erp_by_sa2` for the per-capita rate), landed once the SA2-native
+ABS BA dataset shipped (v2.1.0):
+
+- `housing_supply_rate` — ABS_BA.total_dwellings_count / ERP.population_total,
+  `scale: 1000` (new dwelling approvals per 1,000 residents per FY)
+- `pct_apartment_approvals` — ABS_BA.new_other_residential_building_count /
+  ABS_BA.total_dwellings_count (share of new dwellings that are
+  apartments / units / townhouses rather than free-standing houses)
+- `mean_dwelling_approval_value` — (ABS_BA.value_new_houses +
+  ABS_BA.value_new_other_residential_building) / ABS_BA.total_dwellings_count,
+  `scale: 1000` (mean construction value per new dwelling, $'000 → dollars)
+
+`housing_supply_rate` and `mean_dwelling_approval_value` are the first
+PRESETs to use the `scale:` multiplier (§21.3).
 
 ### 21.5 Versioning to GCP release
 
