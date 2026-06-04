@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import io
 import logging
-import re
 import zipfile
 from pathlib import Path
 
@@ -382,8 +381,3 @@ def _register() -> None:
 
 
 _register()
-
-
-# Silence the unused-import lint on the regex import — kept for symmetry
-# with the other dataset modules even when not currently used here.
-_ = re

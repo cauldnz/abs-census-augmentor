@@ -22,9 +22,9 @@ Augment Australian location datasets with ABS Census data at the SA2 statistical
 Input → Geocoding (G-NAF tiered → Nominatim) → SA2 (MB fast path → spatial fallback) → Census Enrichment → Output
 ```
 
-For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in, and merges in your chosen variables from any registered dataset. G-NAF Core, ASGS boundaries, Census DataPacks, SEIFA / ERP / DSS / ATO, and Nominatim responses all cache locally so re-runs are fast.
+For each location row, the pipeline resolves coordinates (using your input lat/lon if present, else geocoding the address through G-NAF's three offline match tiers and falling back to Nominatim), looks up which SA2 the point falls in, and merges in your chosen variables from any registered dataset. G-NAF Core, ASGS boundaries, Census DataPacks, the registered datasets, and Nominatim responses all cache locally so re-runs are fast.
 
-The 2021 GCP DataPack is one entry in a registry alongside SEIFA, ERP, DSS, and ATO sources — plus six curated PRESET ratios (`pct_renters`, `pct_drive_to_work`, …) that bake in the right denominators. Declare them in one line: `variables: {pct_renters: PRESET.pct_renters}`.
+The GCP DataPack is one entry in a registry alongside SEIFA, ERP (regional population), DSS (welfare payments), ABS Personal Income, ABS Building Approvals (at both SA2 and LGA granularity), and AIHW Mental Health Prescriptions — plus a dozen-plus curated PRESET ratios (`pct_renters`, `pct_drive_to_work`, `housing_supply_rate`, …) that bake in the right denominators. Declare them in one line: `variables: {pct_renters: PRESET.pct_renters}`.
 
 ## See it in action
 

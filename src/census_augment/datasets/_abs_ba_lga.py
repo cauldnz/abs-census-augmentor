@@ -114,7 +114,6 @@ class AbsBaLgaDataSource:
         self._chunk_size = chunk_size
         self._timeout = timeout
         self._resolved_release: str | None = None
-        self._yyyymm: str | None = None
         self._state_urls: dict[str, str] = {}
         # LGA-SA2 correspondence; attached via ``attach_correspondence``.
         # None means "not yet attached" — load() raises until it's set.
@@ -307,7 +306,6 @@ class AbsBaLgaDataSource:
         # were warned above; LGAs in corr but not in source just contribute
         # zero to those SA2s (handled implicitly by reindex below).
         joined = weights.merge(lga_df, left_on="lga_code", right_index=True, how="inner")
-        share = joined["sa2_share_of_lga"].astype("float64")
         per_sa2_records: dict[str, dict[str, float]] = {}
         for sa2_code, group in joined.groupby("sa2_code"):
             sa2_record: dict[str, float] = {}
@@ -318,9 +316,6 @@ class AbsBaLgaDataSource:
                 contribution = (group[col].astype("float64") * group_share).sum()
                 sa2_record[col] = float(contribution)
             per_sa2_records[str(sa2_code)] = sa2_record
-        # Silence unused-variable lint — `share` was unpacked for clarity
-        # but the actual computation happens in the loop above.
-        _ = share
 
         if not per_sa2_records:
             raise RuntimeError(
@@ -416,7 +411,6 @@ class AbsBaLgaDataSource:
             self._state_urls[state] = entry[1]
 
         self._resolved_release = chosen_label
-        self._yyyymm = latest_yyyymm
         _log.info(
             "Resolved ABS BA LGA release=%s (series=%s, yyyymm=%s, %d states)",
             chosen_label,

@@ -87,8 +87,8 @@ def _is_gcp_variable_ref(ref: str) -> bool:
 
     Used by :meth:`Pipeline.from_config` to split user-supplied variable
     refs into GCP-vs-non-GCP for validation. Non-GCP refs (SEIFA, ERP,
-    DSS, ATO, PRESET, ...) are validated lazily by the enricher and
-    registry.
+    DSS, ABS_PIA, ABS_BA, AIHW_MHP, PRESET, ...) are validated lazily by
+    the enricher and registry.
     """
     if "." not in ref:
         return False
@@ -562,9 +562,10 @@ class Pipeline:
         )
         catalog = VariableCatalog.from_data_source(datapacks_ds)
         # Pre-validate only the GCP-shape variables against the
-        # catalog. Non-GCP variables (SEIFA / ERP / DSS / ATO /
-        # PRESET) are validated lazily when the enricher hits each
-        # dataset's fetcher; the registry surfaces clear errors then.
+        # catalog. Non-GCP variables (SEIFA / ERP / DSS / ABS_PIA /
+        # ABS_BA / AIHW_MHP / PRESET) are validated lazily when the
+        # enricher hits each dataset's fetcher; the registry surfaces
+        # clear errors then.
         gcp_variables = {
             friendly: ref for friendly, ref in config.variables.items() if _is_gcp_variable_ref(ref)
         }
