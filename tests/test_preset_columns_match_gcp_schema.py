@@ -156,6 +156,12 @@ def test_every_registered_preset_has_at_least_one_resolvable_ref() -> None:
         "pct_parenting_payment_recipients",
         "pct_youth_allowance_recipients",
         "welfare_density_index",
+        # ABS Building Approvals PRESETs (ABS_BA + ERP source refs, no
+        # GCP). Covered by the abs_building_approvals fetcher's column
+        # lock-door in test_spec_matches_fetcher_columns.py.
+        "housing_supply_rate",
+        "pct_apartment_approvals",
+        "mean_dwelling_approval_value",
     }
 
     gcp_covered = {pid for pid, _, _, _ in _gcp_refs()}

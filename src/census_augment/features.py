@@ -86,6 +86,11 @@ class FeatureSpec(BaseModel):
     status: Literal["proposed", "active", "deprecated"]
     output_kind: Literal["percentage", "ratio", "rate", "scalar", "index"]
     bounds: tuple[float, float] | None = None
+    #: Optional fixed multiplier applied to the computed ratio (spec §21.3).
+    #: Default 1.0 is a no-op. Use e.g. 1000 for a "per 1,000" rate so the
+    #: headline number reads naturally. Applied after the percentage ×100
+    #: multiply and before bounds checking.
+    scale: float = 1.0
     dataset: str | list[str]
     default: bool = False
     tags: list[str] = Field(default_factory=list)
@@ -240,6 +245,13 @@ class FeatureEvaluator:
 
         if self._spec.output_kind == "percentage":
             ratio = ratio * 100
+
+        # Fixed scale multiplier (spec §21.3). Default 1.0 is a no-op,
+        # so pre-scale PRESETs are unaffected. Applied after the
+        # percentage multiply and before bounds so bounds are interpreted
+        # in the scaled unit.
+        if self._spec.scale != 1.0:
+            ratio = ratio * self._spec.scale
 
         # Bounds checking.
         if self._spec.bounds is not None:

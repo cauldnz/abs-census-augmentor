@@ -9,6 +9,55 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — three ABS Building Approvals PRESETs + `scale` multiplier
+
+Three new derived-feature PRESETs sourced from the SA2-native
+`abs_building_approvals` dataset (v2.1.0), plus a small general
+addition to the PRESET framework that two of them needed.
+
+**New PRESETs:**
+
+- **`housing_supply_rate`** — new dwelling approvals per 1,000
+  residents per financial year (`ABS_BA.total_dwellings_count /
+  ERP.population_total`, `scale: 1000`). The headline "is this SA2
+  building enough housing for its population?" metric.
+- **`pct_apartment_approvals`** — share of an SA2's new dwelling
+  approvals that are apartments / units / townhouses rather than
+  free-standing houses (`ABS_BA.new_other_residential_building_count /
+  ABS_BA.total_dwellings_count`). A rough urban-form / densification
+  proxy.
+- **`mean_dwelling_approval_value`** — mean construction value of a new
+  dwelling, in dollars (`(value_new_houses +
+  value_new_other_residential_building) / total_dwellings_count`,
+  `scale: 1000` to convert ABS's `$'000` unit to dollars). A coarse
+  build-cost / size-mix signal.
+
+**Framework addition — `scale` multiplier:**
+
+- `FeatureSpec` gains an optional `scale: float = 1.0` field (spec
+  §21.3). It multiplies the computed `numerator / denominator` ratio
+  by a fixed factor, applied after the `× 100` percentage multiply
+  and before bounds checking. Default `1.0` is a no-op — every
+  pre-existing PRESET is unaffected.
+- Motivation: "per N" rate metrics (`housing_supply_rate` per-1,000)
+  and unit conversions (`mean_dwelling_approval_value` `$'000` →
+  dollars) need a constant multiplier the framework didn't previously
+  support. The evaluator only did `num/den` with `×100` for
+  percentages.
+
+**Tests:** 8 new in `tests/test_features.py` — 5 covering the `scale`
+multiplier (default no-op, rate scaling, percentage+scale composition
+order, scale-before-bounds, null-denominator still-null) and 3
+end-to-end checks of the new PRESETs against synthetic ABS BA inputs.
+Lock-down entries updated in `test_wheel_bundles_specs.py` (FEATURES
+registry list) and `test_preset_columns_match_gcp_schema.py` (the
+three are non-GCP, covered by the `abs_building_approvals` fetcher's
+own column lock-door).
+
+**Spec:** `spec.md` §21.1 documents the `scale` front-matter field,
+§21.3 documents its semantics, and §21.4 adds the three PRESETs to
+the catalogue.
+
 ### Added — user-supplied DataPack ZIP fallback (GCP 2011 unlock)
 
 Unlocks ABS Census 2011 GCP / BCP DataPacks for power users. The 2011
