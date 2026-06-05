@@ -35,7 +35,15 @@ Thumbs.db
 # Worktrees live at .claude/worktrees/<slug>/ during development;
 # without this ignore, the main worktree sees them as untracked
 # directories and the GUI git tooling auto-stashes them on every pull.
-.claude/
+#
+# Exception: .claude/skills/ holds committed, version-controlled Claude
+# skills that are meant to travel with the repo (portable engineering
+# discipline, not per-machine state). Ignore everything else under
+# .claude/ but keep those. Pattern is `.claude/*` (not `.claude/`) so the
+# re-include below works — git can't re-include a path whose parent
+# directory is itself excluded.
+.claude/*
+!.claude/skills/
 
 # VSCode Dev Containers generates this on container build. Records
 # the resolved feature versions for the most recent build —
