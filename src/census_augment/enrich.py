@@ -259,15 +259,13 @@ class CensusEnricher:
             and hasattr(fetcher, "attach_sa2_areas")
         ):
             fetcher.attach_sa2_areas(self._sa2_areas_km2)
-        # AIHW MH Prescriptions cross-level downscale: SA4-keyed source
-        # needs the SA2 -> SA4 mapping wired so load() can downscale.
-        # Without this attachment, the fetcher raises a clear error
-        # explaining how to attach one.
-        if (
-            dataset_id == "aihw_mh_prescriptions"
-            and self._sa2_to_sa4 is not None
-            and hasattr(fetcher, "attach_sa2_to_sa4_mapping")
-        ):
+        # SA4-keyed cross-level datasets (AIHW MH Prescriptions, AIHW
+        # Admitted Patient Care, …) need the SA2 -> SA4 mapping wired so
+        # load() can downscale. Gated on the fetcher exposing the attach
+        # method rather than a specific dataset id, so any future
+        # SA4-downscale dataset picks it up automatically. Without the
+        # attachment, the fetcher raises a clear error at load() time.
+        if self._sa2_to_sa4 is not None and hasattr(fetcher, "attach_sa2_to_sa4_mapping"):
             fetcher.attach_sa2_to_sa4_mapping(self._sa2_to_sa4)
         # ABS BA LGA cross-level downscale: LGA-keyed source needs the
         # LGA -> SA2 area-weighted correspondence attached so load() can
