@@ -9,6 +9,40 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW Mental Health Emergency Department Presentations dataset (`aihw_mh_ed_presentations`)
+
+Third AIHW NMHSPF dataset (after `aihw_mh_prescriptions` and
+`aihw_mh_admitted_patients`). Mental-health-related ED presentations at
+SA4, downscaled to SA2. Catalogue identifier `AIHW_ED`. Built under the
+`real-data-first` skill off a firsthand re-probe of the live ZIP.
+
+**Columns** (2 metrics + ref FY): `AIHW_ED.mh_ed_presentations_count`,
+`AIHW_ED.mh_ed_presentations_per_10000`, `AIHW_ED.reference_financial_year`.
+
+**Real-data findings** (live-probed 2026-06-05) — confirming again that
+every AIHW dataset has its own quirks:
+
+- The member CSV lives inside a subdirectory whose name carries a
+  **literal Unicode en-dash** (`Data tables_ED states and territories
+  2023–24/ED_PHN_SA4_2324.csv`) — matched by the `PHN_SA4` substring,
+  not an exact path.
+- The CSV is **cp1252** (like prescriptions; unlike APC's UTF-8).
+- Multi-FY file with **en-dash FY labels** — normalised + filtered to
+  the requested release.
+- A **`PresentationType`** filter (`Mental health-related presentations`
+  vs `All presentations`) selects the headline rows.
+
+No pipeline change needed — the SA4→SA2 enricher attach generalised in
+the APC PR picks this dataset up automatically.
+
+**Tests:** 10 new in `tests/test_dataset_aihw_ed.py` (resolution,
+mapping guard, end-to-end downscale with PresentationType + FY +
+PHN-exclusion filtering, en-dash subdir member resolution, missing-SA4
+null fallback, no-MH-rows + missing-CSV schema-drift guards, parquet
+round-trip). Lock-doors in `test_spec_matches_fetcher_columns.py` +
+`test_wheel_bundles_specs.py`, live-source smoke in
+`tools/verify_real_parsers.py`.
+
 ### Added — AIHW Mental Health Admitted Patient Care dataset (`aihw_mh_admitted_patients`)
 
 Second AIHW NMHSPF dataset, sibling to `aihw_mh_prescriptions`. Covers
