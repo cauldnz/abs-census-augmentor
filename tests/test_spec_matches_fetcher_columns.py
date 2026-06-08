@@ -40,6 +40,10 @@ from census_augment.datasets import registry
 from census_augment.datasets._abs_ba import ABS_BA_LANDING_URL, AbsBaDataSource
 from census_augment.datasets._abs_ba_lga import AbsBaLgaDataSource
 from census_augment.datasets._abs_pia import ATO_LANDING_URL, AbsPiaDataSource
+from census_augment.datasets._aihw_apc import (
+    _AIHW_APC_URLS_BY_RELEASE,
+    AihwMhAdmittedPatientsDataSource,
+)
 from census_augment.datasets._aihw_mh import (
     _AIHW_RX_URLS_BY_RELEASE,
     AihwMhPrescriptionsDataSource,
@@ -66,6 +70,8 @@ from tests.test_dataset_abs_ba_lga import (
     _make_synthetic_correspondence,
 )
 from tests.test_dataset_abs_pia import _make_ato_xlsx
+from tests.test_dataset_aihw_apc import _full_sa4_rows as _apc_full_sa4_rows
+from tests.test_dataset_aihw_apc import _make_apc_zip
 from tests.test_dataset_aihw_mh import _full_sa4_rows, _make_aihw_zip
 from tests.test_dataset_abs_pia import _make_landing_html as _pia_landing_html
 from tests.test_dataset_dss import _make_ckan_response, _make_dss_xlsx
@@ -396,6 +402,30 @@ def test_spec_matches_fetcher__aihw_mh_prescriptions(tmp_path: Path) -> None:
     _check_spec_matches("aihw_mh_prescriptions", set(df.columns))
 
 
+# ---- AIHW Mental Health Admitted Patient Care ------------------------------
+
+
+@responses.activate
+def test_spec_matches_fetcher__aihw_mh_admitted_patients(tmp_path: Path) -> None:
+    """AIHW APC spec ⊆ ``AihwMhAdmittedPatientsDataSource.load().columns``.
+
+    SA4-keyed; attach a synthetic SA2 -> SA4 mapping so load() downscales
+    to a SA2-keyed DataFrame matching the registry contract.
+    """
+    rows = _apc_full_sa4_rows("SA4101")
+    responses.add(
+        responses.GET,
+        _AIHW_APC_URLS_BY_RELEASE["2023-24"],
+        body=_make_apc_zip(rows=rows),
+        status=200,
+    )
+
+    ds = AihwMhAdmittedPatientsDataSource(root=tmp_path / "aihw-apc-cache")
+    ds.attach_sa2_to_sa4_mapping({"102011028": "101"})
+    df = ds.load()
+    _check_spec_matches("aihw_mh_admitted_patients", set(df.columns))
+
+
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
 
 
@@ -413,6 +443,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "abs_building_approvals",
         "abs_building_approvals_lga",
         "aihw_mh_prescriptions",
+        "aihw_mh_admitted_patients",
     }
     intentionally_skipped = {
         "gcp",  # multi-table loader; covered via VariableCatalog tests

@@ -9,6 +9,56 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW Mental Health Admitted Patient Care dataset (`aihw_mh_admitted_patients`)
+
+Second AIHW NMHSPF dataset, sibling to `aihw_mh_prescriptions`. Covers
+mental-health-related **admitted patient care** activity —
+hospitalisations, patient days, psychiatric care days, procedures — at
+SA4 level, downscaled to SA2 via the boundary's `SA4_CODE21` attribute
+(same cross-level pattern). Catalogue identifier `AIHW_APC`.
+
+Scoped by a background dataset-expansion agent (which probed all 5
+unimplemented AIHW NMHSPF ZIPs and found them all SA4-keyed and
+downscalable), then built off a **firsthand re-probe** of the live
+ZIP per the Real Data First discipline — now also codified as the
+`real-data-first` Claude skill this dataset is the first to be built
+under.
+
+**Columns exposed** (4 metrics × count + per-10,000 rate = 8, + ref FY):
+
+- `AIHW_APC.mh_hospitalisations_count` / `…_per_10000`
+- `AIHW_APC.mh_patient_days_count` / `…_per_10000`
+- `AIHW_APC.mh_psychiatric_care_days_count` / `…_per_10000`
+- `AIHW_APC.mh_procedures_count` / `…_per_10000`
+- `AIHW_APC.reference_financial_year`
+
+**Real-data findings** (live-probed 2026-06-05) that differ from the
+prescriptions sibling — each a schema detail no amount of doc-reading
+would reveal:
+
+- The member CSV is **UTF-8**, not cp1252. Different files in the same
+  AIHW source family use different encodings, so the encoding is
+  per-dataset (the parser does not share the prescriptions constant).
+- There is **no `FinancialYear` column** — the ZIP is a single-year
+  publication; the release id is fixed and there's no FY filter.
+- The headline filter dimension is **`SeparationType == "Total"`**
+  (vs the prescriptions file's `Demographic`/`DemographicCategory`).
+- SA4 codes use the `SA4101` prefix form (stripped to bare 3-digit).
+
+**Wiring:** the cross-level SA4→SA2 attach in `CensusEnricher._make_fetcher`
+was **generalised** — it now keys on the fetcher exposing
+`attach_sa2_to_sa4_mapping` rather than a specific dataset id, so this
+dataset (and any future SA4-downscale dataset) is wired through
+`Pipeline.from_config` automatically with no further pipeline change.
+
+**Tests:** 12 new in `tests/test_dataset_aihw_apc.py` (release
+resolution, mapping guard, end-to-end downscale with SeparationType
+filtering + PHN-row exclusion, missing-SA4 null fallback, missing-CSV /
+missing-columns schema-drift guards, parquet round-trip,
+unknown-measure warn). Lock-door entries in
+`test_spec_matches_fetcher_columns.py` + `test_wheel_bundles_specs.py`,
+and a live-source smoke in `tools/verify_real_parsers.py`.
+
 ### Fixed / Docs — post-v2.4.0 cleanup sweep (dead code, doc drift, dangling tool reference)
 
 Housekeeping pass surfaced by a code audit. No behaviour change to any
