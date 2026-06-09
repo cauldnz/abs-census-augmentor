@@ -9,6 +9,53 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW Community Mental Health Care dataset (`aihw_mh_community`)
+
+Fifth AIHW NMHSPF dataset, completing the service-setting sweep
+(prescriptions → admitted patient care → ED → Medicare → community).
+Community (ambulatory) mental-health care from the National Community
+Mental Health database — patients, service contacts, treatment days — at
+SA4, downscaled to SA2. Catalogue identifier `AIHW_CMH`. Built under the
+`real-data-first` skill off a firsthand probe of the live ZIP.
+
+**Columns** (7 metrics + ref FY): `AIHW_CMH.mh_community_patients_count`,
+`AIHW_CMH.mh_community_patients_per_10000`,
+`AIHW_CMH.mh_community_contacts_count`,
+`AIHW_CMH.mh_community_contacts_per_10000`,
+`AIHW_CMH.mh_community_treatment_days_per_3mo`,
+`AIHW_CMH.mh_community_avg_treatment_length_days`,
+`AIHW_CMH.mh_community_population`,
+`AIHW_CMH.reference_financial_year`.
+
+**Real-data findings** (live-probed 2026-06-09) — the probe *corrected*
+the scouting note, the clearest demonstration yet of why each dataset
+gets re-probed:
+
+- The ZIP carries three long CSVs (Demog / Geospatial / Session focus);
+  only `CMHC_MRF_GeospatialFocus_2324.csv` is geographic — matched by
+  "geospatial" in the member name. **cp1252.**
+- `GeospatialDivisionCode` is **polymorphic**: a bare 3-digit SA4 code
+  (`101`) for `GeospatialType=="SA4"` rows, but a place *name* ("Greater
+  Sydney") for the `GCSSA`/`PHN` rows sharing the file. The
+  `GeospatialType=="SA4"` filter is therefore load-bearing, not
+  cosmetic. SA4 codes need **no prefix strip** (unlike Medicare's
+  hyphenated `SA4-101`).
+- Headline slice is `Total`/`Total` on the
+  `DemographicCategory`/`DemographicVariable` pair; en-dash FY labels
+  normalised + filtered to the requested release; the slice pivots
+  cleanly (one row per division × measure).
+
+No pipeline change needed — the SA4→SA2 enricher attach generalised in
+the APC PR picks this dataset up automatically.
+
+**Tests:** 8 new in `tests/test_dataset_aihw_community.py` (resolution,
+mapping guard, end-to-end downscale exercising the `GeospatialType==SA4`
+filter + the name-coded GCSSA exclusion + demographic-split exclusion +
+FY filtering, missing-SA4 null fallback, no-Total-rows + missing-CSV
+schema-drift guards, parquet round-trip). Lock-doors in
+`test_spec_matches_fetcher_columns.py` + `test_wheel_bundles_specs.py`,
+live-source smoke in `tools/verify_real_parsers.py`.
+
 ### Added — AIHW Medicare-subsidised Mental Health Services dataset (`aihw_mh_medicare`)
 
 Fourth AIHW NMHSPF dataset (after `aihw_mh_prescriptions`,
