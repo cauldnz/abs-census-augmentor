@@ -507,6 +507,7 @@ def main() -> int:
     from census_augment.datasets._abs_pia import AbsPiaDataSource
     from census_augment.datasets._aihw_apc import AihwMhAdmittedPatientsDataSource
     from census_augment.datasets._aihw_ed import AihwMhEdPresentationsDataSource
+    from census_augment.datasets._aihw_medicare import AihwMhMedicareDataSource
     from census_augment.datasets._aihw_mh import AihwMhPrescriptionsDataSource
     from census_augment.datasets._dss import DssDataSource
     from census_augment.datasets._erp import ErpDataSource
@@ -812,6 +813,60 @@ def main() -> int:
             f"{sample['mh_ed_presentations_per_10000']}/10,000"
         )
 
+    def _check_aihw_medicare() -> None:
+        # AIHW Medicare-subsidised MH services (NMHSPF). SA4-keyed,
+        # downscaled to SA2 via SA4_CODE21. Note: hyphenated SA4-101
+        # codes + NBSP in ProviderType (handled by the parser).
+        import geopandas as gpd  # noqa: PLC0415
+
+        from census_augment.spatial import (  # noqa: PLC0415
+            compute_sa2_parent_codes,
+        )
+
+        boundary_path = (
+            data_dir
+            / "boundaries"
+            / "2021"
+            / "SA2_2021_AUST_SHP_GDA2020"
+            / "SA2_2021_AUST_GDA2020.shp"
+        )
+        assert boundary_path.exists(), (
+            f"SA2 boundary shapefile not at {boundary_path} — "
+            f"earlier Boundaries section must have failed."
+        )
+        boundary = gpd.read_file(boundary_path)
+        sa2_to_sa4 = compute_sa2_parent_codes(
+            boundary,
+            sa2_code_column="SA2_CODE21",
+            parent_code_columns={"SA4": "SA4_CODE21"},
+        )["SA4"]
+
+        ds = AihwMhMedicareDataSource(root=data_dir / "aihw_mh_medicare")
+        ds.attach_sa2_to_sa4_mapping(sa2_to_sa4)
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s parsed; expected ~2,400+"
+        expected_cols = {
+            "mh_medicare_patients_count",
+            "mh_medicare_patient_rate_per_1000",
+            "mh_medicare_services_count",
+            "mh_medicare_service_rate_per_1000",
+            "reference_financial_year",
+        }
+        missing = expected_cols - set(df.columns)
+        assert not missing, f"missing expected AIHW Medicare columns: {sorted(missing)}"
+        non_null = df[df["mh_medicare_patients_count"].notna()]
+        assert len(non_null) >= 1000, (
+            f"only {len(non_null)} SA2s have non-null Medicare patient counts; "
+            f"downscale mapping may be broken (check the SA4-hyphen strip)"
+        )
+        sample = non_null.iloc[0]
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {sample.name}: "
+            f"{int(sample['mh_medicare_patients_count']):,} Medicare MH patients, "
+            f"{int(sample['mh_medicare_services_count']):,} services"
+        )
+
     if not _check("SEIFA 2016+2021 (~2,196/2,366 SA2s, 4 indexes)", _check_seifa):
         failures.append("seifa")
     if not _check("ERP by SA2 (~2,454 SA2s, 25-year history)", _check_erp):
@@ -840,6 +895,11 @@ def main() -> int:
         _check_aihw_ed,
     ):
         failures.append("aihw_mh_ed_presentations")
+    if not _check(
+        "AIHW MH Medicare services (~2,450 SA2s, 4 metrics, SA4 -> SA2 downscale)",
+        _check_aihw_medicare,
+    ):
+        failures.append("aihw_mh_medicare")
 
     # ------ PRESET source resolution against real GCP DataPack ------
     # Acid test for the "Real Data First" rule (see CLAUDE.md): every

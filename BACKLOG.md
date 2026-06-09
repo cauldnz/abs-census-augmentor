@@ -127,6 +127,26 @@ Candidates by ROI when motivated:
 
 ### Smaller deferred items
 
+- **Extract an `_AihwSa4Dataset` base class.** As of the Medicare PR
+  there are now **four** near-identical AIHW SA4→SA2 fetchers
+  (`_aihw_mh` prescriptions, `_aihw_apc`, `_aihw_ed`, `_aihw_medicare`)
+  plus the generalised enricher attach. They share: hardcoded
+  URL-by-release registry + `latest` resolution, ZIP fetch→cache,
+  `attach_sa2_to_sa4_mapping` + load-without-mapping guard, long→wide
+  pivot on `Measure`, SA4-prefix strip, downscale via the attached
+  mapping, parquet sidecar, and `reference_financial_year` stamping.
+  The *only* genuine per-dataset variation is: the URL constant, the
+  encoding (cp1252 vs UTF-8), the member-CSV match predicate, the
+  filter dimension+value (`Demographic`/`Total`,
+  `SeparationType`/`Total`, `PresentationType`/MH,
+  `ProviderType`/`All providers`), the SA4 code format (`SA4101` vs
+  `SA4-101` vs bare), and the measure→column map. A base class taking
+  those as class attributes / overridable hooks would collapse ~4×200
+  lines to a thin subclass each, and make the *next* AIHW dataset
+  (Community MH care — already scouted GO) a ~40-line subclass. Defer
+  until the Community MH dataset lands so the base is extracted against
+  5 real call-sites, not 4 (avoids a premature abstraction that the
+  5th breaks). ~2-3 hours including test migration.
 - `_template.md` wheel exclusion (4 KB hygiene; design choice in
   this BACKLOG)
 - LGA boundary smoke missing from `tools/verify_real_parsers.py` —

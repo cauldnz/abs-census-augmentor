@@ -48,6 +48,10 @@ from census_augment.datasets._aihw_ed import (
     _AIHW_ED_URLS_BY_RELEASE,
     AihwMhEdPresentationsDataSource,
 )
+from census_augment.datasets._aihw_medicare import (
+    _AIHW_MEDICARE_URLS_BY_RELEASE,
+    AihwMhMedicareDataSource,
+)
 from census_augment.datasets._aihw_mh import (
     _AIHW_RX_URLS_BY_RELEASE,
     AihwMhPrescriptionsDataSource,
@@ -78,6 +82,8 @@ from tests.test_dataset_aihw_apc import _full_sa4_rows as _apc_full_sa4_rows
 from tests.test_dataset_aihw_apc import _make_apc_zip
 from tests.test_dataset_aihw_ed import _full_sa4_rows as _ed_full_sa4_rows
 from tests.test_dataset_aihw_ed import _make_ed_zip
+from tests.test_dataset_aihw_medicare import _full_sa4_rows as _medicare_full_sa4_rows
+from tests.test_dataset_aihw_medicare import _make_medicare_zip
 from tests.test_dataset_aihw_mh import _full_sa4_rows, _make_aihw_zip
 from tests.test_dataset_abs_pia import _make_landing_html as _pia_landing_html
 from tests.test_dataset_dss import _make_ckan_response, _make_dss_xlsx
@@ -452,6 +458,26 @@ def test_spec_matches_fetcher__aihw_mh_ed_presentations(tmp_path: Path) -> None:
     _check_spec_matches("aihw_mh_ed_presentations", set(df.columns))
 
 
+# ---- AIHW Medicare-subsidised MH services ----------------------------------
+
+
+@responses.activate
+def test_spec_matches_fetcher__aihw_mh_medicare(tmp_path: Path) -> None:
+    """AIHW Medicare spec ⊆ ``AihwMhMedicareDataSource.load().columns``."""
+    rows = _medicare_full_sa4_rows("SA4-101")
+    responses.add(
+        responses.GET,
+        _AIHW_MEDICARE_URLS_BY_RELEASE["2024-25"],
+        body=_make_medicare_zip(rows=rows),
+        status=200,
+    )
+
+    ds = AihwMhMedicareDataSource(root=tmp_path / "aihw-medicare-cache")
+    ds.attach_sa2_to_sa4_mapping({"102011028": "101"})
+    df = ds.load()
+    _check_spec_matches("aihw_mh_medicare", set(df.columns))
+
+
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
 
 
@@ -471,6 +497,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "aihw_mh_prescriptions",
         "aihw_mh_admitted_patients",
         "aihw_mh_ed_presentations",
+        "aihw_mh_medicare",
     }
     intentionally_skipped = {
         "gcp",  # multi-table loader; covered via VariableCatalog tests

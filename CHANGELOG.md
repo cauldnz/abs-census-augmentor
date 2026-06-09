@@ -9,6 +9,45 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW Medicare-subsidised Mental Health Services dataset (`aihw_mh_medicare`)
+
+Fourth AIHW NMHSPF dataset (after `aihw_mh_prescriptions`,
+`aihw_mh_admitted_patients`, and `aihw_mh_ed_presentations`).
+Medicare-subsidised mental-health-specific services (MBS items) —
+patients and services, each with a rate-per-1,000 twin — at SA4,
+downscaled to SA2. Catalogue identifier `AIHW_MBS`. Built under the
+`real-data-first` skill off a firsthand re-probe of the live ZIP.
+
+**Columns** (4 metrics + ref FY): `AIHW_MBS.mh_medicare_patients_count`,
+`AIHW_MBS.mh_medicare_patient_rate_per_1000`,
+`AIHW_MBS.mh_medicare_services_count`,
+`AIHW_MBS.mh_medicare_service_rate_per_1000`,
+`AIHW_MBS.reference_financial_year`.
+
+**Real-data findings** (live-probed 2026-06-05) — yet another distinct
+quirk set, reinforcing why each AIHW dataset gets its own re-probe:
+
+- `GeographicAreaCode` carries the SA4 in a **hyphenated** form
+  (`SA4-101`), not the bare `SA4101` the other AIHW datasets use — the
+  parser strips the `SA4-` prefix to join the boundary's `SA4_CODE21`.
+- `ProviderType` values contain **non-breaking spaces** (U+00A0), e.g.
+  `"All\xa0providers"` — normalised before filtering to the
+  `All providers` headline total (the file also splits by Psychiatrists
+  / GPs / Clinical psychologists / etc.).
+- The CSV is **cp1252**; FY labels use an **en-dash**, normalised +
+  filtered to the requested release.
+
+No pipeline change needed — the SA4→SA2 enricher attach generalised in
+the APC PR picks this dataset up automatically.
+
+**Tests:** 8 new in `tests/test_dataset_aihw_medicare.py` (resolution,
+mapping guard, end-to-end downscale exercising the hyphen-strip + NBSP
+normalisation + FY + PHN-exclusion + provider-split filtering,
+missing-SA4 null fallback, no-All-providers + missing-CSV schema-drift
+guards, parquet round-trip). Lock-doors in
+`test_spec_matches_fetcher_columns.py` + `test_wheel_bundles_specs.py`,
+live-source smoke in `tools/verify_real_parsers.py`.
+
 ### Added — AIHW Mental Health Emergency Department Presentations dataset (`aihw_mh_ed_presentations`)
 
 Third AIHW NMHSPF dataset (after `aihw_mh_prescriptions` and
