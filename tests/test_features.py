@@ -610,3 +610,60 @@ def test_mh_admitted_avg_length_of_stay_against_synthetic_aihw_data() -> None:
     df.index.name = "sa2_code_2021"
     result = FeatureEvaluator(spec).evaluate(df)
     assert result.iloc[0] == pytest.approx(15.0)
+
+
+# ---- ABS business-counts PRESETs end-to-end ----------------------------
+
+
+def test_businesses_per_1000_residents_against_synthetic_data() -> None:
+    """businesses_per_1000_residents = total businesses / population ×
+    1000. 1,500 businesses / 30,000 residents = 0.05 × 1000 = 50 per 1,000.
+    """
+    spec = features.get("businesses_per_1000_residents")
+    assert spec.output_kind == "rate"
+    assert spec.scale == 1000.0
+    df = pd.DataFrame(
+        {
+            "ABS_CAB.business_count_total": [1_500.0],
+            "ERP.population_total": [30_000.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(50.0)
+
+
+def test_businesses_per_1000_residents_null_when_no_residents() -> None:
+    """A zero resident population (industrial / no-resident SA2) yields
+    null, not an infinite density."""
+    spec = features.get("businesses_per_1000_residents")
+    df = pd.DataFrame(
+        {
+            "ABS_CAB.business_count_total": [1_500.0, 800.0],
+            "ERP.population_total": [30_000.0, 0.0],
+        }
+    )
+    df.index = ["sa2_0", "sa2_1"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(50.0)
+    assert pd.isna(result.iloc[1])
+
+
+def test_pct_businesses_non_employing_against_synthetic_data() -> None:
+    """pct_businesses_non_employing = non_employing / total × 100.
+    420 non-employing / 700 total = 60%.
+    """
+    spec = features.get("pct_businesses_non_employing")
+    assert spec.output_kind == "percentage"
+    df = pd.DataFrame(
+        {
+            "ABS_CAB.business_count_non_employing": [420.0],
+            "ABS_CAB.business_count_total": [700.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(60.0)
