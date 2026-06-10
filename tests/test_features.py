@@ -516,3 +516,97 @@ def test_mean_dwelling_approval_value_against_synthetic_abs_ba_data() -> None:
     result = FeatureEvaluator(spec).evaluate(df)
     # (60000 + 30000) / 150 = 600 ($'000 per dwelling) × 1000 = 600,000
     assert result.iloc[0] == pytest.approx(600_000.0)
+
+
+# ---- AIHW MH treatment-intensity PRESETs end-to-end --------------------
+
+
+def test_mh_prescriptions_per_patient_against_synthetic_aihw_data() -> None:
+    """mh_prescriptions_per_patient = prescriptions / patients (ratio).
+    90,000 scripts / 10,000 patients = 9.0 scripts per patient.
+    """
+    spec = features.get("mh_prescriptions_per_patient")
+    assert spec.output_kind == "ratio"
+    df = pd.DataFrame(
+        {
+            "AIHW_MHP.mh_prescriptions_count": [90_000.0],
+            "AIHW_MHP.mh_patients_count": [10_000.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(9.0)
+
+
+def test_mh_medicare_services_per_patient_against_synthetic_aihw_data() -> None:
+    """mh_medicare_services_per_patient = services / patients (ratio).
+    90,000 services / 12,000 patients = 7.5 services per patient.
+    """
+    spec = features.get("mh_medicare_services_per_patient")
+    assert spec.output_kind == "ratio"
+    df = pd.DataFrame(
+        {
+            "AIHW_MBS.mh_medicare_services_count": [90_000.0],
+            "AIHW_MBS.mh_medicare_patients_count": [12_000.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(7.5)
+
+
+def test_mh_community_contacts_per_patient_against_synthetic_aihw_data() -> None:
+    """mh_community_contacts_per_patient = contacts / patients (ratio).
+    85,000 contacts / 5,000 patients = 17.0 contacts per patient.
+    """
+    spec = features.get("mh_community_contacts_per_patient")
+    assert spec.output_kind == "ratio"
+    df = pd.DataFrame(
+        {
+            "AIHW_CMH.mh_community_contacts_count": [85_000.0],
+            "AIHW_CMH.mh_community_patients_count": [5_000.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(17.0)
+
+
+def test_mh_community_contacts_per_patient_null_denominator() -> None:
+    """A null/zero patient count (suppressed or unpublished SA4) yields
+    null rather than a divide-by-zero — the cross-level downscale relies
+    on this for SA2s mapped to SA4s AIHW didn't publish.
+    """
+    spec = features.get("mh_community_contacts_per_patient")
+    df = pd.DataFrame(
+        {
+            "AIHW_CMH.mh_community_contacts_count": [85_000.0, 100.0],
+            "AIHW_CMH.mh_community_patients_count": [5_000.0, 0.0],
+        }
+    )
+    df.index = ["sa2_0", "sa2_1"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(17.0)
+    assert pd.isna(result.iloc[1])
+
+
+def test_mh_admitted_avg_length_of_stay_against_synthetic_aihw_data() -> None:
+    """mh_admitted_avg_length_of_stay = patient days / hospitalisations.
+    15,000 patient days / 1,000 separations = 15.0 days ALOS.
+    """
+    spec = features.get("mh_admitted_avg_length_of_stay")
+    assert spec.output_kind == "ratio"
+    df = pd.DataFrame(
+        {
+            "AIHW_APC.mh_patient_days_count": [15_000.0],
+            "AIHW_APC.mh_hospitalisations_count": [1_000.0],
+        }
+    )
+    df.index = ["sa2_0"]
+    df.index.name = "sa2_code_2021"
+    result = FeatureEvaluator(spec).evaluate(df)
+    assert result.iloc[0] == pytest.approx(15.0)

@@ -162,6 +162,15 @@ def test_every_registered_preset_has_at_least_one_resolvable_ref() -> None:
         "housing_supply_rate",
         "pct_apartment_approvals",
         "mean_dwelling_approval_value",
+        # AIHW MH treatment-intensity PRESETs (AIHW_MHP / AIHW_MBS /
+        # AIHW_CMH / AIHW_APC source refs, both num + den from one AIHW
+        # dataset, no GCP). Covered by the matching aihw_* fetcher column
+        # lock-doors in test_spec_matches_fetcher_columns.py and the live
+        # verify_preset_resolution() non-GCP namespace check.
+        "mh_prescriptions_per_patient",
+        "mh_medicare_services_per_patient",
+        "mh_community_contacts_per_patient",
+        "mh_admitted_avg_length_of_stay",
     }
 
     gcp_covered = {pid for pid, _, _, _ in _gcp_refs()}
