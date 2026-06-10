@@ -9,6 +9,36 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW mental-health treatment-intensity PRESETs (4 new derived features)
+
+Four new opt-in PRESETs, one per AIHW NMHSPF service setting that
+publishes a paired activity + patient/episode count — the
+"how *intensively* is each treated person being treated" companion to
+the datasets' existing population-rate columns:
+
+| PRESET | = | Reads from |
+|---|---|---|
+| `mh_prescriptions_per_patient` | MH scripts ÷ patients | `aihw_mh_prescriptions` (`AIHW_MHP`) |
+| `mh_medicare_services_per_patient` | MBS MH services ÷ patients | `aihw_mh_medicare` (`AIHW_MBS`) |
+| `mh_community_contacts_per_patient` | community contacts ÷ patients | `aihw_mh_community` (`AIHW_CMH`) |
+| `mh_admitted_avg_length_of_stay` | patient days ÷ hospitalisations (ALOS, days) | `aihw_mh_admitted_patients` (`AIHW_APC`) |
+
+Each is a single-dataset `ratio` (both numerator and denominator from
+the same AIHW dataset, so no external denominator and no population
+estimate involved). Three of the four are the explicit "suggested
+derived feature" already named in their dataset spec. All are
+`default: false` (opt-in) — no change to existing pipelines.
+
+Because the inputs are SA4-native values downscaled to SA2 by
+inheritance, each ratio is an SA4-level intensity surfaced on SA2 rows
+(identical for every SA2 within an SA4) — documented in each PRESET's
+cross-level note.
+
+**Tests:** end-to-end evaluator tests in `tests/test_features.py` (one
+per PRESET + a null-denominator guard), the four ids registered in the
+`intentionally_non_gcp_presets` lock-door set, and the
+`test_wheel_bundles_specs.py` FEATURES string updated.
+
 ### Changed — AIHW SA4 fetchers share a base class (internal, no behaviour change)
 
 The five AIHW NMHSPF SA4-keyed fetchers (`aihw_mh_prescriptions`,
