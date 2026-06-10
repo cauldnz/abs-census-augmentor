@@ -39,6 +39,7 @@ import responses
 from census_augment.datasets import registry
 from census_augment.datasets._abs_ba import ABS_BA_LANDING_URL, AbsBaDataSource
 from census_augment.datasets._abs_ba_lga import AbsBaLgaDataSource
+from census_augment.datasets._abs_cab import _ABS_CAB_RELEASES, AbsBusinessCountsDataSource
 from census_augment.datasets._abs_pia import ATO_LANDING_URL, AbsPiaDataSource
 from census_augment.datasets._aihw_apc import (
     _AIHW_APC_URLS_BY_RELEASE,
@@ -81,6 +82,7 @@ from tests.test_dataset_abs_ba_lga import (
     _make_lga_state_xlsx,
     _make_synthetic_correspondence,
 )
+from tests.test_dataset_abs_business_counts import _make_cab_xlsx
 from tests.test_dataset_abs_pia import _make_ato_xlsx
 from tests.test_dataset_aihw_apc import _full_sa4_rows as _apc_full_sa4_rows
 from tests.test_dataset_aihw_apc import _make_apc_zip
@@ -395,6 +397,26 @@ def test_spec_matches_fetcher__abs_building_approvals_lga(tmp_path: Path) -> Non
     _check_spec_matches("abs_building_approvals_lga", set(df.columns))
 
 
+# ---- ABS Counts of Australian Businesses -----------------------------------
+
+
+@responses.activate
+def test_spec_matches_fetcher__abs_business_counts(tmp_path: Path) -> None:
+    """ABS CAB spec ⊆ ``AbsBusinessCountsDataSource.load().columns``."""
+    rows = [
+        ("A", "Agriculture", "101021007", "Braidwood", 10, 5, 2, 1, 0, 18),
+        ("G", "Retail Trade", "101021007", "Braidwood", 7, 3, 1, 0, 0, 11),
+    ]
+    responses.add(
+        responses.GET,
+        _ABS_CAB_RELEASES["2025"]["url"],
+        body=_make_cab_xlsx(rows=rows),
+        status=200,
+    )
+    df = AbsBusinessCountsDataSource(root=tmp_path / "abs-cab-cache").load()
+    _check_spec_matches("abs_business_counts", set(df.columns))
+
+
 # ---- AIHW Mental Health Prescriptions --------------------------------------
 
 
@@ -517,6 +539,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "seifa",
         "abs_building_approvals",
         "abs_building_approvals_lga",
+        "abs_business_counts",
         "aihw_mh_prescriptions",
         "aihw_mh_admitted_patients",
         "aihw_mh_ed_presentations",

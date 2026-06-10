@@ -504,6 +504,7 @@ def main() -> int:
     # ------ v1.3 datasets (SEIFA, ERP, DSS, ABS PIA) ------
     print("=== v1.3 registered datasets ===")
     from census_augment.datasets._abs_ba import AbsBaDataSource
+    from census_augment.datasets._abs_cab import AbsBusinessCountsDataSource
     from census_augment.datasets._abs_pia import AbsPiaDataSource
     from census_augment.datasets._aihw_apc import AihwMhAdmittedPatientsDataSource
     from census_augment.datasets._aihw_cmh import AihwMhCommunityDataSource
@@ -645,6 +646,38 @@ def main() -> int:
             f"sample SA2 {sample.name}: {int(sample['total_dwellings_count'])} "
             f"total dwelling approvals, "
             f"${float(sample['value_total_building']):,.0f}k total building value"
+        )
+
+    def _check_abs_cab() -> None:
+        # ABS Counts of Australian Businesses (catalogue 8165.0). SA2-native
+        # DC8 cube; the smoke parses the latest year's sheet and sums the
+        # industry-division rows per SA2. Confirm the 6 size-band columns +
+        # reference period populate for ~2,400 SA2s.
+        ds = AbsBusinessCountsDataSource(root=data_dir / "abs_business_counts")
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s parsed; expected ~2,400+"
+        expected_cols = {
+            "business_count_non_employing",
+            "business_count_1_4_employees",
+            "business_count_5_19_employees",
+            "business_count_20_199_employees",
+            "business_count_200_plus_employees",
+            "business_count_total",
+            "reference_period",
+        }
+        missing = expected_cols - set(df.columns)
+        assert not missing, f"missing expected ABS CAB columns: {sorted(missing)}"
+        non_null = df[df["business_count_total"].notna()]
+        assert len(non_null) >= 1000, (
+            f"only {len(non_null)} SA2s have a non-null business total; "
+            f"the industry-row summation may be broken"
+        )
+        sample = non_null.iloc[0]
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {sample.name}: "
+            f"{int(sample['business_count_total']):,} businesses "
+            f"({int(sample['business_count_non_employing']):,} non-employing)"
         )
 
     def _check_aihw_mh() -> None:
@@ -939,6 +972,11 @@ def main() -> int:
         _check_abs_ba,
     ):
         failures.append("abs_building_approvals")
+    if not _check(
+        "ABS Counts of Businesses (~2,460 SA2s, 6 size bands, DC8 cube)",
+        _check_abs_cab,
+    ):
+        failures.append("abs_business_counts")
     if not _check(
         "AIHW MH Prescriptions (~2,450 SA2s, 4 metrics, SA4 -> SA2 downscale)",
         _check_aihw_mh,

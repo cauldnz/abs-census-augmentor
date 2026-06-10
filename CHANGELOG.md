@@ -9,6 +9,43 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — ABS Counts of Australian Businesses dataset (`abs_business_counts`)
+
+First **economic-base** dataset: business counts by employment-size band
+at SA2, from ABS catalogue 8165.0 (CABEE — Counts of Australian
+Businesses, including Entries and Exits). Catalogue identifier
+`ABS_CAB`. SA2-native (no downscale). Built under the `real-data-first`
+discipline off a firsthand probe of the live DC8 cube.
+
+**Columns** (6 metrics + ref period): `ABS_CAB.business_count_non_employing`,
+`ABS_CAB.business_count_1_4_employees`,
+`ABS_CAB.business_count_5_19_employees`,
+`ABS_CAB.business_count_20_199_employees`,
+`ABS_CAB.business_count_200_plus_employees`,
+`ABS_CAB.business_count_total`, `ABS_CAB.reference_period`.
+
+**Real-data findings** (live-probed 2026-06-10):
+
+- One ~8 MB national workbook (`8165DC08.xlsx`) carries **three
+  reference years** (2023/2024/2025) in three sheets; the release id
+  selects the year. URL is deterministic (hardcoded, no HTML scrape).
+- **Long format**: one row per industry division × SA2 (20 ANZSIC
+  divisions A–S + `X` "Currently Unknown"), with a **2-row header band**.
+  There is **no per-SA2 total row**, so the per-SA2 figure is the sum
+  across the 20 industry rows; the national `Total All Industries` rows
+  (blank SA2 code) + footnotes are dropped by a 9-digit SA2-code filter.
+- ABS **perturbs** cell values, so summed size bands need not equal the
+  summed Total — `business_count_total` is read from the source Total
+  column (verified: SA2 101021007 totals 714 while its bands sum to 716).
+
+**Tests:** 8 in `tests/test_dataset_abs_business_counts.py` (resolution,
+industry-row summation, total-from-Total-column, national-total +
+footnote exclusion, wrong-year + missing-sheet + shifted-header drift
+guards, parquet round-trip). Lock-doors in
+`test_spec_matches_fetcher_columns.py` + `test_wheel_bundles_specs.py`,
+live-source smoke in `tools/verify_real_parsers.py`. Per-industry-division
+and turnover-size (DC9) breakdowns spec'd as wish-list extensions.
+
 ### Added — AIHW mental-health treatment-intensity PRESETs (4 new derived features)
 
 Four new opt-in PRESETs, one per AIHW NMHSPF service setting that
