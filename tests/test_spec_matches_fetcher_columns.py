@@ -44,6 +44,10 @@ from census_augment.datasets._aihw_apc import (
     _AIHW_APC_URLS_BY_RELEASE,
     AihwMhAdmittedPatientsDataSource,
 )
+from census_augment.datasets._aihw_cmh import (
+    _AIHW_CMH_URLS_BY_RELEASE,
+    AihwMhCommunityDataSource,
+)
 from census_augment.datasets._aihw_ed import (
     _AIHW_ED_URLS_BY_RELEASE,
     AihwMhEdPresentationsDataSource,
@@ -80,6 +84,8 @@ from tests.test_dataset_abs_ba_lga import (
 from tests.test_dataset_abs_pia import _make_ato_xlsx
 from tests.test_dataset_aihw_apc import _full_sa4_rows as _apc_full_sa4_rows
 from tests.test_dataset_aihw_apc import _make_apc_zip
+from tests.test_dataset_aihw_community import _full_sa4_rows as _cmh_full_sa4_rows
+from tests.test_dataset_aihw_community import _make_cmh_zip
 from tests.test_dataset_aihw_ed import _full_sa4_rows as _ed_full_sa4_rows
 from tests.test_dataset_aihw_ed import _make_ed_zip
 from tests.test_dataset_aihw_medicare import _full_sa4_rows as _medicare_full_sa4_rows
@@ -478,6 +484,23 @@ def test_spec_matches_fetcher__aihw_mh_medicare(tmp_path: Path) -> None:
     _check_spec_matches("aihw_mh_medicare", set(df.columns))
 
 
+@responses.activate
+def test_spec_matches_fetcher__aihw_mh_community(tmp_path: Path) -> None:
+    """AIHW Community MH spec ⊆ ``AihwMhCommunityDataSource.load().columns``."""
+    rows = _cmh_full_sa4_rows("101")
+    responses.add(
+        responses.GET,
+        _AIHW_CMH_URLS_BY_RELEASE["2023-24"],
+        body=_make_cmh_zip(rows=rows),
+        status=200,
+    )
+
+    ds = AihwMhCommunityDataSource(root=tmp_path / "aihw-cmh-cache")
+    ds.attach_sa2_to_sa4_mapping({"102011028": "101"})
+    df = ds.load()
+    _check_spec_matches("aihw_mh_community", set(df.columns))
+
+
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
 
 
@@ -498,6 +521,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "aihw_mh_admitted_patients",
         "aihw_mh_ed_presentations",
         "aihw_mh_medicare",
+        "aihw_mh_community",
     }
     intentionally_skipped = {
         "gcp",  # multi-table loader; covered via VariableCatalog tests

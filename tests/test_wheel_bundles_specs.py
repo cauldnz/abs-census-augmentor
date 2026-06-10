@@ -156,8 +156,9 @@ def test_wheel_install_populates_both_registries(tmp_path: Path) -> None:
 
     assert (
         "DATASETS=abs_building_approvals,abs_building_approvals_lga,"
-        "abs_personal_income,aihw_mh_admitted_patients,aihw_mh_ed_presentations,"
-        "aihw_mh_medicare,aihw_mh_prescriptions,dss_payments,erp_by_sa2,gcp,seifa" in out
+        "abs_personal_income,aihw_mh_admitted_patients,aihw_mh_community,"
+        "aihw_mh_ed_presentations,aihw_mh_medicare,aihw_mh_prescriptions,"
+        "dss_payments,erp_by_sa2,gcp,seifa" in out
     ), f"dataset registry empty or missing entries on wheel install:\n{out}"
     assert (
         "FEATURES=housing_supply_rate,mean_dwelling_approval_value,motor_vehicles_per_dwelling,pct_age_pension_recipients,pct_aged_65_plus,pct_apartment_approvals,pct_carer_payment_recipients,pct_commonwealth_rent_assistance_recipients,pct_disability_support_pension_recipients,pct_drive_to_work,pct_employed_full_time,pct_jobseeker_recipients,pct_one_parent_family,pct_parenting_payment_recipients,pct_renters,pct_youth_allowance_recipients,welfare_density_index"

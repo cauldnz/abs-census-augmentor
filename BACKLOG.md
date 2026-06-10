@@ -127,10 +127,12 @@ Candidates by ROI when motivated:
 
 ### Smaller deferred items
 
-- **Extract an `_AihwSa4Dataset` base class.** As of the Medicare PR
-  there are now **four** near-identical AIHW SA4→SA2 fetchers
-  (`_aihw_mh` prescriptions, `_aihw_apc`, `_aihw_ed`, `_aihw_medicare`)
-  plus the generalised enricher attach. They share: hardcoded
+- **Extract an `_AihwSa4Dataset` base class.** *Now actionable* — as of
+  the Community MH PR there are **five** near-identical AIHW SA4→SA2
+  fetchers (`_aihw_mh` prescriptions, `_aihw_apc`, `_aihw_ed`,
+  `_aihw_medicare`, `_aihw_cmh`) plus the generalised enricher attach.
+  Extract against all five call-sites (the count we deferred to). They
+  share: hardcoded
   URL-by-release registry + `latest` resolution, ZIP fetch→cache,
   `attach_sa2_to_sa4_mapping` + load-without-mapping guard, long→wide
   pivot on `Measure`, SA4-prefix strip, downscale via the attached

@@ -43,6 +43,7 @@ from . import _abs_ba as _abs_ba  # noqa: F401, E402
 from . import _abs_ba_lga as _abs_ba_lga  # noqa: F401, E402
 from . import _abs_pia as _abs_pia  # noqa: F401, E402
 from . import _aihw_apc as _aihw_apc  # noqa: F401, E402
+from . import _aihw_cmh as _aihw_cmh  # noqa: F401, E402
 from . import _aihw_ed as _aihw_ed  # noqa: F401, E402
 from . import _aihw_medicare as _aihw_medicare  # noqa: F401, E402
 from . import _aihw_mh as _aihw_mh  # noqa: F401, E402
