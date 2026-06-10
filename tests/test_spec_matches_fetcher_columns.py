@@ -71,6 +71,7 @@ from census_augment.datasets._erp import (
     ERP_LANDING_URL,
     ErpDataSource,
 )
+from census_augment.datasets._salm import _SALM_URLS_BY_RELEASE, SalmDataSource
 from census_augment.datasets._seifa import DEFAULT_SEIFA_2021_URL, SeifaDataSource
 
 # Synthetic-fixture builders live in the per-dataset test modules. Reusing
@@ -88,6 +89,7 @@ from tests.test_dataset_abs_ba_lga import (
 )
 from tests.test_dataset_abs_business_counts import _make_cab_xlsx
 from tests.test_dataset_abs_pia import _make_ato_xlsx
+from tests.test_dataset_salm import _make_salm_csv, _sa2_block
 from tests.test_dataset_aihw_apc import _full_sa4_rows as _apc_full_sa4_rows
 from tests.test_dataset_aihw_apc import _make_apc_zip
 from tests.test_dataset_aihw_community import _full_sa4_rows as _cmh_full_sa4_rows
@@ -422,6 +424,26 @@ def test_spec_matches_fetcher__abs_business_counts(tmp_path: Path) -> None:
     _check_spec_matches("abs_business_counts", set(df.columns))
 
 
+@responses.activate
+def test_spec_matches_fetcher__salm_labour_force(tmp_path: Path) -> None:
+    """SALM spec ⊆ ``SalmDataSource.load().columns``."""
+    rows = _sa2_block(
+        "Braidwood",
+        "101021007",
+        unemployment=[50, 57],
+        labour_force=["2,200", "2,318"],
+        rate=[2.3, 2.5],
+    )
+    responses.add(
+        responses.GET,
+        _SALM_URLS_BY_RELEASE["2025-Q4"],
+        body=_make_salm_csv(rows=rows),
+        status=200,
+    )
+    df = SalmDataSource(root=tmp_path / "salm-cache").load()
+    _check_spec_matches("salm_labour_force", set(df.columns))
+
+
 # ---- AIHW Mental Health Prescriptions --------------------------------------
 
 
@@ -561,6 +583,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "abs_building_approvals",
         "abs_building_approvals_lga",
         "abs_business_counts",
+        "salm_labour_force",
         "aihw_mh_prescriptions",
         "aihw_mh_admitted_patients",
         "aihw_mh_ed_presentations",
