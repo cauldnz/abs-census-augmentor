@@ -43,6 +43,42 @@ parquet round-trip). Lock-doors in `test_spec_matches_fetcher_columns.py`
 + `test_wheel_bundles_specs.py`; live-source smoke in
 `tools/verify_real_parsers.py`.
 
+### Added — Small Area Labour Markets (SALM) dataset (`salm_labour_force`)
+
+Quarterly model-smoothed labour-market estimates at SA2 from Jobs and
+Skills Australia — the canonical sub-regional unemployment series, and
+the key gap it fills: Census employment is 5-yearly, SALM is **current
+and quarterly**. Catalogue identifier `SALM`. SA2-native. Built under the
+`real-data-first` discipline off a firsthand probe of the live CSV.
+
+**Columns** (3 metrics + ref period): `SALM.smoothed_unemployment_count`,
+`SALM.smoothed_labour_force_count`, `SALM.smoothed_unemployment_rate`,
+`SALM.reference_period`. The fetcher surfaces the latest quarter present
+in the downloaded file (e.g. `2025-Q4`).
+
+**Real-data findings** (live-probed 2026-06-10) — two the probe caught
+that a doc-driven implementation would have missed:
+
+- **Thousands separators.** The larger counts carry commas in the source
+  (labour force `"2,318"`); a naive `to_numeric` nulls ~98% of
+  labour-force values. The parser strips commas first — verified against
+  the real file (0 spurious nulls; unemployment ÷ labour force matches
+  the published rate to within 0.05pp).
+- The CSV is **long on `Data Item`, wide on quarter** (2,336 SA2s × 3
+  measures × ~61 quarters); row 1 is a note, the header is row 3; `-`
+  marks suppressed cells → null. The DEWR download URL embeds a rotating
+  per-quarter asset id (hardcoded per release); the parser cross-checks
+  the file's latest quarter against the requested release so a stale URL
+  fails loud. (The DEWR server is occasionally slow to first byte — the
+  retry wrapper covers it.)
+
+**Tests:** 6 in `tests/test_dataset_salm.py` (resolution, latest-quarter
+surface **with the comma-strip**, `-`-suppression null, stale-quarter +
+missing-header drift guards, parquet round-trip). Lock-doors in
+`test_spec_matches_fetcher_columns.py` + `test_wheel_bundles_specs.py`;
+live-source smoke in `tools/verify_real_parsers.py`. Historical-quarter
+selection spec'd as a wish-list extension.
+
 ### Added — ABS business-counts PRESETs (2 new derived features)
 
 Two opt-in PRESETs over the new `abs_business_counts` dataset, giving an

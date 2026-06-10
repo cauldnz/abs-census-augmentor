@@ -51,6 +51,7 @@ from . import _aihw_mh as _aihw_mh  # noqa: F401, E402
 from . import _aihw_social_housing as _aihw_social_housing  # noqa: F401, E402
 from . import _dss as _dss  # noqa: F401, E402
 from . import _erp as _erp  # noqa: F401, E402
+from . import _salm as _salm  # noqa: F401, E402
 from . import _seifa as _seifa  # noqa: F401, E402
 
 __all__ = [

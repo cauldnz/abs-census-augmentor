@@ -506,6 +506,7 @@ def main() -> int:
     from census_augment.datasets._abs_ba import AbsBaDataSource
     from census_augment.datasets._abs_cab import AbsBusinessCountsDataSource
     from census_augment.datasets._abs_pia import AbsPiaDataSource
+    from census_augment.datasets._salm import SalmDataSource
     from census_augment.datasets._aihw_apc import AihwMhAdmittedPatientsDataSource
     from census_augment.datasets._aihw_cmh import AihwMhCommunityDataSource
     from census_augment.datasets._aihw_ed import AihwMhEdPresentationsDataSource
@@ -679,6 +680,36 @@ def main() -> int:
             f"sample SA2 {sample.name}: "
             f"{int(sample['business_count_total']):,} businesses "
             f"({int(sample['business_count_non_employing']):,} non-employing)"
+        )
+
+    def _check_salm() -> None:
+        # Small Area Labour Markets (Jobs and Skills Australia). SA2-native
+        # CSV; the smoke parses the latest quarter and confirms the 3
+        # measures populate (and the thousands-separator strip worked —
+        # labour force should be non-null for ~all SA2s).
+        ds = SalmDataSource(root=data_dir / "salm_labour_force")
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s parsed; expected ~2,300+"
+        expected_cols = {
+            "smoothed_unemployment_count",
+            "smoothed_labour_force_count",
+            "smoothed_unemployment_rate",
+            "reference_period",
+        }
+        missing = expected_cols - set(df.columns)
+        assert not missing, f"missing expected SALM columns: {sorted(missing)}"
+        non_null = df[df["smoothed_labour_force_count"].notna()]
+        assert len(non_null) >= 1500, (
+            f"only {len(non_null)} SA2s have a non-null labour force; the "
+            f"thousands-separator strip may be broken (commas -> NaN)"
+        )
+        sample = non_null.iloc[0]
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {sample.name}: "
+            f"{int(sample['smoothed_unemployment_count']):,} unemployed of "
+            f"{int(sample['smoothed_labour_force_count']):,} labour force "
+            f"({sample['smoothed_unemployment_rate']}%)"
         )
 
     def _check_aihw_mh() -> None:
@@ -1032,6 +1063,11 @@ def main() -> int:
         _check_abs_cab,
     ):
         failures.append("abs_business_counts")
+    if not _check(
+        "SALM labour markets (~2,336 SA2s, 3 measures, latest quarter)",
+        _check_salm,
+    ):
+        failures.append("salm_labour_force")
     if not _check(
         "AIHW MH Prescriptions (~2,450 SA2s, 4 metrics, SA4 -> SA2 downscale)",
         _check_aihw_mh,
