@@ -9,6 +9,25 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Changed — AIHW SA4 fetchers share a base class (internal, no behaviour change)
+
+The five AIHW NMHSPF SA4-keyed fetchers (`aihw_mh_prescriptions`,
+`aihw_mh_admitted_patients`, `aihw_mh_ed_presentations`,
+`aihw_mh_medicare`, `aihw_mh_community`) now subclass a shared
+`_aihw_sa4_base.AihwSa4Dataset` instead of each carrying its own copy of
+the fetch / cache / SA4→SA2 downscale / parquet-sidecar machinery. Each
+subclass declares only its per-dataset schema specifics (URL registry,
+encoding, member-match substrings, filter dimension + value(s), SA4 code
+format, measure→column map) as class attributes — so the next AIHW
+dataset is a ~40-line config subclass rather than ~300 lines of
+copy-paste.
+
+Pure refactor: **zero behaviour change**, the full test suite (827
+passed) is unchanged and untouched, including every per-dataset
+error-message assertion and the `caplog` warning test (logging is routed
+to each subclass's own module logger to preserve that). Net ~1,300 fewer
+lines across the five modules. No user-facing API change.
+
 ### Added — AIHW Community Mental Health Care dataset (`aihw_mh_community`)
 
 Fifth AIHW NMHSPF dataset, completing the service-setting sweep
