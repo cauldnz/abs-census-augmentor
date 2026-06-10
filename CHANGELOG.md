@@ -9,6 +9,40 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — AIHW Social Housing dataset (`aihw_social_housing`)
+
+Social-housing dwelling counts by program — public housing, SOMIH (State
+Owned and Managed Indigenous Housing), community housing — at SA4,
+downscaled to SA2, from AIHW's "Housing Assistance in Australia" data
+tables (sheet `DWELLINGS.4`). Catalogue identifier `AIHW_SH`. A tenure /
+built-environment signal not in the standard Census GCP. Built under the
+`real-data-first` discipline off a firsthand probe of the live workbook.
+
+**Columns** (4 metrics + ref period): `AIHW_SH.social_housing_public_count`,
+`AIHW_SH.social_housing_somih_count`,
+`AIHW_SH.social_housing_community_count`,
+`AIHW_SH.social_housing_total_count`, `AIHW_SH.reference_period`.
+
+**Real-data findings** (live-probed 2026-06-10):
+
+- The SA4 table is sheet `DWELLINGS.4` of the dwellings workbook (banner
+  rows, header at row 4, `Region Code` = bare 3-digit SA4, 88 SA4 rows).
+- The `SOMIH` column uses the suppression sentinel `". ."` for states
+  without a SOMIH program (Vic / WA / ACT) — parsed to null.
+- A **wide** XLSX table (not a ZIP+CSV long-pivot like the AIHW NMHSPF
+  datasets), so it does NOT subclass `_AihwSa4Dataset`; it's a standalone
+  SA4 XLSX fetcher reusing only the SA2→SA4 downscale contract
+  (`attach_sa2_to_sa4_mapping`), which the enricher auto-wires by
+  capability. The `getmedia` UUID + series number change per release, so
+  the URL is hardcoded per release.
+
+**Tests:** 8 in `tests/test_dataset_aihw_social_housing.py` (resolution,
+mapping guard, SA4→SA2 downscale with the `. .` SOMIH-null, missing-SA4
+null fallback, wrong-year + missing-sheet + shifted-header drift guards,
+parquet round-trip). Lock-doors in `test_spec_matches_fetcher_columns.py`
++ `test_wheel_bundles_specs.py`; live-source smoke in
+`tools/verify_real_parsers.py`.
+
 ### Added — ABS business-counts PRESETs (2 new derived features)
 
 Two opt-in PRESETs over the new `abs_business_counts` dataset, giving an

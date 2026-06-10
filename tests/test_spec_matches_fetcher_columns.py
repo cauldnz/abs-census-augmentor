@@ -61,6 +61,10 @@ from census_augment.datasets._aihw_mh import (
     _AIHW_RX_URLS_BY_RELEASE,
     AihwMhPrescriptionsDataSource,
 )
+from census_augment.datasets._aihw_social_housing import (
+    _AIHW_SH_URLS_BY_RELEASE,
+    AihwSocialHousingDataSource,
+)
 from census_augment.datasets._dss import CKAN_PACKAGE_URL, DssDataSource
 from census_augment.datasets._erp import (
     ERP_AGE_SEX_LANDING_URL,
@@ -88,6 +92,7 @@ from tests.test_dataset_aihw_apc import _full_sa4_rows as _apc_full_sa4_rows
 from tests.test_dataset_aihw_apc import _make_apc_zip
 from tests.test_dataset_aihw_community import _full_sa4_rows as _cmh_full_sa4_rows
 from tests.test_dataset_aihw_community import _make_cmh_zip
+from tests.test_dataset_aihw_social_housing import _make_sh_xlsx
 from tests.test_dataset_aihw_ed import _full_sa4_rows as _ed_full_sa4_rows
 from tests.test_dataset_aihw_ed import _make_ed_zip
 from tests.test_dataset_aihw_medicare import _full_sa4_rows as _medicare_full_sa4_rows
@@ -523,6 +528,22 @@ def test_spec_matches_fetcher__aihw_mh_community(tmp_path: Path) -> None:
     _check_spec_matches("aihw_mh_community", set(df.columns))
 
 
+@responses.activate
+def test_spec_matches_fetcher__aihw_social_housing(tmp_path: Path) -> None:
+    """AIHW Social Housing spec ⊆ ``AihwSocialHousingDataSource.load().columns``."""
+    rows = [("NSW", "101", "Capital Region", 1980, 62, 1022, 3065)]
+    responses.add(
+        responses.GET,
+        _AIHW_SH_URLS_BY_RELEASE["2023"]["url"],
+        body=_make_sh_xlsx(rows=rows),
+        status=200,
+    )
+    ds = AihwSocialHousingDataSource(root=tmp_path / "aihw-sh-cache")
+    ds.attach_sa2_to_sa4_mapping({"102011028": "101"})
+    df = ds.load()
+    _check_spec_matches("aihw_social_housing", set(df.columns))
+
+
 # ---- guardrail: every registered dataset (except GCP) has a lock-door test ---
 
 
@@ -545,6 +566,7 @@ def test_every_registered_dataset_has_a_lock_door_test() -> None:
         "aihw_mh_ed_presentations",
         "aihw_mh_medicare",
         "aihw_mh_community",
+        "aihw_social_housing",
     }
     intentionally_skipped = {
         "gcp",  # multi-table loader; covered via VariableCatalog tests

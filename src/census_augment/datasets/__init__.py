@@ -48,6 +48,7 @@ from . import _aihw_cmh as _aihw_cmh  # noqa: F401, E402
 from . import _aihw_ed as _aihw_ed  # noqa: F401, E402
 from . import _aihw_medicare as _aihw_medicare  # noqa: F401, E402
 from . import _aihw_mh as _aihw_mh  # noqa: F401, E402
+from . import _aihw_social_housing as _aihw_social_housing  # noqa: F401, E402
 from . import _dss as _dss  # noqa: F401, E402
 from . import _erp as _erp  # noqa: F401, E402
 from . import _seifa as _seifa  # noqa: F401, E402

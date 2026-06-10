@@ -511,6 +511,7 @@ def main() -> int:
     from census_augment.datasets._aihw_ed import AihwMhEdPresentationsDataSource
     from census_augment.datasets._aihw_medicare import AihwMhMedicareDataSource
     from census_augment.datasets._aihw_mh import AihwMhPrescriptionsDataSource
+    from census_augment.datasets._aihw_social_housing import AihwSocialHousingDataSource
     from census_augment.datasets._dss import DssDataSource
     from census_augment.datasets._erp import ErpDataSource
     from census_augment.datasets._seifa import SeifaDataSource
@@ -959,6 +960,60 @@ def main() -> int:
             f"{int(sample['mh_community_contacts_count']):,} contacts"
         )
 
+    def _check_aihw_social_housing() -> None:
+        # AIHW Social Housing dwellings (Housing Assistance). SA4-native
+        # XLSX (DWELLINGS.4), downscaled to SA2 via SA4_CODE21. Bare 3-digit
+        # SA4 codes; ". ." SOMIH sentinel -> null for non-SOMIH states.
+        import geopandas as gpd  # noqa: PLC0415
+
+        from census_augment.spatial import (  # noqa: PLC0415
+            compute_sa2_parent_codes,
+        )
+
+        boundary_path = (
+            data_dir
+            / "boundaries"
+            / "2021"
+            / "SA2_2021_AUST_SHP_GDA2020"
+            / "SA2_2021_AUST_GDA2020.shp"
+        )
+        assert boundary_path.exists(), (
+            f"SA2 boundary shapefile not at {boundary_path} — "
+            f"earlier Boundaries section must have failed."
+        )
+        boundary = gpd.read_file(boundary_path)
+        sa2_to_sa4 = compute_sa2_parent_codes(
+            boundary,
+            sa2_code_column="SA2_CODE21",
+            parent_code_columns={"SA4": "SA4_CODE21"},
+        )["SA4"]
+
+        ds = AihwSocialHousingDataSource(root=data_dir / "aihw_social_housing")
+        ds.attach_sa2_to_sa4_mapping(sa2_to_sa4)
+        df = ds.load()
+        assert len(df) >= 2000, f"only {len(df)} SA2s parsed; expected ~2,400+"
+        expected_cols = {
+            "social_housing_public_count",
+            "social_housing_somih_count",
+            "social_housing_community_count",
+            "social_housing_total_count",
+            "reference_period",
+        }
+        missing = expected_cols - set(df.columns)
+        assert not missing, f"missing expected AIHW Social Housing columns: {sorted(missing)}"
+        non_null = df[df["social_housing_total_count"].notna()]
+        assert len(non_null) >= 1000, (
+            f"only {len(non_null)} SA2s have non-null social-housing totals; "
+            f"the SA4 downscale may be broken"
+        )
+        sample = non_null.iloc[0]
+        print(
+            f"         -> {len(df):,} SA2s; release {ds.resolved_release}; "
+            f"sample SA2 {sample.name}: "
+            f"{int(sample['social_housing_total_count']):,} social-housing dwellings "
+            f"({int(sample['social_housing_public_count']):,} public)"
+        )
+
     if not _check("SEIFA 2016+2021 (~2,196/2,366 SA2s, 4 indexes)", _check_seifa):
         failures.append("seifa")
     if not _check("ERP by SA2 (~2,454 SA2s, 25-year history)", _check_erp):
@@ -1002,6 +1057,11 @@ def main() -> int:
         _check_aihw_community,
     ):
         failures.append("aihw_mh_community")
+    if not _check(
+        "AIHW Social Housing (~2,450 SA2s, 4 programs, SA4 -> SA2 downscale)",
+        _check_aihw_social_housing,
+    ):
+        failures.append("aihw_social_housing")
 
     # ------ PRESET source resolution against real GCP DataPack ------
     # Acid test for the "Real Data First" rule (see CLAUDE.md): every
