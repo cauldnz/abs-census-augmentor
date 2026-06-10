@@ -9,6 +9,28 @@ For *design* decisions and rationale, see [`spec.md`](spec.md) §14
 
 ## [Unreleased]
 
+### Added — ABS business-counts PRESETs (2 new derived features)
+
+Two opt-in PRESETs over the new `abs_business_counts` dataset, giving an
+SA2 two economic-base axes — density and structure:
+
+- **`businesses_per_1000_residents`** (rate, ×1000) — total businesses
+  ÷ resident population (`ABS_CAB.business_count_total` ÷
+  `ERP.population_total`). Cross-dataset; `bounds: null` because CBD /
+  commercial-core SA2s legitimately reach into the thousands per 1,000
+  (many businesses, few residents) and clamping would fire on real data.
+- **`pct_businesses_non_employing`** (percentage) — non-employing
+  (sole-trader / owner-operator) businesses as a share of the total
+  (`ABS_CAB.business_count_non_employing` ÷
+  `ABS_CAB.business_count_total`). Single-dataset; the
+  small-business / gig-economy structural signal.
+
+Both `default: false`. Refs confirmed against the
+`abs_business_counts` + `erp_by_sa2` specs. Tests: 3 end-to-end
+evaluator tests in `tests/test_features.py` (incl. a null-when-no-
+residents guard); the two ids added to `intentionally_non_gcp_presets`;
+`test_wheel_bundles_specs.py` FEATURES string updated.
+
 ### Added — ABS Counts of Australian Businesses dataset (`abs_business_counts`)
 
 First **economic-base** dataset: business counts by employment-size band
